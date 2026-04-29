@@ -1,0 +1,24 @@
+# Local reference copies of Superpowers.
+/superpowers/
+/Superpowers/
+/plugins/superpowers/
+/.agents/plugins/superpowers/
+/.codex/plugins/superpowers/
+
+# Local design notes created with Superpowers workflows.
+/docs/superpowers/
+
+# Local Codex/agent runtime state.
+.codex/
+.agents/
+
+# Generated dependency and build folders.
+node_modules/
+dist/
+build/
+.next/
+.cache/
+
+# OS/editor files.
+.DS_Store
+*.swp
