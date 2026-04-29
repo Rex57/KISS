@@ -8,6 +8,9 @@
 # Local design notes created with Superpowers workflows.
 /docs/superpowers/
 
+# Local skill pressure tests and validation scenarios.
+/tests/
+
 # Local Codex/agent runtime state.
 .codex/
 .agents/

@@ -1,0 +1,41 @@
+{
+  "name": "kiss",
+  "version": "0.1.0",
+  "description": "Keep It Simple summaries for projects, git changes, logs, graphs, tables, and local skill inventory.",
+  "author": {
+    "name": "KISS Contributors",
+    "email": "maintainers@example.com",
+    "url": "https://github.com/kiss-contributors/kiss"
+  },
+  "homepage": "https://github.com/kiss-contributors/kiss",
+  "repository": "https://github.com/kiss-contributors/kiss",
+  "license": "MIT",
+  "keywords": [
+    "kiss",
+    "project-summary",
+    "git-diff",
+    "graph",
+    "codex-skill"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "KISS",
+    "shortDescription": "Simple visual summaries for projects and coding runs",
+    "longDescription": "KISS helps Codex explain projects, git changes, long run logs, setup hints, and local skill/plugin inventory with graphs, tables, and short plain-language next steps.",
+    "developerName": "KISS Contributors",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "defaultPrompt": [
+      "/kiss what changed",
+      "/kiss what does this project do",
+      "/kiss graph this repo"
+    ],
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/kiss-icon.svg",
+    "logo": "./assets/kiss-icon.svg",
+    "screenshots": []
+  }
+}

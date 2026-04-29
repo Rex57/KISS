@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">KISS</title>
+  <rect width="64" height="64" rx="12" fill="#2563EB"/>
+  <path d="M16 18h8v12l12-12h10L34 31l14 15H38L24 31v15h-8z" fill="#FFFFFF"/>
+</svg>
