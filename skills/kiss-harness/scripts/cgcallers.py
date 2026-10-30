@@ -23,7 +23,7 @@ import sys
 
 COMMON = {"get", "copy", "update", "items", "keys", "values", "pop", "set", "add", "run", "build", "read",
           "write", "close", "open", "start", "stop", "main", "check", "load", "save", "send", "put", "call"}
-CODE = ("*.py", "*.js", "*.jsx", "*.ts", "*.tsx", "*.svelte", ":!docs")
+CODE = ("*.py", "*.js", "*.jsx", "*.ts", "*.tsx", "*.svelte", ":!docs", ":!archive")
 
 
 def def_spans(src):
