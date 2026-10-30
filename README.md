@@ -41,7 +41,7 @@ The plugin installs none of these. Install them yourself, once per device.
 | Node.js and npm | CodeGraph runs on Node | [nodejs.org](https://nodejs.org) |
 | [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `npm install -g @colbymchenry/codegraph`, then `codegraph init -y <repo>` in each project |
 | [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close | see "Install ponytail" below |
-| [Matt Pocock's skills](https://github.com/mattpocock/skills) (optional) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project wants them; `tdd`: the implementer's red-green loop. Without them, KISS follows its own copy of the same rules | his README, "Installation" |
+| [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop | see "Install Matt Pocock's skills" below |
 | `cgcallers` (in this repo) | CodeGraph's callers plus a word grep, before a delete or rename | `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (`~/.local/bin` on your `PATH`) |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
 | [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-tidy-up-memory` | its README |
@@ -53,6 +53,47 @@ The plugin installs none of these. Install them yourself, once per device.
   `/hooks`, trust its two hooks, and start a new thread.
 - Gemini CLI, Antigravity and others: follow ponytail's
   [INSTALL.md](https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md).
+
+### Install Matt Pocock's skills
+
+KISS uses three of them: `grilling`, `domain-modeling` and `tdd`. Install them once per agent, in one way only:
+two installs give you every skill twice. KISS needs no `/setup-matt-pocock-skills`, because it does not use his
+issue-tracker skills.
+
+- Claude Code (updates itself):
+
+  ```bash
+  claude plugin install mattpocock-skills@claude-plugins-official
+  ```
+
+- Codex (updates itself at startup):
+
+  ```bash
+  codex plugin marketplace add mattpocock/skills
+  codex plugin add mattpocock-skills@mattpocock
+  ```
+
+- Gemini CLI (run both again to update):
+
+  ```bash
+  gemini skills install https://github.com/mattpocock/skills.git --path skills/engineering
+  gemini skills install https://github.com/mattpocock/skills.git --path skills/productivity
+  ```
+
+- Antigravity: his README has no steps for it. Copy the three skill folders into Antigravity's global skills folder,
+  `~/.gemini/config/skills/` (App and IDE) or `~/.gemini/antigravity-cli/skills/` (CLI), and copy them again to
+  update:
+
+  ```bash
+  git clone https://github.com/mattpocock/skills.git mattpocock-skills
+  mkdir -p ~/.gemini/config/skills
+  cp -R mattpocock-skills/skills/productivity/grilling mattpocock-skills/skills/engineering/domain-modeling \
+        mattpocock-skills/skills/engineering/tdd ~/.gemini/config/skills/
+  ```
+
+If a skill is missing, a run still works: KISS follows its own copy of the same rules
+([`references/spec-and-tickets.md`](skills/kiss-harness/references/spec-and-tickets.md) and its prompts), and
+`decisions.md` records which skills the run used.
 
 ## How a run goes
 
