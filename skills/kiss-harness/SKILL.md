@@ -37,7 +37,8 @@ once, before step 4.
    plus 2 hours for the reviews and fix rounds; `prompt.py` computes it.
 4. **Implementer:** `prompt.py implementer R=R W=W BR=<branch> SCR=<scratch folder> MAIN=<main checkout>
    PROJECT=<facts file> TITLE=<title> BASE=<base sha> SMOKE="<a fast end-to-end test>" ELAPSED=0` → start ONE
-   subagent with that text: your strongest model at medium effort, in the background.
+   subagent with that text: your strongest model at medium effort, in the background. Give every path
+   absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` and `git -C MAIN status` (both
    empty), the commits, and `progress.md`. Open tickets and no BLOCKED: `tickets.py continue R <elapsed> <budget>`
    → send it to the SAME implementer. After 3 continuations, or on BLOCKED, the owner decides.
@@ -72,4 +73,6 @@ once, before step 4.
   into words; macOS has no `timeout`.
 - A test that reads the clock twice flakes at a second boundary: read it once per stamp.
 - A worktree has no CodeGraph watcher: `codegraph sync -q "W"` after each commit.
+- A seed or a sync can run for minutes: give it a 10-minute timeout (Claude Code: the Bash tool's
+  `timeout: 600000`), or a short default timeout kills it and the agent runs it again.
 - A tool result that shows a preview and names a file: read the file before you act.

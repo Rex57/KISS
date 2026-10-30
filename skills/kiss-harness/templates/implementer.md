@@ -7,12 +7,12 @@ Read once, then: $R/spec.md (what the product must do), $R/decisions.md (the own
 Where you work: W = $W, branch $BR, already checked out. Use the absolute W path in every command. Scratch files go under $SCR. Never touch the main checkout $MAIN, another worktree, a live system, ssh or a git remote; never push; never switch or delete a branch. Start a subagent only for two tickets that are independent modules.
 
 For each open ticket:
-1. Seed it: `python3 -I "$HB/scripts/briefs.py" "$R" "$W" $BR <ID>` (allow 15 minutes), then read $R/briefs/task-<ID>-brief.md: the CodeGraph seed and the callers of what the ticket touches. Read code with CodeGraph (`codegraph explore|node|callers -p "$W"`); grep is for literals, docs and data.
+1. Seed it: `python3 -I "$HB/scripts/briefs.py" "$R" "$W" $BR <ID>` (give the command a 10-minute timeout (Claude Code: the Bash tool's `timeout: 600000`)), then read $R/briefs/task-<ID>-brief.md: the CodeGraph seed and the callers of what the ticket touches. Read code with CodeGraph (`codegraph explore|node|callers -p "$W"`); grep is for literals, docs and data.
 2. Build what the ticket's spec says, in the way the surrounding code does it. When its acceptance names a behaviour that no test covers yet, write that test first and see it fail on the old code.
 3. Run the ticket's acceptance and the tests that `codegraph affected -p "$W" <changed files>` names, plus each build step $PROJECT names for the files you changed.
 4. Commit by explicit path, one commit for the ticket: its title, a short body, and the trailer lines the project's instructions name.
 5. In $R/tickets.json set this ticket's "passes" to true, and change nothing else in that file. Append to $R/progress.md: `## <ID> <commit>`, what you built, each test command and its result, the CodeGraph calls you made, and what the next ticket must know.
-6. `codegraph sync -q "$W"` (allow 10 minutes).
+6. `codegraph sync -q "$W"` (give the command a 10-minute timeout (Claude Code: the Bash tool's `timeout: 600000`)).
 
 After a ticket marked "risky" passes, end your turn with one line that names it: the controller has it reviewed alone and then sends "continue".
 

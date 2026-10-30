@@ -105,7 +105,8 @@ grep/find/Read only for a literal (a route, an env name, a payload key, error te
 not index, or a count. In W, CodeGraph indexes {', '.join(indexed)}; it does not index {', '.join(unindexed)},
 nor git-ignored files such as `.kiss/` (from `codegraph files {P} --format flat --no-metadata` and
 `git ls-files` when this brief was written). Never `grep -n "def X"` + `sed -n` (that is `codegraph node`).
-After each batch of edits and before you return: `codegraph sync -q "{W}"` (it can take 10 minutes).
+After each batch of edits and before you return: `codegraph sync -q "{W}"` (give it a 10-minute timeout;
+Claude Code: the Bash tool's `timeout: 600000`).
 
 ## The ticket (`{R}/issues/{i}.md`)
 {issue}
