@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/kiss-icon.svg" alt="KISS: keep it simple stupid" width="320"></p>
+
 # KISS: Keep It Simple Stupid Workflow harness
 
 A plugin for **Claude Code, Codex, Gemini CLI and Antigravity** that builds a feature with as few agents as the
