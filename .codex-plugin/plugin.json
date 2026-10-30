@@ -1,37 +1,36 @@
 {
   "name": "kiss",
-  "version": "0.1.0",
-  "description": "Keep It Simple summaries for projects, git changes, logs, graphs, tables, and local skill inventory.",
+  "version": "1.0.0",
+  "description": "Keep It Simple Stupid Workflow harness: one implementer, one reviewer that uses the running product, and tickets with acceptance tests. Also kiss-tidy-up-memory.",
   "author": {
-    "name": "KISS Contributors",
-    "email": "maintainers@example.com",
-    "url": "https://github.com/kiss-contributors/kiss"
+    "name": "Rex57",
+    "url": "https://github.com/Rex57"
   },
-  "homepage": "https://github.com/kiss-contributors/kiss",
-  "repository": "https://github.com/kiss-contributors/kiss",
+  "homepage": "https://github.com/Rex57/KISS",
+  "repository": "https://github.com/Rex57/KISS",
   "license": "MIT",
   "keywords": [
-    "kiss",
-    "project-summary",
-    "git-diff",
-    "graph",
-    "codex-skill"
+    "harness",
+    "workflow",
+    "subagents",
+    "codegraph",
+    "skills"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "KISS",
-    "shortDescription": "Simple visual summaries for projects and coding runs",
-    "longDescription": "KISS helps Codex explain projects, git changes, long run logs, setup hints, and local skill/plugin inventory with graphs, tables, and short plain-language next steps.",
-    "developerName": "KISS Contributors",
+    "shortDescription": "Keep It Simple Stupid Workflow harness",
+    "longDescription": "Keep It Simple Stupid Workflow harness: one implementer, one reviewer that uses the running product, and tickets with acceptance tests. Also kiss-tidy-up-memory.",
+    "developerName": "Rex57",
     "category": "Coding",
     "capabilities": [
       "Interactive",
-      "Read"
+      "Read",
+      "Write"
     ],
     "defaultPrompt": [
-      "/kiss what changed",
-      "/kiss what does this project do",
-      "/kiss graph this repo"
+      "Build this feature with the KISS harness",
+      "Tidy up memory"
     ],
     "brandColor": "#2563EB",
     "composerIcon": "./assets/kiss-icon.svg",

@@ -1,6 +1,0 @@
-display_name: KISS
-short_description: Simple graph-first project and change summaries
-default_prompt:
-  - /kiss what changed
-  - /kiss what does this project do
-  - /kiss summarize this long run log

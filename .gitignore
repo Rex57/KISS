@@ -1,27 +1,6 @@
-# Local reference copies of Superpowers.
-/superpowers/
-/Superpowers/
-/plugins/superpowers/
-/.agents/plugins/superpowers/
-/.codex/plugins/superpowers/
-
-# Local design notes created with Superpowers workflows.
-/docs/superpowers/
-
-# Local skill pressure tests and validation scenarios.
-/tests/
-
-# Local Codex/agent runtime state.
-.codex/
-.agents/
-
-# Generated dependency and build folders.
-node_modules/
-dist/
-build/
-.next/
-.cache/
-
-# OS/editor files.
+# OS and Python
 .DS_Store
-*.swp
+__pycache__/
+
+# A project's KISS runs (the harness writes them inside a project, never here)
+.kiss/runs/
