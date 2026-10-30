@@ -32,8 +32,8 @@
       "Build this feature with the KISS harness",
       "Tidy up memory"
     ],
-    "brandColor": "#2563EB",
-    "composerIcon": "./assets/kiss-icon.svg",
+    "brandColor": "#E3202A",
+    "composerIcon": "./assets/kiss-icon-lips.svg",
     "logo": "./assets/kiss-icon.svg",
     "screenshots": []
   }
