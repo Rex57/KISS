@@ -68,11 +68,5 @@ once, before step 4.
 
 ## Traps
 
-- Use absolute paths in every command: a shell that resets its folder has built in the main checkout before.
-- zsh: write heredocs as `<<'EOF'` (an unquoted one runs every backtick); zsh does not split an unquoted `$VAR`
-  into words; macOS has no `timeout`.
-- A test that reads the clock twice flakes at a second boundary: read it once per stamp.
-- A worktree has no CodeGraph watcher: `codegraph sync -q "W"` after each commit.
-- A seed or a sync can run for minutes: give it a 10-minute timeout (Claude Code: the Bash tool's
-  `timeout: 600000`), or a short default timeout kills it and the agent runs it again.
-- A tool result that shows a preview and names a file: read the file before you act.
+Read [references/traps.md](references/traps.md) once, before step 3. The implementer and reviewer prompts name it
+too, so every agent of the run reads the same traps.

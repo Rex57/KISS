@@ -44,6 +44,9 @@ def selftest():
                 SMOKE="python3 tests/x.py")
     out = fill("implementer", dict(base, ELAPSED="340", BUDGET="1200"))
     assert "Time: elapsed 340s of a 1200s budget." in out and "/w/.kiss/project.md" in out
+    assert os.path.exists(os.path.join(HB, "references", "traps.md"))
+    for step in ("implementer", "reviewer"):   # every agent of a run reads the same traps
+        assert HB + "/references/traps.md" in fill(step, dict(base, HEAD="d", APP="a")), step
     try:
         fill("reviewer", base)
         raise AssertionError("a missing key must stop")
