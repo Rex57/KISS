@@ -47,6 +47,9 @@ def selftest():
     assert os.path.exists(os.path.join(HB, "references", "traps.md"))
     for step in ("implementer", "reviewer"):   # every agent of a run reads the same traps
         assert HB + "/references/traps.md" in fill(step, dict(base, HEAD="d", APP="a")), step
+    assert "mattpocock-skills:tdd" in out and "Skipped:" in out and "Risk:" in out
+    rv = fill("reviewer", dict(base, HEAD="d", APP="a"))
+    assert "ponytail:ponytail-review" in rv and "G. Risk, load and speed" in rv and "A|B|C|D|E|F|G" in rv
     try:
         fill("reviewer", base)
         raise AssertionError("a missing key must stop")

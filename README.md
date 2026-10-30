@@ -15,7 +15,7 @@ that works one ticket at a time, and an evaluator that uses the product.
 
 | Skill | What it does |
 |---|---|
-| `kiss-harness` | Spec, then tickets, then one implementer, then one review that uses the product, then at most 3 fix rounds, then the owner's merge. Its scripts check the tickets, fill the prompts, seed each ticket with CodeGraph and keep the time budget (10 minutes per ticket, plus 2 hours for reviews and fixes). |
+| `kiss-harness` | The questions (decisions recorded in `decisions.md`), the spec, the tickets, then one implementer, one review that uses the product, at most 3 fix rounds, and the owner's merge. Its scripts check the tickets, fill the prompts, seed each ticket with CodeGraph and keep the time budget (10 minutes per ticket, plus 2 hours for reviews and fixes). |
 | `kiss-tidy-up-memory` | "Tidy up memory": merge and cut an agent's file memory for one repo, run a loss check with a second agent, revise agentmemory (if you use it) and move old transcripts to the Trash. |
 
 How to call a skill:
@@ -40,7 +40,8 @@ The plugin installs none of these. Install them yourself, once per device.
 | Python 3.9 or later | The scripts (standard library only) | [python.org](https://www.python.org) or [uv](https://docs.astral.sh/uv/) |
 | Node.js and npm | CodeGraph runs on Node | [nodejs.org](https://nodejs.org) |
 | [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `npm install -g @colbymchenry/codegraph`, then `codegraph init -y <repo>` in each project |
-| [ponytail](https://github.com/DietrichGebert/ponytail) | The smallest complete change per ticket, and the reviewer's rubric F | see "Install ponytail" below |
+| [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close | see "Install ponytail" below |
+| [Matt Pocock's skills](https://github.com/mattpocock/skills) (optional) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project wants them; `tdd`: the implementer's red-green loop. Without them, KISS follows its own copy of the same rules | his README, "Installation" |
 | `cgcallers` (in this repo) | CodeGraph's callers plus a word grep, before a delete or rename | `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (`~/.local/bin` on your `PATH`) |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
 | [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-tidy-up-memory` | its README |
@@ -52,6 +53,22 @@ The plugin installs none of these. Install them yourself, once per device.
   `/hooks`, trust its two hooks, and start a new thread.
 - Gemini CLI, Antigravity and others: follow ponytail's
   [INSTALL.md](https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md).
+
+## How a run goes
+
+1. **Questions.** The controller settles every open decision with you, in rounds, each question with its
+   recommended answer (Matt Pocock's `grilling` when installed). Each answer goes into `decisions.md` at once.
+2. **Spec and tickets**, by rules adapted from Matt Pocock's `to-spec` and `to-tickets`: user stories, test seams,
+   thin slices through every layer, a refactor first, blocking links. Each acceptance line names its seam. You
+   approve the tickets and the seams.
+3. **Build:** one implementer, one ticket at a time, with ponytail and `tdd`. Each ticket ends with what it skipped
+   and any risk.
+4. **Review:** one reviewer uses the running product, with rubric A to G (`ponytail-review` for risk, load and
+   speed). A severity pass sorts the findings; the same implementer fixes them and the same reviewer checks again,
+   at most 3 rounds.
+5. **Close:** the project's full check, the list of new `shortcut:` comments (`ponytail-debt`), and your merge.
+
+Matt Pocock's `code-review` is not part of a run: the reviewer and `ponytail-review` cover it.
 
 ## Install KISS
 
@@ -108,9 +125,10 @@ Read the file first: append it once, not again on each update. If `codegraph ins
 ## Use it in a project
 
 1. Index the repo: `codegraph init -y <repo>`.
-2. Copy [`templates/project.md`](skills/kiss-harness/templates/project.md) to `<repo>/.kiss/project.md`, and fill
-   it in: how to run and test the project, how to start it for a reviewer, the rules a reviewer checks, and the
-   traps.
+2. On the first run, the controller drafts `<repo>/.kiss/project.md` from the repo (from
+   [`templates/project.md`](skills/kiss-harness/templates/project.md)) and asks you only about the gaps: how to run
+   and test the project, how to start it for a reviewer, the rules a reviewer checks, the traps, and whether
+   domain docs (a glossary and ADRs) are on.
 3. Add `.kiss/runs/` to the repo's `.gitignore` (or `.git/info/exclude`).
 4. Ask your agent: "build <feature> with the KISS harness". The skill takes you through the spec and the tickets,
    and asks for your yes before the build, each owner question, the merge and any push.

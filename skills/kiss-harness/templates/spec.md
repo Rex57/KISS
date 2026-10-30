@@ -2,23 +2,38 @@
 
 Owner: <name>. Date: <date>. Status: draft | agreed (<date>).
 
-A product spec, not a technical design: say what a person can do and see, and why. Leave the "how" to the
-implementer, who reads the code. An early error here spreads into every ticket, so keep the technical detail
-to the few facts the owner ruled.
+What a person can do and see, and why: not a technical design. The rules for each section are in
+`references/spec-and-tickets.md`. An early error here spreads into every ticket, so keep the technical detail to
+the decisions the owner made.
 
-## Why
+## Problem
 
-<The problem, in one paragraph. Who has it.>
+<The problem, from the user's point of view, in one paragraph. Who has it.>
 
-## What a person can do
+## Solution
 
-<Numbered behaviours, each one a person's action and what they see. These become the tickets' acceptance.>
+<The solution, from the user's point of view.>
+
+## User stories
+
+<A long numbered list that covers every part of the feature:>
+1. As a <actor>, I want <feature>, so that <benefit>.
+
+## Implementation decisions
+
+<The modules to build or change, their interfaces, schema changes, API contracts, the owner's technical rulings.
+No file paths and no code.>
+
+## Testing decisions
+
+<What a good test is here (behaviour through a public interface). The seams the tests go through, each with a
+one-line note on what it catches and what it misses. Similar tests in the repo to copy.>
 
 ## Rules it must keep
 
-<The owner's rulings (decisions.md) and the project rules that this product touches, each in one line.>
+<The owner's rulings (decisions.md) and the project rules that this feature touches, one line each.>
 
-## Out of scope (for this version)
+## Out of scope
 
 <What is left out on purpose, and where it may come later.>
 
