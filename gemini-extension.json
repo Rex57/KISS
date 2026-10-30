@@ -1,5 +1,5 @@
 {
   "name": "kiss",
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.0-alpha.2",
   "description": "Keep It Simple Stupid Workflow harness: one implementer, one reviewer that uses the running product, and tickets with acceptance tests. Also kiss-tidy-up-memory."
 }
