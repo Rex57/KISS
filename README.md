@@ -134,7 +134,7 @@ skills/kiss-tidy-up-memory/  SKILL.md
 Selftests: `python3 -I skills/kiss-harness/scripts/tickets.py --selftest`, the same for `prompt.py` and
 `cgcallers.py`.
 
-A new version changes `version` in all five manifests together.
+A new version changes `version` in the four manifests that carry one (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`, `.antigravity-plugin/plugin.json`), and gets a tag `v<version>`.
 
 ## License
 
