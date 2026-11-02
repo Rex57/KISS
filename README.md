@@ -20,18 +20,19 @@ that works one ticket at a time, and an evaluator that uses the product.
 | `kiss-harness` | The questions (decisions recorded in `decisions.md`), the spec, the tickets, then one implementer, one review that uses the product, at most 3 fix rounds, and the owner's merge. Its scripts check the tickets, fill the prompts, seed each ticket with CodeGraph and keep the time budget (10 minutes per ticket, plus 2 hours for reviews and fixes). |
 | `kiss-doctor` | Checks a device for a run: the CodeGraph rule in each agent's global instructions file, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix and installs nothing. |
 | `kiss-mini-agent` | A small side task in a background worker: a code change on its own `mini/<id>` branch, a read-only question, or a watch on a pull request, a CI run or a test command. kiss-harness hands off work outside its tickets to it. On Claude Code a mod adds `/mini` (`/mini <task>`, `/mini --now <task>` to skip the worker's checks, `/mini ask <question>`, `/mini watch pr <n>` / `run <id>` / `<test command>`, `/mini stop <id>`, `/mini status`, `/mini` alone opens the pane), a band with the counts, and the delivery buttons (Merge into the base, Push, Draft PR, Discard); only your press delivers. |
+| `kiss-housekeeping` | "Clean up the docs": a First run, on your ask, gives each fact one home, sorts pages by kind (living, log, record, history), builds a map, retires stale pages, fixes old names, moves files without breaking code or tests, installs a docs gate in your tests (`tools/check_docs.py`, your own copy) and proves the result with a routing test. After that, each harness close runs its Upkeep when your facts file names the gate. |
 | `kiss-tidy-up-memory` | "Tidy up memory": merge and cut an agent's file memory for one repo, run a loss check with a second agent, revise agentmemory (if you use it) and move old transcripts to the Trash. |
 
 How to call a skill:
 
-| Agent | `kiss-harness` | `kiss-doctor` | `kiss-tidy-up-memory` | `kiss-mini-agent` |
-|---|---|---|---|---|
-| Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-tidy-up-memory` | `/mini <task>` (the mod), or `/kiss:kiss-mini-agent <task>` |
-| Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-tidy-up-memory` | `$kiss:kiss-mini-agent <task>` |
-| Gemini CLI | say "build … with the KISS harness" (the model activates it; `/skills list` shows it) | say "kiss doctor" | say "tidy up memory" | say "mini task: <task>" |
-| Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-tidy-up-memory` | `/kiss-mini-agent <task>` |
+| Agent | `kiss-harness` | `kiss-doctor` | `kiss-tidy-up-memory` | `kiss-housekeeping` | `kiss-mini-agent` |
+|---|---|---|---|---|---|
+| Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-tidy-up-memory` | `/kiss:kiss-housekeeping` | `/mini <task>` (the mod), or `/kiss:kiss-mini-agent <task>` |
+| Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-tidy-up-memory` | `$kiss:kiss-housekeeping` | `$kiss:kiss-mini-agent <task>` |
+| Gemini CLI | say "build … with the KISS harness" (the model activates it; `/skills list` shows it) | say "kiss doctor" | say "tidy up memory" | say "clean up the docs" | say "mini task: <task>" |
+| Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-tidy-up-memory` | `/kiss-housekeeping` | `/kiss-mini-agent <task>` |
 
-On every agent you can also just say it: "build <feature> with the KISS harness", or "tidy up memory".
+On every agent you can also just say it: "build <feature> with the KISS harness", "clean up the docs", or "tidy up memory".
 `kiss-doctor` starts only when you call it.
 
 ## Tools you need
@@ -220,13 +221,14 @@ rules/feedback.md            the feedback mode: the block each skill ends with w
 skills/kiss-harness/         SKILL.md, scripts/, templates/, references/
 skills/kiss-doctor/          SKILL.md, scripts/doctor.py
 skills/kiss-tidy-up-memory/  SKILL.md
+skills/kiss-housekeeping/    SKILL.md, standard.md, moves.md, routing.md, scripts/ (the docs gate, inventory, mover)
 skills/kiss-mini-agent/      SKILL.md, references/handoff.md (the brief, the report, the worker's rules)
 mods/kiss-mini-agent/        the Claude Code mod: /mini, the background host, the band and the pane (Claude Code only)
 claude-agents/               kiss-implementer, kiss-reviewer and kiss-worker, the named subagents (Claude Code)
 ```
 
 Selftests: `python3 -I skills/kiss-harness/scripts/tickets.py --selftest`, the same for `prompt.py`,
-`cgcallers.py` and `skills/kiss-doctor/scripts/doctor.py`. The mod's tests: `claude plugin test .`.
+`cgcallers.py`, `skills/kiss-doctor/scripts/doctor.py` and the three scripts in `skills/kiss-housekeeping/scripts/`. The mod's tests: `claude plugin test .`.
 
 A new version changes `version` in the four manifests that carry one (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`, `.antigravity-plugin/plugin.json`), and gets a tag `v<version>`.
 
