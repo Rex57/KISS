@@ -11,8 +11,8 @@ const NOW = Date.UTC(2026, 10, 2, 14, 30, 5)
 const ID = '1102-143005'
 
 /** The engine beneath the mod: one session that is both the sender and the host. */
-type Opts = { delivered?: boolean; branch?: string; fail?: Record<string, { stdout?: string; stderr?: string }> }
-function world(on: On, { delivered = true, branch = 'main', fail = {} }: Opts = {}) {
+type Opts = { delivered?: boolean; branch?: string; fail?: Record<string, { stdout?: string; stderr?: string }>; store?: Record<string, unknown> }
+function world(on: On, { delivered = true, branch = 'main', fail = {}, store }: Opts = {}) {
   const w = {
     session: 's1',
     branch,
@@ -23,7 +23,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {} }: Opts = 
     files: {} as Record<string, string>,
   }
   mock.clock(on, { now: NOW })
-  mock.store(on)
+  mock.store(on, store)
   mock.env(on, { KISS_MINI_HOST: '1', TMPDIR: '/tmp/' })
   on('session.id', () => ({ value: w.session }))
   on('session.cwd', () => ({ value: '/repo' }))
@@ -323,4 +323,31 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
   await $.tool.call({ tool: 'Bash', command: 'git commit -m fix', agentId: 'w1' } as never)
   await $.tool.call({ tool: 'Bash', command: 'git push', agentId: 'other' } as never)
   expect(ran).toEqual(['git commit -m fix', 'git push'])
+})
+
+test('a delivered task keeps no PR body, diff or tests', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `push-${ID}` })
+  expect(await ui.find({ type: 'Text', text: /tests:/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /1 file changed/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the host forgets a task ended over 7 days ago, keeps a newer one and one that still holds a worktree', async ($, on) => {
+  const day = 24 * 3600_000
+  const old = { kind: 'question', title: 'q', sender: 's0', cwd: '/repo', started: NOW - 9 * day }
+  world(on, {
+    store: {
+      'kiss-mini/task/old': { ...old, id: 'old', state: 'done', finished: NOW - 8 * day },
+      'kiss-mini/task/new': { ...old, id: 'new', state: 'done', finished: NOW - 6 * day },
+      'kiss-mini/task/wt': { ...old, id: 'wt', kind: 'code', state: 'failed', finished: NOW - 8 * day, worktree: '/tmp/x' },
+    },
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  const list = await status($)
+  expect(list).not.toContain('old ')
+  expect(list).toContain('new question done')
+  expect(list).toContain('wt code failed')
 })

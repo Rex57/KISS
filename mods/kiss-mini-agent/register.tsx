@@ -12,8 +12,11 @@ const HOST = 'kiss-mini/host'
 const HOST_NAME = 'kiss-mini-agent'
 const OPEN: State[] = ['waiting for you', 'working', 'ready', 'watching']
 const TOAST: State[] = ['done', 'ready', 'waiting for you', 'failed']
+const ENDED: State[] = ['done', 'failed']
 const SUMMARY_MAX = 600
 const PANE = 'kiss-mini'
+const KEEP_MS = 7 * 24 * 3600_000
+const SHOW_ENDED = 10
 
 // The band draws from this copy of the ledger; a timer refreshes it, as other sessions write the store.
 const ledger = atom({ plugin: 'kiss', key: 'mini' } as const, [], { shape: 'mini-1' })
@@ -83,6 +86,14 @@ async function refresh($: $) {
     if (t.sender !== me || t.notified || !TOAST.includes(t.state)) continue
     await save($, { ...t, notified: true })
     $.ui.toast(`mini ${t.id} ${t.state}: ${t.title}`)
+  }
+}
+
+/** Host: the ledger forgets ended tasks after 7 days; one that still holds a worktree waits for its Discard. */
+async function prune($: $) {
+  const now = await $.clock.now()
+  for (const t of await tasks($)) {
+    if (ENDED.includes(t.state) && !t.worktree && (t.finished ?? t.started) < now - KEEP_MS) await $.store.delete(TASK + t.id)
   }
 }
 
@@ -188,8 +199,10 @@ export const register: Register = on => {
     })
     if (await isHost($)) {
       await $.store.set(HOST, { sessionId: await $.session.id(), beat: await $.clock.now() })
+      await prune($)
       $.clock.every(60_000, async () => {
         await $.store.set(HOST, { sessionId: await $.session.id(), beat: await $.clock.now() })
+        await prune($)
       })
       for (const t of await tasks($)) if (t.state === 'working' && !t.host) await run($, t.id)
     }
@@ -277,7 +290,9 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
-    const list = await read($, ledger)
+    const all = await read($, ledger)
+    const ended = all.filter(t => ENDED.includes(t.state)).sort((a, b) => (b.finished ?? 0) - (a.finished ?? 0))
+    const list = [...all.filter(t => !ENDED.includes(t.state)), ...ended.slice(0, SHOW_ENDED)]
     return (
       <Box flexDirection="column">
         {list.length === 0 && <Text dimColor>No mini tasks.</Text>}
