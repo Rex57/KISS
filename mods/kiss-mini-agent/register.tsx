@@ -19,6 +19,10 @@ const KEEP_MS = 7 * 24 * 3600_000
 const WATCH_FIRST = 60_000
 const WATCH_IDLE = 600_000
 const WATCH_MAX = 24 * 3600_000
+const STATUS_EVERY = 30_000
+// Code workers at once: 3 from the harness (a hand-off), 1 for the owner's own /mini.
+const SLOTS = { harness: 3, owner: 1 }
+const ORDER: State[] = ['waiting for you', 'working', 'ready', 'watching']
 const SHOW_ENDED = 10
 
 // The band draws from this copy of the ledger; a timer refreshes it, as other sessions write the store.
@@ -182,6 +186,11 @@ async function tick($: $) {
 async function run($: $, id: string) {
   const t = (await $.store.get(TASK + id)) as Task | undefined
   if (!t || t.host || t.state !== (t.kind === 'watch' ? 'watching' : 'working')) return
+  if (isCode(t)) {
+    const harness = t.brief !== undefined
+    const busy = (await tasks($)).filter(x => isCode(x) && x.host && x.state === 'working' && (x.brief !== undefined) === harness)
+    if (busy.length >= SLOTS[harness ? 'harness' : 'owner']) return
+  }
   await save($, { ...t, host: await $.session.id() })
   if (t.kind === 'watch') return tick($)
   if (isCode(t)) {
@@ -297,6 +306,12 @@ export const register: Register = on => {
       argumentHint: '<task> [--base <branch>] | ask <question> | watch pr <n> | watch run <id> | watch <test command> | status',
     })
     await $.tool.register({
+      name: 'progress',
+      description: 'kiss-mini-agent workers: report your plan\'s step as you start it: step (1-based) of total steps.',
+      inputSchema: { type: 'object', properties: { step: { type: 'number' }, total: { type: 'number' } }, required: ['step', 'total'] },
+      isDeferred: false,
+    })
+    await $.tool.register({
       name: 'handoff',
       description:
         'kiss-mini-agent: hand a side task (outside the current tickets) to a background worker. kind: code, bug or question; ' +
@@ -379,6 +394,41 @@ export const register: Register = on => {
     return { result: `kiss-mini-agent task ${id} (${t.kind}) started (${await send($, id)}).${t.return ? ' Its report comes back to this session as one message.' : ''}` }
   })
 
+  // Host: a worker's progress tool sets its step n of m.
+  on('tool.call', { tool: 'mcp__kiss__progress' }, async ($, e) => {
+    const a = e as unknown as { step: number; total: number; agentId?: string }
+    const t = (await tasks($)).find(x => a.agentId !== undefined && x.agentId === a.agentId)
+    if (t) await save($, { ...t, step: a.step, total: a.total })
+    return { result: t ? `step ${a.step} of ${a.total} noted` : 'kiss-mini-agent: no task runs in this loop.' }
+  })
+
+  // Host: each tool call of a worker is its last tool call; after a new one, at most every 30 s, a small model
+  // writes the one-line status from the recent calls.
+  on('tool.call', async ($, e, next) => {
+    const r = await next(e)
+    if (e.agentId === undefined || String(e.tool) === 'mcp__kiss__progress' || !(await isHost($))) return r
+    const t = (await tasks($)).find(x => x.agentId === e.agentId)
+    if (!t) return r
+    const a = e as unknown as Record<string, unknown>
+    const arg = [a.command, a.file_path, a.pattern, a.description, a.url].find(v => typeof v === 'string') as string | undefined
+    const call = `${String(e.tool)} ${arg ?? ''}`.trim().slice(0, 100)
+    const calls = [...(t.calls ?? []), call].slice(-5)
+    const now = await $.clock.now()
+    const due = now - (t.statusAt ?? 0) >= STATUS_EVERY
+    await save($, { ...t, lastTool: call, calls, ...(due ? { statusAt: now } : {}) })
+    if (due) {
+      const m = await $.model.complete({
+        model: 'haiku',
+        prompt: `A coding agent works on: ${t.title.slice(0, 200)}\nIts last tool calls:\n${calls.join('\n')}\nSay in one line of at most 60 characters what it does now. Only the line.`,
+      })
+      const line = m.isAnswered ? m.text.trim().split('\n')[0]?.slice(0, 80) : undefined
+      const cur = (await $.store.get(TASK + t.id)) as Task
+      if (line && line !== cur.status) await save($, { ...cur, status: line })
+    }
+    await refresh($)
+    return r
+  })
+
   // Host: a task message is taken in code, so the host's own model makes no turn for it.
   on('session.receive', async ($, e, next) => {
     const id = /KISS-MINI task (\S+)/.exec(e.text)?.[1]
@@ -411,6 +461,8 @@ export const register: Register = on => {
       done.pr = /^## Pull request body\s*\n([\s\S]*)/m.exec(e.answer)?.[1]?.trim() || summary
     }
     await save($, done)
+    // A slot is free: start the tasks that wait for one.
+    for (const x of await tasks($)) if (!x.host) await run($, x.id)
     if (t.return) await $.session.send({ to: { sessionId: t.sender }, text: reportMessage(done, e.answer) })
     await refresh($)
     return next(e)
@@ -435,15 +487,23 @@ export const register: Register = on => {
     const all = await read($, ledger)
     const ended = all.filter(t => ENDED.includes(t.state)).sort((a, b) => (b.finished ?? 0) - (a.finished ?? 0))
     // An ended task that still holds a worktree stays in view until its Discard.
-    const list = [...all.filter(t => !ENDED.includes(t.state)), ...ended.filter((t, i) => i < SHOW_ENDED || t.worktree)]
+    // Waiting for the owner first, then working, ready, watching; then the ended ones, newest first.
+    const open = all.filter(t => !ENDED.includes(t.state)).sort((a, b) => ORDER.indexOf(a.state) - ORDER.indexOf(b.state))
+    const list = [...open, ...ended.filter((t, i) => i < SHOW_ENDED || t.worktree)]
+    const now = await $.clock.now()
+    const age = (t: Task) => {
+      const s = Math.round(((t.finished ?? now) - t.started) / 1000)
+      return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`
+    }
     return (
       <Box flexDirection="column">
         {list.length === 0 && <Text dimColor>No mini tasks.</Text>}
         {list.map(t => (
           <Box flexDirection="column" key={t.id}>
-            <Text>{t.id} {t.kind} {t.state}: {t.title}</Text>
+            <Text>{`${t.id} ${t.kind} ${t.state}: ${t.title}${t.step ? ` · step ${t.step} of ${t.total}` : ''} · ${age(t)}`}</Text>
             {t.report && <Text dimColor>{t.report}</Text>}
             {!t.report && t.status && <Text dimColor>{t.status}</Text>}
+            {t.state === 'working' && t.lastTool && <Text dimColor>{t.lastTool}</Text>}
             {t.state === 'ready' && isCode(t) && <Text>{t.branch} from {t.base}: {t.diff}</Text>}
             {t.state === 'ready' && isCode(t) && <Text>tests: {t.tests}</Text>}
             {DELIVERY.some(([how]) => offers(t, how)) && (
@@ -465,8 +525,13 @@ export const register: Register = on => {
     if (counts.length === 0) return next(e)
     // Other mods share this slot: theirs is drawn below the counts.
     const below = await next(e).catch(() => undefined)
-    const { Box, Text } = $.ui.resolve(e)
-    const mine = <Text>mini: {counts.map(([s, n]) => `${n} ${s}`).join(' · ')}</Text>
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const open = () => $.ui.open({ id: PANE, title: 'mini' })
+    const mine = (
+      <Button key="mini-open" plain onPress={open}>
+        <Text>mini: {counts.map(([s, n]) => `${n} ${s}`).join(' · ')}</Text>
+      </Button>
+    )
     return below ? <Box flexDirection="column">{mine}{below}</Box> : mine
   })
 }

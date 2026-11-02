@@ -32,6 +32,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     gh: { pr: 'OPEN', run: 'in_progress ' },
     ghAt: [] as number[],
     models: 0,
+    opened: [] as string[],
     store: {} as Record<string, any>,
     sent: [] as { to: string; text: string }[],
     spawned: [] as { prompt: string; subagentType?: string; cwd?: string }[],
@@ -84,9 +85,9 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
   })
   on('model.complete', () => {
     w.models++
-    return { value: { isAnswered: true, text: '' } } as never
+    return { value: { isAnswered: true, text: `reads calc.py (${w.models})`, usage: {} } } as never
   })
-  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  on('ui.open', ($, e) => (w.opened.push(e.id), { value: { isPlaced: true } }) as never)
   on('tool.register', ($, e) => ({ value: { tool: `mcp__kiss__${e.name}` } }) as never)
   on('fs.write', ($, e) => {
     w.files[e.path] = e.text
@@ -558,4 +559,89 @@ test('a watched test command that fails ends failed with its last lines', async 
   await watch($, w, 'pytest -q --fail')
   expect(await status($)).toContain(`${ID} watch failed: pytest -q --fail - exit 1: collected 3 · line a · FAILED test_add - assert -1 == 5`)
   expect(w.spawned).toEqual([])
+})
+
+/** A worker's tool calls as the host sees them: the progress tool and an ordinary tool, both answered beneath. */
+function tools(on: On) {
+  on('tool.call', () => ({ result: {}, text: 'ok' }) as never)
+}
+async function working($: any, w: ReturnType<typeof world>) {
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'mini', args: 'fix add so it returns the sum --base main' })
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' })
+  await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
+}
+
+test('a working task\'s row shows its kind, title, state, step n of m and its last tool call', async ($, on) => {
+  const w = world(on)
+  tools(on)
+  await working($, w)
+  await $.tool.call({ tool: 'mcp__kiss__progress', step: 2, total: 5, agentId: 'w1' } as never)
+  await $.tool.call({ tool: 'Read', file_path: '/tmp/wt/calc.py', agentId: 'w1' } as never)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const text = JSON.stringify(await ui.drawn())
+    for (const part of [`${ID} code working: fix add so it returns the sum`, 'step 2 of 5', 'Read /tmp/wt/calc.py']) expect(text).toContain(part)
+    await ui.unmount()
+  }
+})
+
+test('the status line asks the small model at most every 30 seconds, and only on a new tool call', async ($, on) => {
+  const w = world(on)
+  tools(on)
+  await working($, w)
+  await $.tool.call({ tool: 'Read', file_path: 'calc.py', agentId: 'w1' } as never)
+  expect(w.models).toBe(1)
+  await w.clock.advance(10_000)
+  await $.tool.call({ tool: 'Grep', pattern: 'add', agentId: 'w1' } as never)
+  expect(w.models).toBe(1)
+  await w.clock.advance(20_000)
+  expect(w.models).toBe(1)
+  await $.tool.call({ tool: 'Edit', file_path: 'calc.py', agentId: 'w1' } as never)
+  expect(w.models).toBe(2)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /reads calc\.py \(2\)/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a task waiting for the owner sorts above a working task, and the band opens the pane', async ($, on) => {
+  const base = { kind: 'question', sender: 's1', cwd: '/repo', started: NOW, host: 's1' }
+  const w = world(on, {
+    store: {
+      'kiss-mini/task/a-work': { ...base, id: 'a-work', title: 'working one', state: 'working' },
+      'kiss-mini/task/b-wait': { ...base, id: 'b-wait', title: 'waiting one', state: 'waiting for you' },
+    },
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const text = JSON.stringify(await ui.drawn())
+  expect(text.indexOf('waiting one')).toBeLessThan(text.indexOf('working one'))
+  await ui.unmount()
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await band.press({ key: 'mini-open' })
+  expect(w.opened).toContain('kiss-mini')
+  await band.unmount()
+  expect(w.sent).toEqual([])
+})
+
+test('a fourth harness code task waits while three run, and an owner task still starts', async ($, on) => {
+  const running = (n: number) => ({
+    id: `h${n}`, kind: 'code', title: `harness ${n}`, brief: 'Kind: code', return: true, sender: 'c1', cwd: '/repo',
+    state: 'working', started: NOW, host: 's1', agentId: `x${n}`, base: 'run', branch: `mini/h${n}`, worktree: `/tmp/h${n}`,
+  })
+  const w = world(on, { store: { 'kiss-mini/task/h1': running(1), 'kiss-mini/task/h2': running(2), 'kiss-mini/task/h3': running(3) } })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.tool.call({ tool: 'mcp__kiss__handoff', kind: 'code', title: 'fourth', brief: 'Kind: code', base: 'run', return: true } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
+  expect(w.spawned).toEqual([])
+  expect(await status($)).toContain(`${ID} code working: fourth`)
+  await w.clock.advance(1_000)
+  await $.command.run({ command: 'mini', args: 'owner fix --base main' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
+  expect(w.spawned.length).toBe(1)
+  expect(w.spawned[0]?.prompt).toContain('owner fix')
+  // One harness worker ends: the waiting one starts.
+  await $.turn.complete({ agentId: 'x1', reason: 'answer', answer: 'State: failed\nSummary: no.', durationMs: 1, isAborted: false, turnId: 'tx' } as never)
+  expect(w.spawned.length).toBe(2)
+  expect(w.spawned[1]?.prompt).toContain('fourth')
 })

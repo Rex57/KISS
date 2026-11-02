@@ -13,6 +13,12 @@ export type Task = {
   next?: number
   every?: number
   changes?: number
+  /** A worker's progress: step n of m from its progress tool, its last tool calls, when the status line was written. */
+  step?: number
+  total?: number
+  lastTool?: string
+  calls?: string[]
+  statusAt?: number
   /** The changes the sender has toasted. */
   seen?: number
   /** A hand-off's own brief (handoff.md's format); absent for the owner's /mini, whose brief is built from the title. */

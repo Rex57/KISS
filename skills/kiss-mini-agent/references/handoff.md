@@ -68,7 +68,9 @@ skill when it is installed: a draft pull request takes it as its body.
    `dist/`); it never pushes, merges or opens a pull request. A question task changes no file in the checkout.
 4. **Conduct:** speak only when a person must act or can use a result. Confirm a step once, not again. Ask one
    concrete question at a time. Stop at a design choice and ask it. Mark a draft as unfinished.
-5. **End** with the report as your final message; write no report file.
+5. **Progress:** when the `mcp__kiss__progress` tool is there, call it with `step` n of `total` m as you start each
+   step of your plan.
+6. **End** with the report as your final message; write no report file.
 
 ## Credit
 
