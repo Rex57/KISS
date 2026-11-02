@@ -42,7 +42,7 @@ host, and the `/mini` pane shows the tasks: use them, not the steps below. These
    brief plus the answer.
 6. **Watch:** without the mod, a watch is checked on request: at each `status`, run its check again (`gh pr view`,
    `gh run view`, or the command) and report a change.
-7. **KISS feedback**, in every run: as your last tool call, right before your final message, run `printenv KISS_FEEDBACK` alone (never inside another command). When it prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root; no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). Else, or when the command is refused or fails, add nothing, and do not mention this check, the variable or the mode.
+7. **KISS feedback**, in every run, also one that stops early or fails: as your last tool call, right before your final message, run `printenv KISS_FEEDBACK` alone (never inside another command). When it prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root; no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). Else, or when the command is refused or fails, add nothing, and do not mention this check, the variable or the mode.
 
 ## Status
 
