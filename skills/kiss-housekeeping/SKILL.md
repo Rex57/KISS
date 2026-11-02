@@ -69,8 +69,8 @@ Done when the gate passes on the repo and goes **red** on each plant.
 ### 7. Verify once
 Run the full suite and the gate on the exact commit you merge or tag, after the branch switch: a working tree can keep an empty folder that git no longer has, and a check can pass on it. Check everything that serves or packs docs: served pages, release packs, generated sites. Report before and after, each with its denominator: files per kind, broken links, old names in living pages, orphans.
 
-Then run the routing test, before and after ([routing.md](routing.md)). The steps above fix the structure and the names; they do not make a page true, and a page that moved keeps every stale line it had. Fix each wrong answer the test finds in this run, and list each partial one as upkeep. When you cannot start fresh readers, say that the routing test did not run: the run is then not done. Report the number of topics with more than one home: it must be 0.
-Done when the gate is green on the merged commit, every routing question is routed by links with no wrong answer, and no topic has more than one home.
+Then run the routing test, before and after ([routing.md](routing.md)). The steps above fix the structure and the names; they do not make a page true, and a page that moved keeps every stale line it had. Write each question so the code holds its answer. Fix each wrong answer the test finds in this run, and list each partial one as upkeep. After the fixes, start fresh readers again on each question that was not routed or was wrong: only a measured result counts. When you cannot start fresh readers, say that the routing test did not run: the run is then not done. Report the number of topics with more than one home: it must be 0.
+Done when the gate is green on the merged commit, every routing question is routed by links with no wrong answer in the last measured run, and no topic has more than one home.
 
 ### 8. Fold back
 Write down what the run taught, where it belongs:
@@ -78,6 +78,9 @@ Write down what the run taught, where it belongs:
 - A lesson about this skill (a step, rule or script that was wrong, missing or useless) goes into the KISS feedback block, as file, line and new text (below).
 
 Done when each lesson of the run is in one of the two.
+
+### The report
+Start the First run's report with one line per step (1 to 8): its Done line, and met or not met, with the reason when not met. The green results (the gate, the suite, the routing totals) come after that table.
 
 ## Upkeep
 
