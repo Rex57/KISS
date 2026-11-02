@@ -88,6 +88,8 @@ test('/mini ask records a working task and the band reads 1 working; the report 
   expect(w.spawned[0]?.cwd).toBe('/repo')
   expect(w.spawned[0]?.prompt).toContain('Kind: question')
   expect(w.spawned[0]?.prompt).toContain('what does tickets.py check?')
+  expect(w.spawned[0]?.prompt).toContain('Current behaviour:')
+  expect(w.spawned[0]?.prompt).toContain('Key interfaces:')
 
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
   await $.turn.complete({
@@ -293,4 +295,15 @@ test('a second press while a delivery runs finds it taken: one push, one PR', as
   expect(w.runs.filter(argv => argv[0] === 'gh').length).toBe(1)
   expect(git(w).filter(line => line.includes(' push ')).length).toBe(1)
   await ui.unmount()
+})
+
+test('a long task text is cut in the brief, which stays at most 1,500 characters; the whole text is in the task folder', async ($, on) => {
+  const w = world(on)
+  const text = `fix ${'the long description of the bug '.repeat(60)}`.trim()
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'mini', args: text } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(w.spawned[0]?.prompt.length).toBeLessThanOrEqual(1500)
+  expect(w.spawned[0]?.prompt).toContain(`/tmp/kiss-mini/${ID}/task.md`)
+  expect(w.files[`/tmp/kiss-mini/${ID}/task.md`]).toBe(text)
 })

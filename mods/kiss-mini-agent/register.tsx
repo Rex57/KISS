@@ -38,12 +38,20 @@ export function parseReport(answer: string): { state: State; summary: string } {
   return { state: state ?? 'failed', summary: summary.slice(0, SUMMARY_MAX) }
 }
 
+const TITLE_MAX = 300
+const NOT_GIVEN = 'not given: the first check finds it.'
+
+/** The brief in handoff.md's format, at most 1,500 characters: a long task text is cut, its whole text is in the task folder. */
 function brief(t: Task, rules: string, dir: string) {
-  const head = [`# Mini task ${t.id}: ${t.title}`, `Kind: ${t.kind}`]
+  const title = t.title.length > TITLE_MAX ? `${t.title.slice(0, TITLE_MAX)}... (whole text: ${dir}/task.md)` : t.title
+  const head = [`# Mini task ${t.id}: ${title}`, `Kind: ${t.kind}`]
   const tail = ['Return: owner    Owner order: yes', `Rules: ${rules}`]
   if (t.kind === 'question') {
     return [...head, `Checkout: ${t.cwd}    Task folder: ${dir}`, ...tail,
-      `Summary: answer the owner's question: ${t.title}`,
+      "Summary: answer the owner's question in the first line.",
+      `Current behaviour: ${NOT_GIVEN}`,
+      'Expected behaviour: an answer, with no change to any file.',
+      `Key interfaces: ${NOT_GIVEN}`,
       'Acceptance checks:',
       '- The answer names the files and lines it rests on.',
       'Out of scope: any change to a file.',
@@ -51,12 +59,15 @@ function brief(t: Task, rules: string, dir: string) {
     ].join('\n')
   }
   return [...head, `Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`, ...tail,
-    `Summary: ${t.title}`,
+    'Summary: the change the first line asks for.',
+    `Current behaviour: ${NOT_GIVEN}`,
+    'Expected behaviour: as the first line says.',
+    `Key interfaces: ${NOT_GIVEN}`,
     'Acceptance checks:',
-    '- A test or a command shows the change works; the project\'s tests pass.',
+    "- A test or a command shows the change works; the project's tests pass.",
     `- One commit on ${t.branch}; nothing pushed or merged.`,
     '- The full text ends with a "## Pull request body" section.',
-    'Out of scope: anything the summary does not ask for.',
+    'Out of scope: anything the first line does not ask for.',
     'Suggested skills: tdd, ponytail, CodeGraph; pr for the pull request body',
   ].join('\n')
 }
@@ -83,10 +94,12 @@ async function run($: $, id: string) {
     if (made.exitCode !== 0) return save($, { ...t, state: 'failed', report: made.stderr.trim().slice(0, SUMMARY_MAX) })
   }
   const rules = `${$.plugin.root}/skills/kiss-mini-agent/references/handoff.md`
+  const dir = await folder($, id)
+  if (t.title.length > TITLE_MAX) await $.fs.write(`${dir}/task.md`, t.title)
   const r = await $.agent.spawn({
     subagentType: 'kiss:kiss-worker',
-    prompt: brief(t, rules, await folder($, id)),
-    description: `mini ${id}: ${t.title}`,
+    prompt: brief(t, rules, dir),
+    description: `mini ${id}: ${t.title.slice(0, 80)}`,
     cwd: t.worktree ?? t.cwd,
   })
   // The worker's turn.start may have written the task meanwhile: build on the stored entry.
