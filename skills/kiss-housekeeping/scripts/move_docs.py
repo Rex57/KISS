@@ -170,7 +170,7 @@ def selftest():
              "docs/old/setup.md": "# Setup\n## Install\n[back](../../README.md)\n",
              "tools/build.py": "PAGE = 'docs/old/setup.md'\n",
              "docs/archive/old.md": "# Old\nThe guide was docs/old/setup.md.\n",
-             "tools/check_docs.py": "CONFIG = dict(history=['docs/archive/'])\n"}
+             "tools/check_docs.py": "CONFIG = {\"history\": [\"docs/archive/\"]}\n"}
     def tree(d):
         out = {}
         for root, dirs, names in os.walk(d):
@@ -203,7 +203,7 @@ def selftest():
                    "docs/setup.md": "# Setup\n## Install\n[back](../README.md)\n",
                    "tools/build.py": "PAGE = 'docs/setup.md'\n",
                    "docs/archive/old.md": "# Old\nThe guide was docs/old/setup.md.\n",
-                   "tools/check_docs.py": "CONFIG = dict(history=['docs/archive/'])\n"}, got
+                   "tools/check_docs.py": "CONFIG = {\"history\": [\"docs/archive/\"]}\n"}, got
     return "move_docs selftest ok: a dry run changes nothing; --apply fixes links, anchors, labels and paths; history keeps its words"
 
 

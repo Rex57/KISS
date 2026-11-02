@@ -83,7 +83,7 @@ def selftest():
     project's own gate CONFIG (its history folder) read from tools/check_docs.py."""
     pages = {"README.md": "# R\n[s](docs/setup-guide.md)\n", "docs/setup-guide.md": "# Setup\n[x](gone.md)\n",
              "docs/notes/2026-10-01-idea.md": "# Idea\n", "tools/build.py": "PAGE = 'docs/setup-guide.md'\n",
-             "docs/archive/old.md": "# Old\n", "tools/check_docs.py": "CONFIG = dict(history=['docs/archive/'])\n"}
+             "docs/archive/old.md": "# Old\n", "tools/check_docs.py": "CONFIG = {\"history\": [\"docs/archive/\"]}\n"}
     with tempfile.TemporaryDirectory() as d:
         for p, body in pages.items():
             os.makedirs(os.path.join(d, os.path.dirname(p)), exist_ok=True)
