@@ -19,6 +19,7 @@ const KEEP_MS = 7 * 24 * 3600_000
 const WATCH_FIRST = 60_000
 const WATCH_IDLE = 600_000
 const WATCH_MAX = 24 * 3600_000
+const CODE_MAX = 30 * 60_000
 const STATUS_EVERY = 30_000
 // Code workers at once: 3 from the harness (a hand-off), 1 for the owner's own /mini.
 const SLOTS = { harness: 3, owner: 1 }
@@ -160,11 +161,29 @@ async function look($: $, t: Task): Promise<{ state: State; status: string }> {
   return end === 'success' ? { state: 'done', status: 'passed' } : { state: 'failed', status: end || 'failed' }
 }
 
+/** Host: ends a task's worker by denying its every tool call; its last report is ignored. A slot frees. */
+async function stop($: $, t: Task, why: string) {
+  await save($, { ...t, state: 'failed', report: why, stopped: true, finished: await $.clock.now() })
+  for (const x of await tasks($)) if (!x.host) await run($, x.id)
+  await refresh($)
+}
+
+/** Host: a worker the engine lists as waiting (a permission ask in the host session) waits for the owner. */
+async function waits($: $) {
+  const agents = await $.agent.list()
+  for (const t of await tasks($)) {
+    const status = agents.find(a => a.id === t.agentId)?.status
+    if (t.state === 'working' && status === 'waiting') await save($, { ...t, state: 'waiting for you', wait: 'permission', notified: false })
+    else if (t.wait === 'permission' && t.state === 'waiting for you' && status === 'running') await save($, { ...t, state: 'working', wait: undefined, notified: false })
+  }
+}
+
 /** Host: checks each watch that is due; a change checks again in a minute, no change waits twice as long, up to 10 minutes. */
 async function tick($: $) {
   const now = await $.clock.now()
   const me = await $.session.id()
   for (const t of await tasks($)) {
+    if (isCode(t) && t.state === 'working' && t.host === me && t.claimed && now - t.claimed > CODE_MAX) await stop($, t, 'timed out after 30 minutes')
     if (t.kind !== 'watch' || t.state !== 'watching' || t.host !== me) continue
     if (now - t.started > WATCH_MAX) {
       await save($, { ...t, state: 'done', report: 'expired', finished: now })
@@ -191,7 +210,7 @@ async function run($: $, id: string) {
     const busy = (await tasks($)).filter(x => isCode(x) && x.host && x.state === 'working' && (x.brief !== undefined) === harness)
     if (busy.length >= SLOTS[harness ? 'harness' : 'owner']) return
   }
-  await save($, { ...t, host: await $.session.id() })
+  await save($, { ...t, host: await $.session.id(), claimed: await $.clock.now() })
   if (t.kind === 'watch') return tick($)
   if (isCode(t)) {
     const made = await $.process.run(['git', '-C', t.cwd, 'worktree', 'add', '-b', t.branch!, t.worktree!, t.base!])
@@ -218,8 +237,13 @@ async function run($: $, id: string) {
 
 /** Sender: wakes the host; when no host takes the message, starts one (it takes every waiting task as it starts). */
 async function send($: $, id: string) {
+  return wake($, `KISS-MINI task ${id}`)
+}
+
+/** Sender: one message to the host (a task, an answer, a stop); a new host when none takes it. */
+async function wake($: $, text: string) {
   const host = (await $.store.get(HOST)) as { sessionId: string } | undefined
-  if (host && (await $.session.send({ to: { sessionId: host.sessionId }, text: `KISS-MINI task ${id}` })).isDelivered) return 'sent'
+  if (host && (await $.session.send({ to: { sessionId: host.sessionId }, text })).isDelivered) return 'sent'
   // No prompt: the host's own model never runs. Haiku in case the person attaches and types. The flag rides in
   // --settings: a session started from a background session does not get the caller's environment.
   const settings = JSON.stringify({ env: { KISS_MINI_HOST: '1' } })
@@ -303,7 +327,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'mini',
       description: 'kiss-mini-agent: /mini <task> a code change, /mini ask <question>, /mini status (alone) the list; no argument opens the pane',
-      argumentHint: '<task> [--base <branch>] | ask <question> | watch pr <n> | watch run <id> | watch <test command> | status',
+      argumentHint: '<task> [--base <branch>] | ask <question> | watch pr <n> | watch run <id> | watch <test command> | stop <id> | status',
     })
     await $.tool.register({
       name: 'progress',
@@ -340,7 +364,10 @@ export const register: Register = on => {
       })
       for (const t of await tasks($)) if (!t.host) await run($, t.id)
     }
-    $.clock.every(5_000, () => refresh($))
+    $.clock.every(5_000, async () => {
+      if (await isHost($)) await waits($)
+      await refresh($)
+    })
     await refresh($)
     return next(e)
   })
@@ -355,6 +382,11 @@ export const register: Register = on => {
       const id = await newId($)
       const cwd = await $.session.cwd()
       const t: Task = { id, kind: 'question', title: rest.join(' '), sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now() }
+      if (verb === 'stop') {
+        const known = (await $.store.get(TASK + (rest[0] ?? ''))) as Task | undefined
+        if (!known) return { text: `mini: no task ${rest[0] ?? ''}. /mini status lists them.` }
+        return { text: `mini ${known.id}: stop asked (${await wake($, `KISS-MINI stop ${known.id}`)}).` }
+      }
       if (verb === 'watch') {
         const what = rest[0] === 'pr' || rest[0] === 'run' ? rest[0] : 'test'
         Object.assign(t, { kind: 'watch', state: 'watching', watch: what, target: (what === 'test' ? rest : rest.slice(1)).join(' ') })
@@ -405,10 +437,11 @@ export const register: Register = on => {
   // Host: each tool call of a worker is its last tool call; after a new one, at most every 30 s, a small model
   // writes the one-line status from the recent calls.
   on('tool.call', async ($, e, next) => {
-    const r = await next(e)
-    if (e.agentId === undefined || String(e.tool) === 'mcp__kiss__progress' || !(await isHost($))) return r
+    if (e.agentId === undefined || !(await isHost($))) return next(e)
     const t = (await tasks($)).find(x => x.agentId === e.agentId)
-    if (!t) return r
+    if (t?.stopped) return { deny: `kiss-mini-agent: the owner stopped this task (${t.report}). Make no more tool calls; end now.` }
+    const r = await next(e)
+    if (!t || String(e.tool) === 'mcp__kiss__progress') return r
     const a = e as unknown as Record<string, unknown>
     const arg = [a.command, a.file_path, a.pattern, a.description, a.url].find(v => typeof v === 'string') as string | undefined
     const call = `${String(e.tool)} ${arg ?? ''}`.trim().slice(0, 100)
@@ -431,10 +464,18 @@ export const register: Register = on => {
 
   // Host: a task message is taken in code, so the host's own model makes no turn for it.
   on('session.receive', async ($, e, next) => {
-    const id = /KISS-MINI task (\S+)/.exec(e.text)?.[1]
-    if (!id || !(await isHost($))) return next(e)
-    await run($, id)
-    return { consumed: `kiss-mini-agent task ${id}` }
+    const [, verb, id = '', text = ''] = /KISS-MINI (task|answer|stop) (\S+)\n?([\s\S]*?)(?:<\/cross-session-message>|$)/.exec(e.text) ?? []
+    if (!verb || !(await isHost($))) return next(e)
+    const t = (await $.store.get(TASK + id)) as Task | undefined
+    if (verb === 'task') await run($, id)
+    else if (verb === 'stop' && t && !ENDED.includes(t.state)) await stop($, t, 'stopped')
+    else if (verb === 'answer' && t?.agentId && t.state === 'waiting for you' && t.wait !== 'permission') {
+      // The same worker takes the answer and goes on: a finished subagent is resumed with the message.
+      await save($, { ...t, state: 'working', notified: false, report: undefined })
+      await $.session.send({ to: { agentId: t.agentId }, text: `The owner answers your question: ${text.trim()}` })
+      await refresh($)
+    }
+    return { consumed: `kiss-mini-agent ${verb} ${id}` }
   })
 
   // Host: a worker's first turn names its task in its brief's first line; from then on its agentId does.
@@ -449,7 +490,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined || !(await isHost($))) return next(e)
     const t = (await tasks($)).find(x => x.agentId === e.agentId)
-    if (!t) return next(e)
+    if (!t || t.stopped) return next(e)
     const { state, summary } = parseReport(e.answer)
     const log = `${await folder($, t.id)}/report.md`
     await $.fs.write(log, e.answer)
@@ -484,6 +525,8 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
+    // Mobile draws no Input: there the owner answers from another surface.
+    const Input = e.surface === 'mobile' ? undefined : ($.ui.resolve(e) as { Input?: any }).Input
     const all = await read($, ledger)
     const ended = all.filter(t => ENDED.includes(t.state)).sort((a, b) => (b.finished ?? 0) - (a.finished ?? 0))
     // An ended task that still holds a worktree stays in view until its Discard.
@@ -504,6 +547,12 @@ export const register: Register = on => {
             {t.report && <Text dimColor>{t.report}</Text>}
             {!t.report && t.status && <Text dimColor>{t.status}</Text>}
             {t.state === 'working' && t.lastTool && <Text dimColor>{t.lastTool}</Text>}
+            {t.state === 'waiting for you' && t.wait === 'permission' && (
+              <Text color="warning">waits for a permission in the host session: claude attach {(t.host ?? '').slice(0, 8)}</Text>
+            )}
+            {Input && t.state === 'waiting for you' && t.wait !== 'permission' && t.agentId && (
+              <Input key={`answer-${t.id}`} placeholder="your answer" submitLabel="Send" onSubmit={(text: string) => void wake($, `KISS-MINI answer ${t.id}\n${text}`)} />
+            )}
             {t.state === 'ready' && isCode(t) && <Text>{t.branch} from {t.base}: {t.diff}</Text>}
             {t.state === 'ready' && isCode(t) && <Text>tests: {t.tests}</Text>}
             {DELIVERY.some(([how]) => offers(t, how)) && (

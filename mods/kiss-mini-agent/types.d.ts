@@ -19,6 +19,12 @@ export type Task = {
   lastTool?: string
   calls?: string[]
   statusAt?: number
+  /** When the host gave it a worker; a worker past 30 minutes is stopped. */
+  claimed?: number
+  /** Stopped by the owner or the time limit: the worker's tool calls are denied, its last report ignored. */
+  stopped?: boolean
+  /** Waiting for the owner because the worker waits for a permission in the host session (not a question). */
+  wait?: 'permission'
   /** The changes the sender has toasted. */
   seen?: number
   /** A hand-off's own brief (handoff.md's format); absent for the owner's /mini, whose brief is built from the title. */

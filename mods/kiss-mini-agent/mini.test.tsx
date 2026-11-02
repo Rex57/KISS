@@ -33,6 +33,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     ghAt: [] as number[],
     models: 0,
     opened: [] as string[],
+    /** What `$.agent.list()` answers: the host's agents and where each loop stands. */
+    agents: [] as { id: string; description: string; type: string; status: string }[],
     store: {} as Record<string, any>,
     sent: [] as { to: string; text: string }[],
     spawned: [] as { prompt: string; subagentType?: string; cwd?: string }[],
@@ -83,6 +85,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     const out = e.argv.includes('--abbrev-ref') ? `${w.branch}\n` : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
+  on('agent.list', () => ({ value: w.agents }) as never)
   on('model.complete', () => {
     w.models++
     return { value: { isAnswered: true, text: `reads calc.py (${w.models})`, usage: {} } } as never
@@ -644,4 +647,70 @@ test('a fourth harness code task waits while three run, and an owner task still 
   await $.turn.complete({ agentId: 'x1', reason: 'answer', answer: 'State: failed\nSummary: no.', durationMs: 1, isAborted: false, turnId: 'tx' } as never)
   expect(w.spawned.length).toBe(2)
   expect(w.spawned[1]?.prompt).toContain('fourth')
+})
+
+test('a worker\'s question puts its row in waiting for you with one toast; the owner\'s answer in the pane goes to that worker', async ($, on) => {
+  const w = world(on)
+  tools(on)
+  await working($, w)
+  const toasts = w.toasts.length
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: 'State: waiting for you\nSummary: Should add() also take floats?\nBranch: none', durationMs: 1, isAborted: false, turnId: 't1' } as never)
+  expect(await status($)).toContain(`${ID} code waiting for you: fix add so it returns the sum - Should add() also take floats?`)
+  expect(w.toasts.length).toBe(toasts + 1)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.input({ key: `answer-${ID}`, text: 'yes, floats too' })
+  await ui.unmount()
+  const wake = w.sent.at(-1)?.text ?? ''
+  expect(wake).toContain(`KISS-MINI answer ${ID}`)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: wake } as never)
+  const toWorker = w.sent.at(-1)
+  expect(toWorker?.to).toContain('w1')
+  expect(toWorker?.text).toContain('yes, floats too')
+  expect(await status($)).toContain(`${ID} code working`)
+  // The same worker goes on and reports again.
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1, isAborted: false, turnId: 't2' } as never)
+  expect(await status($)).toContain(`${ID} code ready`)
+})
+
+test('a worker the engine lists as waiting shows as waiting for you, with a way to open the host session', async ($, on) => {
+  const w = world(on)
+  tools(on)
+  await working($, w)
+  w.agents = [{ id: 'w1', description: 'mini', type: 'kiss:kiss-worker', status: 'waiting' }]
+  await w.clock.advance(5_000)
+  expect(await status($)).toContain(`${ID} code waiting for you`)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /claude attach s1/ })).toBeDefined()
+  await ui.unmount()
+  w.agents = [{ id: 'w1', description: 'mini', type: 'kiss:kiss-worker', status: 'running' }]
+  await w.clock.advance(5_000)
+  expect(await status($)).toContain(`${ID} code working`)
+})
+
+test('/mini stop on a working task stops its worker and marks it failed as stopped', async ($, on) => {
+  const w = world(on)
+  const ran: string[] = []
+  on('tool.call', ($, e) => (ran.push(String(e.tool)), { result: {}, text: 'ok' }) as never)
+  await working($, w)
+  const r = await $.command.run({ command: 'mini', args: `stop ${ID}` } as never)
+  expect(r.text).toContain(ID)
+  expect(w.spawned.length).toBe(1)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
+  expect(await status($)).toContain(`${ID} code failed: fix add so it returns the sum - stopped`)
+  const denied = await $.tool.call({ tool: 'Read', file_path: 'calc.py', agentId: 'w1' } as never)
+  expect(JSON.stringify(denied)).toContain('stopped')
+  expect(ran).toEqual([])
+  // Its last answer changes nothing.
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1, isAborted: false, turnId: 't2' } as never)
+  expect(await status($)).toContain(`${ID} code failed`)
+})
+
+test('a code task past 30 minutes is stopped as timed out', async ($, on) => {
+  const w = world(on)
+  tools(on)
+  await working($, w)
+  await w.clock.advance(29 * 60_000)
+  expect(await status($)).toContain(`${ID} code working`)
+  await w.clock.advance(2 * 60_000)
+  expect(await status($)).toContain(`${ID} code failed: fix add so it returns the sum - timed out after 30 minutes`)
 })
