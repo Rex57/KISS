@@ -83,7 +83,8 @@ is in your skill list. Write into `R/decisions.md` which of them the run used, w
     by the facts file's `Docs gate:` line: a command → kiss-housekeeping's Upkeep U1 to U3 (U4 too when the run
     changed the map), and the report gives the gate's result; `none (owner declined)` → nothing; no line → ask the
     owner once whether to do a docs First run (kiss-housekeeping): a no goes into the facts file as
-    `Docs gate: none (owner declined)`, a yes starts that First run after the merge gate. Then the **merge gate**. A push, a pull request or any write to a remote is its own gate, always asked.
+    `Docs gate: none (owner declined)` (when git tracks the facts file, commit that line by explicit path on the
+    run's branch before the merge gate; when git ignores it, say so in the report), a yes starts that First run after the merge gate. Then the **merge gate**. A push, a pull request or any write to a remote is its own gate, always asked.
 11. **KISS feedback**, in every run, before your final message (at the close, the close report): run
     `printenv KISS_FEEDBACK`; when it prints `1`, end that message with the block of
     [`rules/feedback.md`](../../rules/feedback.md); else add nothing.
