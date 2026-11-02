@@ -63,7 +63,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     if (e.argv.includes('MERGE_HEAD')) return { value: { exitCode: w.merging ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--abort')) w.merging = false
     // The checkout is on w.branch; the worker's branch differs from the base by one line; `fail` names git verbs that fail.
-    const bad = fail[e.argv[3] ?? ''] ?? fail[e.argv[0] ?? '']
+    const bad = fail[`${e.argv[3]} ${e.argv[4]}`] ?? fail[e.argv[3] ?? ''] ?? fail[e.argv[0] ?? '']
     if (bad && e.argv[3] === 'merge') w.merging = true
     if (bad) return { value: { exitCode: 1, stdout: bad.stdout ?? '', stderr: bad.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
     const out = e.argv.includes('--abbrev-ref') ? `${w.branch}\n` : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
@@ -338,11 +338,12 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
     return { result: {}, text: 'ok' } as never
   })
   await ready($, w)
-  for (const command of [`git push -u origin mini/${ID}`, 'git -C /repo merge main', 'git -c x=y push', 'gh pr create --draft', 'gh pr merge 12', 'cd x && git push']) {
+  for (const command of [`git push -u origin mini/${ID}`, 'git -C /repo merge main', 'git -c x=y push', 'gh pr create --draft', 'gh pr merge 12', 'cd x && git push',
+    'git --no-pager push origin x', 'git -C/x push', 'gh api -X POST repos/o/r/pulls -f head=x -f base=main']) {
     const r = await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
     expect(JSON.stringify(r)).toContain('press in the /mini pane')
   }
-  const allowed = ['git commit -m fix', 'git add merge.py', 'git commit -m "merge the push docs"', 'git merge-base main HEAD', 'git log --grep merge', 'gh pr view 12']
+  const allowed = ['git commit -m "docs: how to git push a branch"', 'git commit -m fix', 'git add merge.py', 'git commit -m "merge the push docs"', 'git merge-base main HEAD', 'git log --grep merge', 'gh pr view 12']
   for (const command of allowed) await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
   await $.tool.call({ tool: 'Bash', command: 'git push', agentId: 'other' } as never)
   expect(ran).toEqual([...allowed, 'git push'])
@@ -384,7 +385,7 @@ test('Merge is refused while the checkout has a merge of its own under way: no m
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: `merge-${ID}` })
   expect(git(w).some(line => line.includes(' merge --no-edit') || line.includes('--abort'))).toBe(false)
-  expect(w.toasts.at(-1)).toContain('merge of its own')
+  expect(w.toasts.at(-1)).toContain(`${ID}: merge failed: a merge is under way in /repo`)
   expect(await status($)).toContain(`${ID} code ready`)
   await ui.unmount()
 })
@@ -426,6 +427,7 @@ test('an ended task that still holds a worktree stays in the pane past the last 
 })
 
 test('with real-length paths a long task text still gives a brief of at most 1,500 characters', async ($, on) => {
+  // Made-up paths as long as a real temp folder and a real session's scratch folder.
   const tmp = '/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/'
   const cwd = '/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo'
   const w = world(on, { tmp, cwd })
@@ -434,4 +436,15 @@ test('with real-length paths a long task text still gives a brief of at most 1,5
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   expect(w.spawned[0]?.prompt.length).toBeLessThanOrEqual(1500)
   expect(w.spawned[0]?.prompt).toContain('task.md')
+})
+
+test('Discard clears a worktree git no longer lists, so the task can leave the ledger', async ($, on) => {
+  const w = world(on, { fail: { 'worktree remove': { stderr: `fatal: '/tmp/kiss-mini/${ID}/wt' is not a working tree` } } })
+  await ready($, w)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `discard-${ID}` })
+  expect(git(w)).toContain(`git -C /repo branch -D mini/${ID}`)
+  expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].worktree]).toEqual(['done', undefined])
+  expect(w.toasts.some(text => text.includes('worktree kept'))).toBe(false)
+  await ui.unmount()
 })

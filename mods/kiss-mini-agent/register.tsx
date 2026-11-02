@@ -42,8 +42,11 @@ export function parseReport(answer: string): { state: State; summary: string } {
 }
 
 const BRIEF_MAX = 1500
-// A command that pushes, merges or opens a pull request: git's subcommand (after -C/-c options), or gh pr create|merge|ready.
-const DELIVERS = /\bgit(?:\s+-[Cc]\s+\S+)*\s+(?:push|merge)(?=\s|$|[;&|)])|\bgh\s+pr\s+(?:create|merge|ready)\b/
+// A command that pushes, merges or opens a pull request: git's push or merge subcommand after any options (quoted
+// text, such as a commit message, is not read), gh pr create|merge|ready, or a gh api call that writes to `pulls`.
+const GIT_DELIVERS = /\bgit(?:\s+(?:-C\s*\S+|-c\s+\S+|--?[\w-]+(?:=\S+)?))*\s+(?:push|merge)(?=\s|$|[;&|)])/
+const GH_DELIVERS = /\bgh\s+pr\s+(?:create|merge|ready)\b|\bgh\s+api\b(?=[^;&|]*pulls)(?=[^;&|]*(?:-X\s*POST|--method[\s=]POST|\s-[fF]\s|--(?:raw-)?field|--input))/
+const delivers = (command: string) => GIT_DELIVERS.test(command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")) || GH_DELIVERS.test(command)
 const NOT_GIVEN = 'not given: read the files the first line names.'
 
 function briefLines(t: Task, title: string, rules: string, dir: string) {
@@ -180,7 +183,7 @@ async function deliverOnce($: $, id: string, how: Delivery) {
       const merging = (await git('rev-parse', '-q', '--verify', 'MERGE_HEAD')).exitCode === 0
       const unmerged = (await git('diff', '--name-only', '--diff-filter=U')).stdout.trim()
       if (head !== t.base) r = { exitCode: 1, stdout: '', stderr: `check out ${t.base} in ${t.cwd} first` }
-      else if (merging || unmerged) r = { exitCode: 1, stdout: '', stderr: `${t.cwd} has a merge of its own under way: finish or abort it first` }
+      else if (merging || unmerged) r = { exitCode: 1, stdout: '', stderr: `a merge is under way in ${t.cwd}: finish or abort it first` }
       // No merge was under way before this one, so a MERGE_HEAD now is this press's own.
       else if ((r = await git('merge', '--no-edit', t.branch)).exitCode !== 0 && (await git('rev-parse', '-q', '--verify', 'MERGE_HEAD')).exitCode === 0) {
         await git('merge', '--abort')
@@ -193,11 +196,13 @@ async function deliverOnce($: $, id: string, how: Delivery) {
     }
     if (r.exitCode !== 0) return failed(`${r.stdout}\n${r.stderr}`)
     // The delivered work is the branch (or, for a discard, nothing): the worktree goes, whatever it holds.
-    const gone = await git('worktree', 'remove', '--force', t.worktree)
+    const removed = await git('worktree', 'remove', '--force', t.worktree)
     if (how === 'discard') await git('branch', '-D', t.branch)
-    if (gone.exitCode !== 0) $.ui.toast(`mini ${id}: worktree kept at ${t.worktree}: ${gone.stderr.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 200)}`)
+    // A worktree git no longer lists (its folder deleted, then pruned) is gone too.
+    const gone = removed.exitCode === 0 || !(await git('worktree', 'list', '--porcelain')).stdout.split('\n').includes(`worktree ${t.worktree}`)
+    if (!gone) $.ui.toast(`mini ${id}: worktree kept at ${t.worktree}: ${removed.stderr.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 200)}`)
     const { pr, diff, tests, ...rest } = t
-    await save($, { ...rest, state: 'done', delivered: how, ...(gone.exitCode === 0 ? { worktree: undefined } : {}) })
+    await save($, { ...rest, state: 'done', delivered: how, ...(gone ? { worktree: undefined } : {}) })
     await refresh($)
   } catch (err) {
     await failed(String(err))
@@ -298,11 +303,11 @@ export const register: Register = on => {
 
   // Host: D8 holds in code, not only in the brief: a worker may not push, merge or open a pull request.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    if (e.agentId === undefined || !DELIVERS.test(e.command) || !(await isHost($))) return next(e)
+    if (e.agentId === undefined || !delivers(e.command) || !(await isHost($))) return next(e)
     if (!(await tasks($)).some(t => t.agentId === e.agentId)) return next(e)
     return { deny: 'kiss-mini-agent: only the owner\'s press in the /mini pane pushes, merges or opens a pull request. Commit on your branch and report.' }
   }).catch(($, e, next) =>
-    next.called || e.agentId === undefined || !DELIVERS.test(e.command) ? next(e) : { deny: 'kiss-mini-agent: its guard failed; no push, merge or pull request from a subagent.' },
+    next.called || e.agentId === undefined || !delivers(e.command) ? next(e) : { deny: 'kiss-mini-agent: its guard failed; no push, merge or pull request from a subagent.' },
   )
 
   // Host: its model stays idle; a worker's hand-back or any other prompt but the person's own is dropped.
