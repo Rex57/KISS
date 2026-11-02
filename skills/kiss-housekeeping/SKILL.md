@@ -57,7 +57,7 @@ Make one commit per step, in this order. The early steps make the later moves sm
 
 Every move goes through `python3 -I "$HK/scripts/move_docs.py"`. It runs `git mv`, rewrites the links, and replaces the old paths. Fix each path user it reports **in the same commit**, then run the tests those path users belong to, and every test that scans docs: a split can take away the one example a scan counts on. [moves.md](moves.md) lists the path users that a script cannot see.
 
-Commit each step before you start the next one. Two steps' edits in one file cannot be split into two commits afterwards without an interactive tool.
+Commit each step before you start the next one. Stage each file by explicit path, never `git add -A` or a folder, and read `git diff --cached --stat` before each commit. Two steps' edits in one file cannot be split into two commits afterwards without an interactive tool.
 
 Before a split, copy the whole page to `archive/<date>-before-split/`, so nothing is lost. Then write each new home short, from the page, and link the copy once.
 Done when every commit leaves the suite green, with the denominator printed.
@@ -70,7 +70,7 @@ Done when the gate passes on the repo and goes **red** on each plant.
 Run the full suite and the gate on the exact commit you merge or tag, after the branch switch: a working tree can keep an empty folder that git no longer has, and a check can pass on it. Check everything that serves or packs docs: served pages, release packs, generated sites. Report before and after, each with its denominator: files per kind, broken links, old names in living pages, orphans.
 
 Then run the routing test, before and after ([routing.md](routing.md)). The steps above fix the structure and the names; they do not make a page true, and a page that moved keeps every stale line it had. Write each question so the code holds its answer. Fix each wrong answer the test finds in this run, and list each partial one as upkeep. After the fixes, start fresh readers again on each question that was not routed or was wrong: only a measured result counts. When you cannot start fresh readers, say that the routing test did not run: the run is then not done. Report the number of topics with more than one home: it must be 0.
-Done when the gate is green on the merged commit, every routing question is routed by links with no wrong answer in the last measured run, and no topic has more than one home.
+Done when the gate is green on the merged commit, every routing question is routed by links with no wrong answer in the last measured run, each question's truth names a file and line in the code, and no topic has more than one home.
 
 ### 8. Fold back
 Write down what the run taught, where it belongs:
@@ -87,8 +87,8 @@ In every run, before your final message: run `printenv KISS_FEEDBACK`; when it p
 
 ## Upkeep
 
-- **U1.** Copy the code below `CONFIG` from `$HK/scripts/check_docs.py` over the project's `tools/check_docs.py`, and keep the project's `CONFIG`. Run the gate. Fix each failure at its home.
-- **U2.** Read each living page that the phase touched against what changed. Make it true, and set its `Reviewed` date. A page too long to read in one pass (a contract, a guide): split it by section across parallel reviewers. First list the exact strings the tests read from the page (search the tests for the page's file name; an `index("...")` on its text is a pointer like a path), and give that list to every reviewer and to the editor. Each reviewer checks every claim in its section against the code and returns its findings as text, each with the evidence (file and line) and the replacement. One editor then checks each finding against the code and applies them all in one scripted pass, where each edit must match exactly once. A names pass is not a review: only a review earns today's `Reviewed` date.
+- **U1.** Copy the whole `$HK/scripts/check_docs.py` over the project's `tools/check_docs.py` every time, whatever the difference, then put the project's `CONFIG` assignment back (the last one; Python's `ast` gives its lines). Apart from `CONFIG`, the copy must equal the master. Run the gate. Fix each failure at its home.
+- **U2.** Read each living page that the phase touched against what changed. Make it true, and set its `Reviewed` date to today, even when no line changed: each page read in full against the change earns it. A page too long to read in one pass (a contract, a guide): split it by section across parallel reviewers. First list the exact strings the tests read from the page (search the tests for the page's file name; an `index("...")` on its text is a pointer like a path), and give that list to every reviewer and to the editor. Each reviewer checks every claim in its section against the code and returns its findings as text, each with the evidence (file and line) and the replacement. One editor then checks each finding against the code and applies them all in one scripted pass, where each edit must match exactly once. A names pass is not a review: only a review earns today's `Reviewed` date.
 - **U3.** Put each new page where [standard.md](standard.md) "Where a new page goes" says. Add each new record to its index.
 - **U4.** When the map changes, or an outside document (a spec, an audit, a stakeholder's questions) arrives to be checked against the system, run the routing test ([routing.md](routing.md)) on the tree as it is. Fix each wrong answer at its home.
 - **U5.** KISS feedback, in every run, before your final message: run `printenv KISS_FEEDBACK`; when it prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md); else add nothing.
