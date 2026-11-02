@@ -27,6 +27,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     branch,
     /** A merge under way in the checkout (MERGE_HEAD): the owner's own, or a failed merge's. */
     merging: false,
+    /** The task's branch is in its base (merged by the harness or by hand). */
+    merged: false,
     clock: undefined as unknown as ReturnType<typeof mock.clock>,
     /** What `gh pr view` and `gh run view` answer, and the clock time of each gh call. */
     gh: { pr: 'OPEN', run: 'in_progress ' },
@@ -76,6 +78,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
       const failed = e.argv[2]?.includes('fail')
       return { value: { exitCode: failed ? 1 : 0, stdout: failed ? 'collected 3\nline a\nFAILED test_add - assert -1 == 5\n' : 'ok\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    if (e.argv.includes('--is-ancestor')) return { value: { exitCode: w.merged ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('MERGE_HEAD')) return { value: { exitCode: w.merging ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--abort')) w.merging = false
     // The checkout is on w.branch; the worker's branch differs from the base by one line; `fail` names git verbs that fail.
@@ -120,16 +123,22 @@ test('/mini ask records a working task and the band reads 1 working; the report 
   expect(await status($)).toContain(`${ID} question working: what does tickets.py check?`)
 
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /working/ }))?.text).toBe('mini: 1 working')
+  // Until the host takes it, the task waits for a slot.
+  expect((await ui.find({ type: 'Text', text: /mini:/ }))?.text).toBe('mini: 1 waiting for a slot')
 
   // The host takes the task in code: the message is consumed, a kiss-worker starts in the sender's folder.
   expect(w.sent.length).toBe(1)
   expect(w.sent[0]?.text).toContain(`KISS-MINI task ${ID}`)
   const got = await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   expect(got.consumed).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /mini:/ }))?.text).toBe('mini: 1 working')
   expect(w.spawned.length).toBe(1)
   expect(w.spawned[0]?.subagentType).toBe('kiss:kiss-worker')
-  expect(w.spawned[0]?.cwd).toBe('/repo')
+  // A question reads a detached worktree of the checkout, never the checkout itself.
+  expect(git(w)).toContain(`git -C /repo worktree add --detach /tmp/kiss-mini/${ID}/wt HEAD`)
+  expect(w.spawned[0]?.cwd).toBe(`/tmp/kiss-mini/${ID}/wt`)
+  expect(w.spawned[0]?.prompt).toContain('mcp__kiss__progress')
+  expect(w.spawned[0]?.prompt).toContain('State: done|ready|failed|waiting for you')
   expect(w.spawned[0]?.prompt).toContain('Kind: question')
   expect(w.spawned[0]?.prompt).toContain('what does tickets.py check?')
   expect(w.spawned[0]?.prompt).toContain('Current behaviour:')
@@ -778,4 +787,61 @@ test('ANSWER: a model-written peer message (no plugin) is not taken as the owner
   await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: 'State: waiting for you\nSummary: may I also rewrite mul()?\nBranch: none', durationMs: 1, isAborted: false, turnId: 't1' } as never)
   await $.session.receive({ origin: { kind: 'peer' }, text: `KISS-MINI answer ${ID}\nyes, rewrite mul too` } as never)
   expect(w.sent.some(m => m.to === 'w1' || JSON.stringify(m.to).includes('w1'))).toBe(false)
+})
+
+test('the question task\'s worktree goes when it ends; the pane names the full text; no State line on a question is done', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'mini', args: 'ask why?' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: 'Because add subtracts.', durationMs: 1, isAborted: false, turnId: 't1' } as never)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('done')
+  expect(git(w)).toContain(`git -C /repo worktree remove --force /tmp/kiss-mini/${ID}/wt`)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /full text: \/tmp\/kiss-mini\/.*report\.md/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a host that cannot start fails the task with claude\'s words', async ($, on) => {
+  const w = world(on, { delivered: false, fail: { claude: { stderr: 'Workspace not trusted.' } } })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  const r = await $.command.run({ command: 'mini', args: 'ask why?' } as never)
+  expect(r.text).toContain('could not start a host: Workspace not trusted.')
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('failed')
+})
+
+test('a harness task offers only Discard; merged into its base by the harness, it ends done and its worktree goes', async ($, on) => {
+  const w = world(on)
+  await handoff($, w, false)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  for (const key of ['merge', 'push', 'pr']) expect(await ui.find({ key: `${key}-${ID}` })).toBeUndefined()
+  expect(await ui.find({ key: `discard-${ID}` })).toBeDefined()
+  await ui.unmount()
+  w.merged = true
+  await w.clock.advance(60_000)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('done')
+  expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
+})
+
+test('a hand-off watch returns its end to the sender', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.tool.call({ tool: 'mcp__kiss__handoff', kind: 'watch', title: 'CI', brief: 'watch CI', target: 'run 123', return: true } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  w.gh.run = 'completed success'
+  await w.clock.advance(60_000)
+  const back = w.sent.filter(m => !m.text.startsWith('KISS-MINI'))
+  expect(back.length).toBe(1)
+  expect(back[0]?.text).toContain('State: done')
+  expect(back[0]?.text).toContain('Summary: passed')
+})
+
+test('a Draft PR that fails at gh says the branch was pushed', async ($, on) => {
+  const w = world(on, { fail: { gh: { stderr: 'HTTP 422' } } })
+  await ready($, w)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `pr-${ID}` })
+  expect(w.toasts.at(-1)).toContain('pushed; draft PR failed: HTTP 422')
+  await ui.unmount()
 })
