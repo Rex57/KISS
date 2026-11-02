@@ -16,6 +16,9 @@ const ENDED: State[] = ['done', 'failed']
 const SUMMARY_MAX = 600
 const PANE = 'kiss-mini'
 const KEEP_MS = 7 * 24 * 3600_000
+const WATCH_FIRST = 60_000
+const WATCH_IDLE = 600_000
+const WATCH_MAX = 24 * 3600_000
 const SHOW_ENDED = 10
 
 // The band draws from this copy of the ledger; a timer refreshes it, as other sessions write the store.
@@ -115,9 +118,14 @@ async function refresh($: $) {
   await update($, ledger, () => list)
   const me = await $.session.id()
   for (const t of list) {
-    if (t.sender !== me || t.notified || !TOAST.includes(t.state)) continue
-    await save($, { ...t, notified: true })
-    $.ui.toast(`mini ${t.id} ${t.state}: ${t.title}`)
+    if (t.sender !== me) continue
+    if ((t.changes ?? 0) > (t.seen ?? 0)) {
+      await save($, { ...t, seen: t.changes })
+      $.ui.toast(`mini ${t.id} watch: ${t.title} is ${t.status}`)
+    }
+    if (t.notified || !TOAST.includes(t.state)) continue
+    await save($, { ...(await $.store.get(TASK + t.id) as Task), notified: true })
+    $.ui.toast(`mini ${t.id} ${t.state}: ${t.title}${t.kind === 'watch' && t.report ? ` - ${t.report}` : ''}`)
   }
 }
 
@@ -129,11 +137,53 @@ async function prune($: $) {
   }
 }
 
-/** Host: claims the task, then starts its worker; a task another host claimed is left alone. */
+/** Host: one check of a watch, by gh or the command itself; no model is asked. */
+async function look($: $, t: Task): Promise<{ state: State; status: string }> {
+  const run = (argv: string[]) => $.process.run(argv, { cwd: t.cwd, timeoutMs: 600_000 })
+  if (t.watch === 'test') {
+    const r = await run(['sh', '-c', t.target!])
+    const last = `${r.stdout}\n${r.stderr}`.trim().split('\n').slice(-5).join(' · ')
+    return r.exitCode === 0 ? { state: 'done', status: 'passed' } : { state: 'failed', status: `exit ${r.exitCode}: ${last}`.slice(0, SUMMARY_MAX) }
+  }
+  const r = t.watch === 'pr'
+    ? await run(['gh', 'pr', 'view', t.target!, '--json', 'state', '-q', '.state'])
+    : await run(['gh', 'run', 'view', t.target!, '--json', 'status,conclusion', '-q', '.status+" "+.conclusion'])
+  // A gh that fails (network, auth) is no change: the watch checks again later.
+  if (r.exitCode !== 0) return { state: 'watching', status: t.status ?? `gh: ${r.stderr.trim().slice(0, 200)}` }
+  const [st = '', end = ''] = r.stdout.trim().toLowerCase().split(/\s+/)
+  if (t.watch === 'pr') return st === 'merged' || st === 'closed' ? { state: 'done', status: st } : { state: 'watching', status: st }
+  if (st !== 'completed') return { state: 'watching', status: st }
+  return end === 'success' ? { state: 'done', status: 'passed' } : { state: 'failed', status: end || 'failed' }
+}
+
+/** Host: checks each watch that is due; a change checks again in a minute, no change waits twice as long, up to 10 minutes. */
+async function tick($: $) {
+  const now = await $.clock.now()
+  const me = await $.session.id()
+  for (const t of await tasks($)) {
+    if (t.kind !== 'watch' || t.state !== 'watching' || t.host !== me) continue
+    if (now - t.started > WATCH_MAX) {
+      await save($, { ...t, state: 'done', report: 'expired', finished: now })
+      continue
+    }
+    if (now < (t.next ?? 0)) continue
+    const { state, status } = await look($, t)
+    const changed = t.status !== undefined && status !== t.status
+    const every = changed ? WATCH_FIRST : Math.min(WATCH_IDLE, (t.every ?? WATCH_FIRST / 2) * 2)
+    const ended = state !== 'watching' ? { report: status, finished: now } : {}
+    // An end toasts by its state; only a change along the way counts as a change to toast.
+    const changes = (t.changes ?? 0) + (changed && state === 'watching' ? 1 : 0)
+    await save($, { ...t, state, status, every, next: now + every, changes, ...ended })
+  }
+  await refresh($)
+}
+
+/** Host: claims the task, then starts its worker (a watch: its first check); a task another host claimed is left alone. */
 async function run($: $, id: string) {
   const t = (await $.store.get(TASK + id)) as Task | undefined
-  if (!t || t.host || t.state !== 'working') return
+  if (!t || t.host || t.state !== (t.kind === 'watch' ? 'watching' : 'working')) return
   await save($, { ...t, host: await $.session.id() })
+  if (t.kind === 'watch') return tick($)
   if (isCode(t)) {
     const made = await $.process.run(['git', '-C', t.cwd, 'worktree', 'add', '-b', t.branch!, t.worktree!, t.base!])
     // No worktree was made: nothing is left to Discard.
@@ -244,7 +294,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'mini',
       description: 'kiss-mini-agent: /mini <task> a code change, /mini ask <question>, /mini status (alone) the list; no argument opens the pane',
-      argumentHint: '<task> [--base <branch>] | ask <question> | status',
+      argumentHint: '<task> [--base <branch>] | ask <question> | watch pr <n> | watch run <id> | watch <test command> | status',
     })
     await $.tool.register({
       name: 'handoff',
@@ -271,8 +321,9 @@ export const register: Register = on => {
       $.clock.every(60_000, async () => {
         await $.store.set(HOST, { sessionId: await $.session.id(), beat: await $.clock.now() })
         await prune($)
+        await tick($)
       })
-      for (const t of await tasks($)) if (t.state === 'working' && !t.host) await run($, t.id)
+      for (const t of await tasks($)) if (!t.host) await run($, t.id)
     }
     $.clock.every(5_000, () => refresh($))
     await refresh($)
@@ -289,7 +340,11 @@ export const register: Register = on => {
       const id = await newId($)
       const cwd = await $.session.cwd()
       const t: Task = { id, kind: 'question', title: rest.join(' '), sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now() }
-      if (verb !== 'ask') {
+      if (verb === 'watch') {
+        const what = rest[0] === 'pr' || rest[0] === 'run' ? rest[0] : 'test'
+        Object.assign(t, { kind: 'watch', state: 'watching', watch: what, target: (what === 'test' ? rest : rest.slice(1)).join(' ') })
+        if (!t.target) return { text: 'mini: watch pr <number|url>, watch run <id|url>, or watch <test command>.' }
+      } else if (verb !== 'ask') {
         const words = [verb, ...rest]
         const at = words.indexOf('--base')
         const base = at >= 0 ? words.splice(at, 2)[1] : undefined
@@ -388,6 +443,7 @@ export const register: Register = on => {
           <Box flexDirection="column" key={t.id}>
             <Text>{t.id} {t.kind} {t.state}: {t.title}</Text>
             {t.report && <Text dimColor>{t.report}</Text>}
+            {!t.report && t.status && <Text dimColor>{t.status}</Text>}
             {t.state === 'ready' && isCode(t) && <Text>{t.branch} from {t.base}: {t.diff}</Text>}
             {t.state === 'ready' && isCode(t) && <Text>tests: {t.tests}</Text>}
             {DELIVERY.some(([how]) => offers(t, how)) && (

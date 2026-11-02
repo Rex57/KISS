@@ -27,6 +27,11 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     branch,
     /** A merge under way in the checkout (MERGE_HEAD): the owner's own, or a failed merge's. */
     merging: false,
+    clock: undefined as unknown as ReturnType<typeof mock.clock>,
+    /** What `gh pr view` and `gh run view` answer, and the clock time of each gh call. */
+    gh: { pr: 'OPEN', run: 'in_progress ' },
+    ghAt: [] as number[],
+    models: 0,
     store: {} as Record<string, any>,
     sent: [] as { to: string; text: string }[],
     spawned: [] as { prompt: string; subagentType?: string; cwd?: string }[],
@@ -34,7 +39,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     toasts: [] as string[],
     files: {} as Record<string, string>,
   }
-  mock.clock(on, { now: NOW })
+  w.clock = mock.clock(on, { now: NOW })
   // The store in memory, readable by the test: the ledger is the contract every session reads.
   const mem: Record<string, unknown> = JSON.parse(JSON.stringify(store ?? {}))
   w.store = mem
@@ -60,6 +65,14 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
   on('process.run', ($, e) => {
     w.runs.push([...e.argv])
     if (hang.includes(e.argv[0] ?? '')) throw new Error(`${e.argv[0]}: timed out after 120000 ms`)
+    if (e.argv[0] === 'gh' && e.argv[2] === 'view') {
+      w.ghAt.push(w.clock.now())
+      return { value: { exitCode: 0, stdout: `${e.argv[1] === 'pr' ? w.gh.pr : w.gh.run}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (e.argv[0] === 'sh') {
+      const failed = e.argv[2]?.includes('fail')
+      return { value: { exitCode: failed ? 1 : 0, stdout: failed ? 'collected 3\nline a\nFAILED test_add - assert -1 == 5\n' : 'ok\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv.includes('MERGE_HEAD')) return { value: { exitCode: w.merging ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--abort')) w.merging = false
     // The checkout is on w.branch; the worker's branch differs from the base by one line; `fail` names git verbs that fail.
@@ -68,6 +81,10 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     if (bad) return { value: { exitCode: 1, stdout: bad.stdout ?? '', stderr: bad.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
     const out = e.argv.includes('--abbrev-ref') ? `${w.branch}\n` : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('model.complete', () => {
+    w.models++
+    return { value: { isAnswered: true, text: '' } } as never
   })
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
   on('tool.register', ($, e) => ({ value: { tool: `mcp__kiss__${e.name}` } }) as never)
@@ -495,4 +512,50 @@ test('a hand-off with return off sends nothing back', async ($, on) => {
   await handoff($, w, false)
   expect(w.sent.filter(m => !m.text.startsWith('KISS-MINI task'))).toEqual([])
   expect(await status($)).toContain(`${ID} bug ready: add subtracts`)
+})
+
+async function watch($: any, w: ReturnType<typeof world>, target: string) {
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'mini', args: `watch ${target}` })
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' })
+}
+
+test('a watched CI run that goes from running to passed moves from watching to done, with one toast', async ($, on) => {
+  const w = world(on)
+  await watch($, w, 'run 123')
+  expect(await status($)).toContain(`${ID} watch watching: run 123`)
+  expect(w.spawned).toEqual([])
+  const toasts = w.toasts.length
+  w.gh.run = 'completed success'
+  await w.clock.advance(60_000)
+  expect(await status($)).toContain(`${ID} watch done: run 123 - passed`)
+  expect(w.toasts.length).toBe(toasts + 1)
+})
+
+test('with the clock run past 24 hours, an open watch ends as expired', { timeoutMs: 60_000 }, async ($, on) => {
+  const w = world(on)
+  await watch($, w, 'pr 12')
+  // In steps the mocked clock takes: each holds fewer than its 10,000 waits.
+  await w.clock.advance(12 * 3600_000)
+  await w.clock.advance(12 * 3600_000)
+  expect(await status($)).toContain(`${ID} watch watching`)
+  await w.clock.advance(120_000)
+  expect(await status($)).toContain(`${ID} watch done: pr 12 - expired`)
+})
+
+test('with no change the checks space out to every 10 minutes, and no model is asked', async ($, on) => {
+  const w = world(on)
+  await watch($, w, 'pr 12')
+  await w.clock.advance(60 * 60_000)
+  const gaps = w.ghAt.slice(1).map((at, i) => at - (w.ghAt[i] ?? 0))
+  expect(gaps.slice(0, 2)).toEqual([60_000, 120_000])
+  expect(gaps.slice(-2)).toEqual([600_000, 600_000])
+  expect(w.models).toBe(0)
+})
+
+test('a watched test command that fails ends failed with its last lines', async ($, on) => {
+  const w = world(on)
+  await watch($, w, 'pytest -q --fail')
+  expect(await status($)).toContain(`${ID} watch failed: pytest -q --fail - exit 1: collected 3 · line a · FAILED test_add - assert -1 == 5`)
+  expect(w.spawned).toEqual([])
 })
