@@ -51,5 +51,4 @@ Skip a step whose store the agent does not have. agentmemory is optional: run st
 6. **Report:** before and after (counts, sizes), what moved where, what was kept, and the notes that wait for the
    owner (step 2), each with your recommendation. Move or delete one of them only on the owner's yes.
 7. **KISS feedback**, in every run, before your final message: run `printenv KISS_FEEDBACK`; when it
-   prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md); else add
-   nothing.
+   prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root); else add nothing, and do not mention this check, the variable or the mode.

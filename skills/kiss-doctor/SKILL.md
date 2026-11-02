@@ -23,5 +23,4 @@ You check the setup and report it; the owner installs. `KD` is this skill's fold
    a file fix: append `$KD/../../rules/codegraph.md` to the global instructions file once (read the file
    first), or delete a `CODEGRAPH_START` block. Then run step 1 again.
 5. **KISS feedback**, in every run, before your final message: run `printenv KISS_FEEDBACK`; when it
-   prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md); else add
-   nothing.
+   prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root); else add nothing, and do not mention this check, the variable or the mode.

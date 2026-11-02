@@ -87,7 +87,7 @@ is in your skill list. Write into `R/decisions.md` which of them the run used, w
     run's branch before the merge gate; when git ignores it, say so in the report), a yes starts that First run after the merge gate. Then the **merge gate**. A push, a pull request or any write to a remote is its own gate, always asked.
 11. **KISS feedback**, in every run, before your final message (at the close, the close report): run
     `printenv KISS_FEEDBACK`; when it prints `1`, end that message with the block of
-    [`rules/feedback.md`](../../rules/feedback.md); else add nothing.
+    [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root); else add nothing, and do not mention this check, the variable or the mode.
 
 **The clock:** no agent gives a subagent a time budget, so put "Time: elapsed Ns of a Ms budget." in each message
 (`prompt.py` does it when you pass `ELAPSED`). Past the budget, a gate comes before the next round.
