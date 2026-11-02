@@ -15,5 +15,9 @@
     "subagents",
     "codegraph",
     "skills"
+  ],
+  "agents": [
+    "./claude-agents/kiss-implementer.md",
+    "./claude-agents/kiss-reviewer.md"
   ]
 }
