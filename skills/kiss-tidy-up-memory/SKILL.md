@@ -24,7 +24,9 @@ Skip a step whose store the agent does not have. agentmemory is optional: run st
    Mark the folders of removed worktrees: they go in step 5, after their notes pass steps 2 and 3.
 2. **File memory:** first copy each memory folder to a scratch folder (step 3 compares against it). Read every
    note in full; merge overlaps; where two notes disagree, keep the newer fact with its date; cut each to what is
-   still true; drop what is stale or the repo already records; keep feedback, user and reference notes. Remove
+   still true; drop what is stale or the repo already records; keep feedback, user and reference notes. A repo fact
+   that only memory holds moves to its docs home, and the note keeps a one-line pointer to that page (the same rule
+   from the docs side: kiss-housekeeping's [standard.md](../kiss-housekeeping/standard.md), "Classifying"). Remove
    every secret (a password, key or token). Then check: each note's name matches its filename, every note is in the
    index with one short line, the index stays under 200 lines and 25 KB (the part Claude Code loads), and no
    `[[link]]` points to a missing note. Two kinds of note stay as they are and wait for the owner in the report: a

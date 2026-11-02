@@ -116,8 +116,9 @@ If a skill is missing, a run still works: KISS follows its own copy of the same 
 4. **Review:** one reviewer uses the running product, with rubric A to G (`ponytail-review` for risk, load and
    speed). A severity pass sorts the findings; the same implementer fixes them and the same reviewer checks again,
    at most 3 rounds.
-5. **Close:** the project's full check, the list of new `shortcut:` comments (`ponytail-debt`), and the merge
-   gate: one yes, or none when `.kiss/project.md` says `Merge: after a green close`. A push always asks.
+5. **Close:** the project's full check, the list of new `shortcut:` comments (`ponytail-debt`), the docs Upkeep
+   (`kiss-housekeeping`) when `.kiss/project.md` names a docs gate (with no `Docs gate:` line it asks you once
+   whether to do a docs First run, and records a no), and the merge gate: one yes, or none when `.kiss/project.md` says `Merge: after a green close`. A push always asks.
 
 The controller asks you two kinds of thing. A **decision** (`D<n>`) is a choice about the product, its data, its
 interfaces or its tests, and goes into `decisions.md`. A **gate** (the tickets, more rounds, the budget, the

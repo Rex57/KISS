@@ -14,6 +14,8 @@ project's instructions file (CLAUDE.md, AGENTS.md or GEMINI.md) already says.
 - Commit trailer: the exact lines each commit message ends with, or "none".
 - Merge: `ask` (the merge gate asks the owner) or `after a green close` (a standing yes: merge when the full check
   passes and no decision is open). A push always asks.
+- Docs gate: `python3 -I tools/check_docs.py .` (a kiss-housekeeping First run installs it; the close runs its
+  Upkeep), or `none (owner declined)`. With no line, the close asks once.
 
 ## Start the product for a reviewer
 
