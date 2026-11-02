@@ -5,8 +5,9 @@
     python3 -I check_docs.py --selftest   plant each failure in a scratch repo and see it caught
 
 The kiss-housekeeping skill keeps the master copy (its scripts/ folder). A repo runs its own
-copy (tools/check_docs.py) with its CONFIG filled in. The code below CONFIG stays the same as
-the master: the skill's Upkeep (U1) copies it over the project's copy and keeps its CONFIG.
+copy (tools/check_docs.py) with its CONFIG filled in. Everything but CONFIG stays the same as
+the master: the skill's Upkeep (U1) copies the whole master over the project's copy, then puts
+the project's CONFIG assignment (the last one) back.
 
 The kind of a page comes from its path, so a script and a person read it the same way:
   history  under a history folder (archive/): not checked
@@ -52,6 +53,12 @@ def tracked(repo, *globs, config=CONFIG):
             and not any(fnmatch.fnmatch(p, g) for g in config["ignore"])]
 
 
+def config_node(tree):
+    """The last `CONFIG = ...` assignment of a parsed gate: the one Python uses."""
+    return [n for n in tree.body if isinstance(n, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "CONFIG" for t in n.targets)][-1]
+
+
 def use_project_config(repo):
     """A project's own gate (tools/check_docs.py) holds its CONFIG: use it here, read as a literal (the
     file is never run). CONFIG is updated in place, because tracked() and kind() bind it as their
@@ -61,10 +68,8 @@ def use_project_config(repo):
         return
     try:
         tree = ast.parse(open(path, encoding="utf-8").read(), path)
-        value = next(n.value for n in tree.body if isinstance(n, ast.Assign)
-                     and any(isinstance(t, ast.Name) and t.id == "CONFIG" for t in n.targets))
-        CONFIG.update(ast.literal_eval(value))
-    except (SyntaxError, StopIteration, ValueError, TypeError) as e:
+        CONFIG.update(ast.literal_eval(config_node(tree).value))
+    except (SyntaxError, IndexError, ValueError, TypeError) as e:
         sys.exit("%s: cannot read its CONFIG as a literal dict (%s)" % (path, type(e).__name__))
 
 
@@ -304,20 +309,22 @@ def selftest(copy=True):
     if copy:
         with tempfile.TemporaryDirectory() as d:
             src = open(os.path.abspath(__file__), encoding="utf-8").read()
-            a, b = src.index("\nCONFIG = {"), src.index("\n}\n", src.index("\nCONFIG = {")) + 3
-            copies = {   # a project fills its CONFIG in: by a new value, by a line edit, or on one line
-                "filled": src.replace("\nTEST_CONFIG = ", '\nCONFIG = dict(map="docs/index.md", front_door="README.md", '
-                                      'history=["docs/archive/"], logs=["CHANGELOG.md"], agent_files=[], '
-                                      'glossary="docs/glossary.md", ignore=[], stale_days=30)\nTEST_CONFIG = ', 1),
+            node = config_node(ast.parse(src))                 # its own CONFIG, wherever and however written
+            lines = src.splitlines(keepends=True)
+            head, tail = "".join(lines[:node.lineno - 1]), "".join(lines[node.end_lineno:])
+            one = ('CONFIG = {"map": "docs/index.md", "front_door": "README.md", "history": ["docs/archive/"], '
+                   '"logs": [], "agent_files": [], "glossary": "g.md", "ignore": [], "stale_days": 30}\n')
+            copies = {   # a project fills its CONFIG in: by a second assignment, by a line edit, or on one line
+                "filled": src.replace("\nTEST_CONFIG = ", "\n" + one + "TEST_CONFIG = ", 1),
                 "line edit": re.sub(r'(?m)^    "logs": .*$', '    "logs": [],', src),   # as sed edits every such line
-                "one line": src[:a] + '\nCONFIG = {"map": "docs/index.md", "front_door": "README.md", "history": '
-                            '["docs/archive/"], "logs": [], "agent_files": [], "glossary": "g.md", "ignore": [], '
-                            '"stale_days": 30}\n' + src[b:],
+                "one line": head + one + tail,
             }
             for name, text in copies.items():
-                assert text != src, name
+                if text == src:                                # this copy is already filled that way
+                    continue
                 open(os.path.join(d, "check_docs.py"), "w", encoding="utf-8").write(text)
-                out = subprocess.run([sys.executable, "-I", os.path.join(d, "check_docs.py"), "--selftest", "--no-copy"],
+                again = [] if name == "one line" else ["--no-copy"]   # a one-line copy runs its own copy step too
+                out = subprocess.run([sys.executable, "-I", os.path.join(d, "check_docs.py"), "--selftest", *again],
                                      capture_output=True, text=True)
                 assert out.returncode == 0, "a copy (%s) fails its selftest:\n%s" % (name, out.stderr)
     return "check_docs selftest ok: 7 checks fire on their planted fault, quiet on a clean tree"
