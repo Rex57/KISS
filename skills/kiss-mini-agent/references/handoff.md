@@ -63,8 +63,9 @@ skill when it is installed: a draft pull request takes it as its body.
    | question | `research` |
    | a pull request body | `pr` |
 
-3. **Where to work:** a code or bug task works only in its worktree, on its branch, and ends with one commit;
-   it never pushes, merges or opens a pull request. A question task changes no file in the checkout.
+3. **Where to work:** a code or bug task works only in its worktree, on its branch, and ends with one commit
+   that adds the files the task changed by explicit path, never build or test output (`__pycache__`, `.pyc`,
+   `dist/`); it never pushes, merges or opens a pull request. A question task changes no file in the checkout.
 4. **Conduct:** speak only when a person must act or can use a result. Confirm a step once, not again. Ask one
    concrete question at a time. Stop at a design choice and ask it. Mark a draft as unfinished.
 5. **End** with the report as your final message; write no report file.
