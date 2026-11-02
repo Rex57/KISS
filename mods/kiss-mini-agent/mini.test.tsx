@@ -307,3 +307,20 @@ test('a long task text is cut in the brief, which stays at most 1,500 characters
   expect(w.spawned[0]?.prompt).toContain(`/tmp/kiss-mini/${ID}/task.md`)
   expect(w.files[`/tmp/kiss-mini/${ID}/task.md`]).toBe(text)
 })
+
+test('the host refuses a worker\'s git push, git merge and gh pr; other commands and other loops pass', async ($, on) => {
+  const w = world(on)
+  const ran: string[] = []
+  on('tool.call', ($, e) => {
+    ran.push(String((e as { command?: string }).command))
+    return { result: {}, text: 'ok' } as never
+  })
+  await ready($, w)
+  for (const command of [`git push -u origin mini/${ID}`, 'git -C /repo merge main', 'gh pr create --draft', 'cd x && git push']) {
+    const r = await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
+    expect(JSON.stringify(r)).toContain('press in the /mini pane')
+  }
+  await $.tool.call({ tool: 'Bash', command: 'git commit -m fix', agentId: 'w1' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'git push', agentId: 'other' } as never)
+  expect(ran).toEqual(['git commit -m fix', 'git push'])
+})

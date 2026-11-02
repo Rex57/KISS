@@ -39,6 +39,8 @@ export function parseReport(answer: string): { state: State; summary: string } {
 }
 
 const TITLE_MAX = 300
+// A command that pushes, merges or opens a pull request, anywhere in a Bash line.
+const DELIVERS = /\bgit\b[^;&|]*\s(push|merge)\b|\bgh\s+pr\b/
 const NOT_GIVEN = 'not given: the first check finds it.'
 
 /** The brief in handoff.md's format, at most 1,500 characters: a long task text is cut, its whole text is in the task folder. */
@@ -258,6 +260,15 @@ export const register: Register = on => {
     await refresh($)
     return next(e)
   })
+
+  // Host: D8 holds in code, not only in the brief: a worker may not push, merge or open a pull request.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    if (e.agentId === undefined || !DELIVERS.test(e.command) || !(await isHost($))) return next(e)
+    if (!(await tasks($)).some(t => t.agentId === e.agentId)) return next(e)
+    return { deny: 'kiss-mini-agent: only the owner\'s press in the /mini pane pushes, merges or opens a pull request. Commit on your branch and report.' }
+  }).catch(($, e, next) =>
+    next.called || e.agentId === undefined || !DELIVERS.test(e.command) ? next(e) : { deny: 'kiss-mini-agent: its guard failed; no push, merge or pull request from a subagent.' },
+  )
 
   // Host: its model stays idle; a worker's hand-back or any other prompt but the person's own is dropped.
   on('prompt.submit', async ($, e, next) =>
