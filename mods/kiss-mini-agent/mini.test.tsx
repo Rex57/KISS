@@ -371,7 +371,9 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
   })
   await ready($, w)
   for (const command of [`git push -u origin mini/${ID}`, 'git -C /repo merge main', 'git -c x=y push', 'gh pr create --draft', 'gh pr merge 12', 'cd x && git push',
-    'git --no-pager push origin x', 'git -C/x push', 'gh api -X POST repos/o/r/pulls -f head=x -f base=main']) {
+    'git --no-pager push origin x', 'git -C/x push', 'gh api -X POST repos/o/r/pulls -f head=x -f base=main',
+    'bash -c "git push origin x"', "sh -c 'cd x && git push'", 'eval "git push"', 'git subtree push --prefix d origin b',
+    'git -c alias.p=push p origin x', 'gh api -X PUT repos/o/r/pulls/12/merge']) {
     const r = await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
     expect(JSON.stringify(r)).toContain('press in the /mini pane')
   }
@@ -844,4 +846,12 @@ test('a Draft PR that fails at gh says the branch was pushed', async ($, on) => 
   await ui.press({ key: `pr-${ID}` })
   expect(w.toasts.at(-1)).toContain('pushed; draft PR failed: HTTP 422')
   await ui.unmount()
+})
+
+test('the host denies a worker\'s GitHub write tools of an MCP server', async ($, on) => {
+  const w = world(on)
+  tools(on)
+  await ready($, w)
+  const r = await $.tool.call({ tool: 'mcp__github__create_pull_request', title: 'x', agentId: 'w1' } as never)
+  expect(JSON.stringify(r)).toContain('writes to GitHub')
 })

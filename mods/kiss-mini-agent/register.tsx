@@ -54,9 +54,17 @@ const BRIEF_MAX = 1500
 const NO_HOST = 'could not start a host'
 // A command that pushes, merges or opens a pull request: git's push or merge subcommand after any options (quoted
 // text, such as a commit message, is not read), gh pr create|merge|ready, or a gh api call that writes to `pulls`.
-const GIT_DELIVERS = /\bgit(?:\s+(?:-C\s*\S+|-c\s+\S+|--?[\w-]+(?:=\S+)?))*\s+(?:push|merge)(?=\s|$|[;&|)])/
-const GH_DELIVERS = /\bgh\s+pr\s+(?:create|merge|ready)\b|\bgh\s+api\b(?=[^;&|]*pulls)(?=[^;&|]*(?:-X\s*POST|--method[\s=]POST|\s-[fF]\s|--(?:raw-)?field|--input))/
-const delivers = (command: string) => GIT_DELIVERS.test(command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")) || GH_DELIVERS.test(command)
+const GIT_DELIVERS = /\bgit(?:\s+(?:-C\s*\S+|-c\s+\S+|--?[\w-]+(?:=\S+)?))*\s+(?:subtree\s+)?(?:push|merge)(?=\s|$|[;&|)'"])/
+// A git alias that is push or merge under another name.
+const GIT_ALIAS = /\bgit\b[^;&|]*-c\s*['"]?alias\.[\w-]+=[^;&|]*\b(?:push|merge)\b/
+const GH_DELIVERS = /\bgh\s+pr\s+(?:create|merge|ready)\b|\bgh\s+api\b(?=[^;&|]*pulls\/\d+\/merge)|\bgh\s+api\b(?=[^;&|]*pulls)(?=[^;&|]*(?:-X\s*POST|--method[\s=]POST|\s-[fF]\s|--(?:raw-)?field|--input))/
+// Quoted text is not read (a commit message), except where a shell or eval runs it as a command.
+const RUNS_TEXT = /\b(?:bash|sh|zsh|eval)\b/
+const delivers = (command: string) =>
+  GIT_DELIVERS.test(RUNS_TEXT.test(command) ? command : command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")) ||
+  GIT_ALIAS.test(command) || GH_DELIVERS.test(command)
+// A GitHub tool of an MCP server that writes (a pull request, a merge, a push).
+const GITHUB_WRITES = /^mcp__.*github.*__.*(?:create|merge|update|push|delete)/i
 const NOT_GIVEN = 'not given: read the files the first line names.'
 
 const isCode = (t: Task) => t.kind === 'code' || t.kind === 'bug'
@@ -525,6 +533,7 @@ export const register: Register = on => {
     if (e.agentId === undefined || !(await isHost($))) return next(e)
     const t = (await tasks($)).find(x => x.agentId === e.agentId)
     if (t?.stopped) return { deny: `kiss-mini-agent: the owner stopped this task (${t.report}). Make no more tool calls; end now.` }
+    if (t && GITHUB_WRITES.test(String(e.tool))) return { deny: 'kiss-mini-agent: only the owner\'s press in the /mini pane writes to GitHub. Commit on your branch and report.' }
     const r = await next(e)
     if (!t || String(e.tool) === 'mcp__kiss__progress') return r
     const a = e as unknown as Record<string, unknown>
