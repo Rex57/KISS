@@ -60,7 +60,7 @@ const GIT_DELIVERS = /\bgit(?:\s+(?:-C\s*\S+|-c\s+\S+|--?[\w-]+(?:=\S+)?))*\s+(?
 const GIT_ALIAS = /\bgit\b[^;&|]*-c\s*['"]?alias\.[\w-]+=[^;&|]*\b(?:push|merge)\b/
 const GH_DELIVERS = /\bgh\s+pr\s+(?:create|merge|ready)\b|\bgh\s+api\b(?=[^;&|]*pulls\/\d+\/merge)|\bgh\s+api\b(?=[^;&|]*pulls)(?=[^;&|]*(?:-X\s*POST|--method[\s=]POST|\s-[fF]\s|--(?:raw-)?field|--input))/
 // Quoted text is not read (a commit message), except where a shell or eval runs it as a command.
-const RUNS_TEXT = /\b(?:(?:bash|sh|zsh)\s+-c|eval)\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
+const RUNS_TEXT = /\b(?:(?:bash|sh|zsh)\s+-[a-z]*c|eval)\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
 const delivers = (command: string) =>
   GIT_DELIVERS.test(command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")) ||
   [...command.matchAll(RUNS_TEXT)].some(m => GIT_DELIVERS.test(m[1] ?? m[2] ?? '')) ||
@@ -68,11 +68,14 @@ const delivers = (command: string) =>
 // A GitHub tool of an MCP server that writes (a pull request, a merge, a push).
 const GITHUB_WRITES = /^mcp__.*github.*__.*(?:create|merge|update|push|delete)/i
 const NOT_GIVEN = 'not given: read the files the first line names.'
+const TEXT_MIN = 200
 
 const isCode = (t: Task) => t.kind === 'code' || t.kind === 'bug'
 
 /** The brief; `text` is the part that may be cut: the owner's task text, or a hand-off's own brief. */
-function briefLines(t: Task, text: string, rules: string, dir: string) {
+function briefLines(t: Task, text: string, rules: string, dir: string, short = false) {
+  // Short: the lines that only say "not given" go first, before any of the task's own text.
+  const given = (line: string) => !(short && line.endsWith(NOT_GIVEN))
   const where = isCode(t)
     ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`]
     : [`Checkout: ${t.cwd} (read only)    Task folder: ${dir}`]
@@ -92,7 +95,7 @@ function briefLines(t: Task, text: string, rules: string, dir: string) {
       '- The answer names the files and lines it rests on.',
       'Out of scope: any change to a file.',
       'Suggested skills: research',
-    ].join('\n')
+    ].filter(given).join('\n')
   }
   return [...head,
     'Summary: the change the first line asks for.',
@@ -105,7 +108,7 @@ function briefLines(t: Task, text: string, rules: string, dir: string) {
     '- The full text ends with a "## Pull request body" section.',
     'Out of scope: anything the first line does not ask for.',
     'Suggested skills: tdd, ponytail, CodeGraph; pr for the pull request body',
-  ].join('\n')
+  ].filter(given).join('\n')
 }
 
 /** The brief in handoff.md's format, at most 1,500 characters: a text that does not fit is cut, its whole text is in the task folder. */
@@ -113,9 +116,12 @@ function brief(t: Task, rules: string, dir: string): { text: string; whole: stri
   const whole = t.brief ?? t.title
   const full = briefLines(t, whole, rules, dir)
   if (full.length <= BRIEF_MAX) return { text: full, whole, isCut: false }
+  const short = briefLines(t, whole, rules, dir, true)
+  if (short.length <= BRIEF_MAX) return { text: short, whole, isCut: false }
   const more = `... (whole text: ${dir}/task.md)`
-  const room = BRIEF_MAX - briefLines(t, '', rules, dir).length - more.length
-  return { text: briefLines(t, whole.slice(0, Math.max(0, room)) + more, rules, dir), whole, isCut: true }
+  // At least the first 200 characters of the task's own text stay in the brief.
+  const room = Math.max(TEXT_MIN, BRIEF_MAX - briefLines(t, '', rules, dir, true).length - more.length)
+  return { text: briefLines(t, whole.slice(0, room) + more, rules, dir, true), whole, isCut: true }
 }
 
 /** The report as the sender reads it: the report format's lines, the summary cut to 600, the log in the task folder. */
@@ -537,6 +543,9 @@ export const register: Register = on => {
     if (t?.stopped) return { deny: `kiss-mini-agent: the owner stopped this task (${t.report}). Make no more tool calls; end now.` }
     if (t && GITHUB_WRITES.test(String(e.tool))) return { deny: 'kiss-mini-agent: only the owner\'s press in the /mini pane writes to GitHub. Commit on your branch and report.' }
     // A question reads the owner's own working tree: it writes no file there, and its commands leave no caches.
+    // shortcut: read-only by rule; only Edit, Write and NotebookEdit are denied and the Python and pytest caches are
+    // off, so a Bash command (cargo test, pytest --cov, sed -i, git stash) can still write in the checkout; upgrade:
+    // deny write verbs in Bash, or run the question in a copy of the working tree.
     if (t?.kind === 'question' && ['Edit', 'Write', 'NotebookEdit'].includes(String(e.tool))) {
       return { deny: 'kiss-mini-agent: a question changes no file. Answer from what you read.' }
     }

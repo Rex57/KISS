@@ -66,7 +66,9 @@ skill when it is installed: a draft pull request takes it as its body.
 
 3. **Where to work:** a code or bug task works only in its worktree, on its branch, and ends with one commit
    that adds the files the task changed by explicit path, never build or test output (`__pycache__`, `.pyc`,
-   `dist/`); it never pushes, merges or opens a pull request. A question task changes no file in the checkout.
+   `dist/`); it never pushes, merges or opens a pull request. A question task changes no file in the checkout: it runs in the owner's own working tree, read-only by this rule;
+   the mod denies only Edit, Write and NotebookEdit and turns off the Python and pytest caches, so a Bash command can
+   still write there.
 4. **Conduct:** speak only when a person must act or can use a result. Confirm a step once, not again. Ask one
    concrete question at a time. Stop at a design choice and ask it. Mark a draft as unfinished.
 5. **Progress:** when the `mcp__kiss__progress` tool is there, call it with `step` n of `total` m as you start each

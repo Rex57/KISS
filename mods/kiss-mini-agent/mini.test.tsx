@@ -378,7 +378,7 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
   for (const command of [`git push -u origin mini/${ID}`, 'git -C /repo merge main', 'git -c x=y push', 'gh pr create --draft', 'gh pr merge 12', 'cd x && git push',
     'git --no-pager push origin x', 'git -C/x push', 'gh api -X POST repos/o/r/pulls -f head=x -f base=main',
     'bash -c "git push origin x"', "sh -c 'cd x && git push'", 'eval "git push"', 'git subtree push --prefix d origin b',
-    'git -c alias.p=push p origin x', 'gh api -X PUT repos/o/r/pulls/12/merge']) {
+    'git -c alias.p=push p origin x', 'bash -lc "git push origin x"', 'gh api -X PUT repos/o/r/pulls/12/merge']) {
     const r = await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
     expect(JSON.stringify(r)).toContain('press in the /mini pane')
   }
@@ -933,4 +933,17 @@ test('/mini --now skips the three checks; a plain /mini runs them', async ($, on
   await $.command.run({ command: 'mini', args: 'ask why?' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
   expect(w.spawned[1]?.prompt).toContain('Checks: run')
+})
+
+test('with real-length paths a 400-character task keeps its first 200 characters in a brief of at most 1,500', async ($, on) => {
+  const tmp = '/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/'
+  const cwd = '/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo-with-a-long-name'
+  const w = world(on, { tmp, cwd })
+  const text = `fix ${'the parser drops the last field '.repeat(12)}`.trim().slice(0, 400)
+  await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'mini', args: `${text} --base main` } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  const prompt = w.spawned[0]?.prompt ?? ''
+  expect(prompt.length).toBeLessThanOrEqual(1500)
+  expect(prompt).toContain(text.slice(0, 200))
 })
