@@ -120,6 +120,8 @@ function brief(t: Task, rules: string, dir: string): { text: string; whole: stri
   if (short.length <= BRIEF_MAX) return { text: short, whole, isCut: false }
   const more = `... (whole text: ${dir}/task.md)`
   // At least the first 200 characters of the task's own text stay in the brief.
+  // shortcut: a brief can pass 1,500 characters when the paths alone leave less than 200 characters for the task text;
+  // upgrade: shorten the paths in the brief, for example to names relative to the task folder.
   const room = Math.max(TEXT_MIN, BRIEF_MAX - briefLines(t, '', rules, dir, true).length - more.length)
   return { text: briefLines(t, whole.slice(0, room) + more, rules, dir, true), whole, isCut: true }
 }

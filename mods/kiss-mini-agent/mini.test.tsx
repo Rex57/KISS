@@ -947,3 +947,14 @@ test('with real-length paths a 400-character task keeps its first 200 characters
   expect(prompt.length).toBeLessThanOrEqual(1500)
   expect(prompt).toContain(text.slice(0, 200))
 })
+
+test('when the paths leave under 200 characters for the task text, its first 200 characters still stay', async ($, on) => {
+  const deep = '/very-long-folder-name-for-a-test-0123456789'.repeat(6)
+  const w = world(on, { tmp: `/tmp${deep}/`, cwd: `/home/someone${deep}/repo` })
+  const text = `fix ${'the parser drops the last field '.repeat(12)}`.trim().slice(0, 400)
+  await $.session.start({ cwd: `/home/someone${deep}/repo`, surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'mini', args: `${text} --base main` } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(w.spawned[0]?.prompt).toContain(text.slice(0, 200))
+  expect(w.spawned[0]?.prompt).not.toContain(text.slice(0, 201))
+})
