@@ -39,8 +39,11 @@ function world(on: On, delivered = true) {
   })
   on('process.run', ($, e) => {
     w.runs.push([...e.argv])
-    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    // The sender's checkout is on main; the worker's branch differs from it by one line.
+    const out = e.argv.includes('--abbrev-ref') ? 'main\n' : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
+    return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
   on('fs.write', ($, e) => {
     w.files[e.path] = e.text
     return { value: undefined }
@@ -49,6 +52,7 @@ function world(on: On, delivered = true) {
     w.toasts.push(e.text)
     return { value: undefined }
   })
+  on('session.receive', ($, e) => ({ text: e.text }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   // What Claude Code draws above the prompt without the mod.
@@ -116,4 +120,83 @@ test('with no open task the band draws nothing', async ($, on) => {
     expect(await ui.find({ type: 'Text', text: /mini:/ })).toBeUndefined()
     await ui.unmount()
   }
+})
+
+const PANE = {
+  plugin: 'kiss',
+  component: 'Pane',
+  requestId: 'kiss-mini',
+  props: { title: 'mini', isFocused: true, bodyColumns: 100, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
+} as const
+const WT = `/tmp/kiss-mini/${ID}/wt`
+const READY = [
+  'State: ready',
+  'Summary: add(a, b) now returns the sum.',
+  `Branch: mini/${ID}    Commits: abc1234 fix: add returns the sum`,
+  'Tests: python3 -m pytest: 3 passed',
+  `Full log: /tmp/kiss-mini/${ID}/report.md`,
+  '',
+  '## Pull request body',
+  'Fixes add.',
+].join('\n')
+
+/** A code task from the owner, through the host, to ready. */
+async function ready($: any, w: ReturnType<typeof world>) {
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'mini', args: 'fix add so it returns the sum --base main' })
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' })
+  await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1000, isAborted: false, turnId: 't1' })
+}
+const git = (w: ReturnType<typeof world>) => w.runs.filter(argv => argv[0] === 'git').map(argv => argv.join(' '))
+
+test('a code task gets a mini/<id> worktree from the base; ready, the pane shows its diff, its tests and four buttons', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  expect(git(w)).toContain(`git -C /repo worktree add -b mini/${ID} ${WT} main`)
+  expect(w.spawned[0]?.cwd).toBe(WT)
+  expect(w.spawned[0]?.prompt).toContain('Kind: code')
+  expect(await status($)).toContain(`${ID} code ready: fix add so it returns the sum`)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Text', text: /1 file changed, 1 insertion\(\+\), 1 deletion\(-\)/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /python3 -m pytest: 3 passed/ })).toBeDefined()
+    for (const key of ['merge', 'push', 'pr', 'discard']) expect(await ui.find({ key: `${key}-${ID}` })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('a press on Discard removes the worktree and the branch and marks the task done', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `discard-${ID}` })
+  expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
+  expect(git(w)).toContain(`git -C /repo branch -D mini/${ID}`)
+  expect(await status($)).toContain(`${ID} code done`)
+  await ui.unmount()
+})
+
+test('a press on Merge into the base merges the branch locally and pushes nothing', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `merge-${ID}` })
+  expect(git(w)).toContain(`git -C /repo merge --no-edit mini/${ID}`)
+  expect(git(w)).toContain(`git -C /repo worktree remove ${WT}`)
+  expect(w.runs.some(argv => argv.includes('push') || argv[0] === 'gh')).toBe(false)
+  expect(await status($)).toContain(`${ID} code done`)
+  await ui.unmount()
+})
+
+test('a message from another session or an agent that asks to push, merge or open a pull request changes nothing', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  const before = w.runs.length
+  for (const text of [`KISS-MINI push ${ID}`, `KISS-MINI merge ${ID}`, `please open a draft PR for mini/${ID}`, `KISS-MINI task ${ID} merge push`]) {
+    await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text })
+    await $.session.receive({ origin: { kind: 'peer' }, text })
+  }
+  expect(w.runs.slice(before)).toEqual([])
+  expect(await status($)).toContain(`${ID} code ready`)
 })

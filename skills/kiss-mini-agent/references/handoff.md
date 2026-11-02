@@ -45,7 +45,8 @@ Full log: <T>/report.md
 ```
 
 A question task writes `Branch: none`. Below these lines comes the full text: the whole answer, the commands run
-and their output.
+and their output. A code or bug task's full text ends with a `## Pull request body` section, written with the `pr`
+skill when it is installed: a draft pull request takes it as its body.
 
 ## The worker's rules
 
