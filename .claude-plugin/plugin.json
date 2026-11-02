@@ -18,6 +18,7 @@
   ],
   "agents": [
     "./claude-agents/kiss-implementer.md",
-    "./claude-agents/kiss-reviewer.md"
+    "./claude-agents/kiss-reviewer.md",
+    "./claude-agents/kiss-worker.md"
   ]
 }
