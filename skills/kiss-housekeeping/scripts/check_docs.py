@@ -5,8 +5,8 @@
     python3 -I check_docs.py --selftest   plant each failure in a scratch repo and see it caught
 
 The kiss-housekeeping skill keeps the master copy (its scripts/ folder). A repo runs its own
-copy (tools/check_docs.py) with its CONFIG filled in; keep the code below CONFIG the same as
-the master, so an improvement is one copy.
+copy (tools/check_docs.py) with its CONFIG filled in. The code below CONFIG stays the same as
+the master: the skill's Upkeep (U1) copies it over the project's copy and keeps its CONFIG.
 
 The kind of a page comes from its path, so a script and a person read it the same way:
   history  under a history folder (archive/): not checked
@@ -15,17 +15,24 @@ The kind of a page comes from its path, so a script and a person read it the sam
   agent    an agent or tool file (CLAUDE.md, .claude/...): links and names checked only
   living   everything else: kept true, has a status line, linked from the map
 """
-import datetime, fnmatch, hashlib, os, re, subprocess, sys, tempfile, urllib.parse
+import datetime, fnmatch, hashlib, importlib.util, os, re, subprocess, sys, tempfile, urllib.parse
 
 CONFIG = {
     "map": "docs/README.md",             # routes every reader; links every living page
     "front_door": "README.md",           # links the map
     "history": ["archive/"],
     "logs": ["CHANGELOG.md", "docs/decisions.md"],
-    "agent_files": ["CLAUDE.md", "*/CLAUDE.md", "AGENTS.md", "GEMINI.md", ".claude/*"],
+    "agent_files": ["CLAUDE.md", "*/CLAUDE.md", "AGENTS.md", "*/AGENTS.md", "GEMINI.md", "*/GEMINI.md",
+                    ".claude/*", ".kiss/*"],
     "glossary": "docs/reference/glossary.md",   # its table with an "Old names" column feeds the names check
     "ignore": ["*node_modules/*"],
     "stale_days": 120,                   # a living page not reviewed for this long is a warning
+}
+
+TEST_CONFIG = {                          # the selftest's own: a project's filled-in CONFIG cannot break it
+    "map": "docs/README.md", "front_door": "README.md", "history": ["archive/"],
+    "logs": ["CHANGELOG.md", "docs/decisions.md"], "agent_files": ["CLAUDE.md", "*/CLAUDE.md", ".claude/*"],
+    "glossary": "docs/reference/glossary.md", "ignore": [], "stale_days": 120,
 }
 
 # ---- shared reading (inventory.py and move_docs.py import these) ----------------------------
@@ -43,6 +50,18 @@ def tracked(repo, *globs, config=CONFIG):
                          capture_output=True, text=True, check=True).stdout.splitlines()
     return [p for p in out if os.path.isfile(os.path.join(repo, p))
             and not any(fnmatch.fnmatch(p, g) for g in config["ignore"])]
+
+
+def use_project_config(repo):
+    """A project's own gate (tools/check_docs.py) holds its CONFIG: use it here. CONFIG is updated in
+    place, because tracked() and kind() bind it as their default argument."""
+    path = os.path.join(repo, "tools", "check_docs.py")
+    if os.path.isfile(path):
+        spec = importlib.util.spec_from_file_location("project_check_docs", path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.dont_write_bytecode = True          # a dry run leaves no __pycache__ in the project
+        spec.loader.exec_module(mod)
+        CONFIG.update(mod.CONFIG)
 
 
 def kind(path, config=CONFIG):
@@ -82,7 +101,7 @@ def links(path, text):
 
 
 def anchors(text):
-    """The anchors a page offers: each heading's GitHub slug (a repeat gets -1, -2...), and each
+    """The anchors a page offers: each heading's slug (a repeat gets -1, -2...), and each
     <a name=...> or id=. The slug: the heading's text, lower case, punctuation dropped, a space a hyphen."""
     out, seen = set(), {}
     for line in blank_fences(text).splitlines():
@@ -171,7 +190,7 @@ def check(repo, config=CONFIG, today=None):
                 age = (today - datetime.date.fromisoformat(m.group(3))).days
                 if age > config["stale_days"]:
                     warn.append(("stale", p, "reviewed %s, %d days ago" % (m.group(3), age)))
-            if p not in (config["map"], config["front_door"]) and config["map"] not in linked_from[p]:
+            if p != config["map"] and config["map"] not in linked_from[p]:
                 fail.append(("map", p, "the map (%s) does not link it" % config["map"]))
         if k == "record" and not any(kinds.get(q) in ("living", "log", "agent", "record") for q in linked_from[p]):
             fail.append(("index", p, "no living page, log or record links it: add it to its index"))
@@ -214,8 +233,9 @@ def report(repo, config=CONFIG):
     return 1 if fail else 0
 
 
-def selftest():
-    """Each check fires on its planted fault and stays quiet on the clean tree."""
+def selftest(copy=True):
+    """Each check fires on its planted fault and stays quiet on the clean tree; a copy with its
+    CONFIG filled in passes the same selftest."""
     def run(files, **cfg):
         with tempfile.TemporaryDirectory() as d:
             for p, body in files.items():
@@ -223,12 +243,12 @@ def selftest():
                 open(os.path.join(d, p), "w", encoding="utf-8").write(body)
             subprocess.run(["git", "init", "-q"], cwd=d, check=True)
             subprocess.run(["git", "add", "-A"], cwd=d, check=True)
-            return check(d, dict(CONFIG, **cfg), today=datetime.date(2026, 11, 2))
+            return check(d, dict(TEST_CONFIG, **cfg), today=datetime.date(2026, 11, 2))
 
     ok = "> Status: current · Owner: Ana · Reviewed: 2026-11-01\n"
     clean = {
         "README.md": "# R\n" + ok + "[map](docs/README.md)\n",
-        "docs/README.md": "# Map\n" + ok + "[a](a.md) [g](reference/glossary.md) [log](decisions.md)\n",
+        "docs/README.md": "# Map\n" + ok + "[front](../README.md) [a](a.md) [g](reference/glossary.md) [log](decisions.md)\n",
         "docs/a.md": "# A\n" + ok + "Quillo, called Fernweb before. See [r](design/2026-10-01-r.md). `fernweb` is an id.\n"
                      "[here](#a) [log](decisions.md#d-the-log) [again](decisions.md#d-the-log-1)\n",
         "docs/decisions.md": "# D\n" + ok + "1. Fernweb was chosen.\n## D: the log\n## D: the `log`\n",
@@ -267,12 +287,25 @@ def selftest():
     assert not fail, fail                                # an escaped pipe in a pattern is alternation
     fail, _, _ = run(dict(clean, **{"CLAUDE.md": "# Agent\nThe V2 console.\n"}))
     assert any(c == "name" for c, _, _ in fail), fail
+    fail, _, _ = run(dict(clean, **{"README.md": "# R\n" + ok}))
+    assert any(c == "map" and p == "README.md" for c, p, _ in fail), fail    # the map links the front door too
+    if copy:
+        with tempfile.TemporaryDirectory() as d:
+            src = open(os.path.abspath(__file__), encoding="utf-8").read()
+            filled = re.sub(r"(?ms)^CONFIG = \{.*?^\}", lambda m: 'CONFIG = {"map": "docs/index.md", "front_door": "README.md", '
+                            '"history": ["docs/archive/"], "logs": ["CHANGELOG.md"], "agent_files": [], '
+                            '"glossary": "docs/glossary.md", "ignore": [], "stale_days": 30}', src, count=1)
+            assert filled != src
+            open(os.path.join(d, "check_docs.py"), "w", encoding="utf-8").write(filled)
+            out = subprocess.run([sys.executable, "-I", os.path.join(d, "check_docs.py"), "--selftest", "--no-copy"],
+                                 capture_output=True, text=True)
+            assert out.returncode == 0, "a copy with a filled CONFIG fails its selftest:\n" + out.stderr
     return "check_docs selftest ok: 7 checks fire on their planted fault, quiet on a clean tree"
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--selftest"]:
-        print(selftest())
+    if sys.argv[1:2] == ["--selftest"]:
+        print(selftest(copy="--no-copy" not in sys.argv))
     elif sys.argv[1:2] and sys.argv[1].startswith("-"):
         sys.exit(__doc__)
     else:
