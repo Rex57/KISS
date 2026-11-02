@@ -19,7 +19,6 @@ A root file (no / in its path) is never replaced as text: `git show <tag>:FILE` 
 import os, re, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I leaves this folder off the path
-sys.dont_write_bytecode = True  # no __pycache__ in the plugin folder
 import check_docs as C  # noqa: E402
 from inventory import TEXT  # noqa: E402
 
@@ -107,6 +106,7 @@ def repath(text, moves):
 
 
 def main(repo, tsv, apply):
+    C.use_project_config(repo)
     moves = plan(repo, tsv)
     md = C.tracked(repo)
     files = set(C.tracked(repo, "*"))
@@ -164,10 +164,13 @@ def main(repo, tsv, apply):
 
 def selftest():
     """A scratch repo: a dry run changes no byte and no git state; --apply moves the page and fixes
-    its links (anchor kept), the label that named it, and the full path in a tool."""
+    its links (anchor kept), the label that named it, and the full path in a tool; a page in the
+    project's own history folder (its tools/check_docs.py CONFIG) keeps its words."""
     pages = {"README.md": "# R\n[guide](docs/old/setup.md#install)\n[`docs/old/setup.md`](docs/old/setup.md)\n",
              "docs/old/setup.md": "# Setup\n## Install\n[back](../../README.md)\n",
-             "tools/build.py": "PAGE = 'docs/old/setup.md'\n"}
+             "tools/build.py": "PAGE = 'docs/old/setup.md'\n",
+             "docs/archive/old.md": "# Old\nThe guide was docs/old/setup.md.\n",
+             "tools/check_docs.py": "CONFIG = dict(history=['docs/archive/'])\n"}
     def tree(d):
         out = {}
         for root, dirs, names in os.walk(d):
@@ -198,8 +201,10 @@ def selftest():
         got = {p: b.decode() for p, b in tree(repo)[0].items()}
     assert got == {"README.md": "# R\n[guide](docs/setup.md#install)\n[`docs/setup.md`](docs/setup.md)\n",
                    "docs/setup.md": "# Setup\n## Install\n[back](../README.md)\n",
-                   "tools/build.py": "PAGE = 'docs/setup.md'\n"}, got
-    return "move_docs selftest ok: a dry run changes nothing; --apply fixes links, anchors, labels and paths"
+                   "tools/build.py": "PAGE = 'docs/setup.md'\n",
+                   "docs/archive/old.md": "# Old\nThe guide was docs/old/setup.md.\n",
+                   "tools/check_docs.py": "CONFIG = dict(history=['docs/archive/'])\n"}, got
+    return "move_docs selftest ok: a dry run changes nothing; --apply fixes links, anchors, labels and paths; history keeps its words"
 
 
 if __name__ == "__main__":

@@ -12,7 +12,6 @@ The summary on stderr prints every count with its denominator.
 import collections, hashlib, json, os, re, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I leaves this folder off the path
-sys.dont_write_bytecode = True  # no __pycache__ in the plugin folder
 import check_docs as C  # noqa: E402
 
 TEXT = ("*.py", "*.js", "*.ts", "*.svelte", "*.sh", "*.yml", "*.yaml", "*.toml", "*.json",
@@ -20,6 +19,7 @@ TEXT = ("*.py", "*.js", "*.ts", "*.svelte", "*.sh", "*.yml", "*.yaml", "*.toml",
 
 
 def main(repo, extra):
+    C.use_project_config(repo)
     files = C.tracked(repo)
     every = set(C.tracked(repo, "*"))
     text = {p: open(os.path.join(repo, p), encoding="utf-8", errors="replace").read() for p in files}
@@ -79,9 +79,11 @@ def main(repo, extra):
 
 
 def selftest():
-    """A scratch repo of 3 pages: 3 rows, the broken link, and the tool that names one page's path."""
+    """A scratch repo of 4 pages: 4 rows, the broken link, the tool that names one page's path, and the
+    project's own gate CONFIG (its history folder) read from tools/check_docs.py."""
     pages = {"README.md": "# R\n[s](docs/setup-guide.md)\n", "docs/setup-guide.md": "# Setup\n[x](gone.md)\n",
-             "docs/notes/2026-10-01-idea.md": "# Idea\n", "tools/build.py": "PAGE = 'docs/setup-guide.md'\n"}
+             "docs/notes/2026-10-01-idea.md": "# Idea\n", "tools/build.py": "PAGE = 'docs/setup-guide.md'\n",
+             "docs/archive/old.md": "# Old\n", "tools/check_docs.py": "CONFIG = dict(history=['docs/archive/'])\n"}
     with tempfile.TemporaryDirectory() as d:
         for p, body in pages.items():
             os.makedirs(os.path.join(d, os.path.dirname(p)), exist_ok=True)
@@ -90,12 +92,13 @@ def selftest():
         out = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), d], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     rows = {r["path"]: r for r in json.loads(out.stdout)}
-    assert sorted(rows) == ["README.md", "docs/notes/2026-10-01-idea.md", "docs/setup-guide.md"], rows
+    assert sorted(rows) == ["README.md", "docs/archive/old.md", "docs/notes/2026-10-01-idea.md", "docs/setup-guide.md"], rows
+    assert rows["docs/archive/old.md"]["kind"] == "history", rows["docs/archive/old.md"]
     assert rows["docs/setup-guide.md"]["used_by"] == ["tools/build.py"], rows["docs/setup-guide.md"]
     assert rows["docs/setup-guide.md"]["broken"] == ["2:gone.md"] and rows["docs/setup-guide.md"]["inbound"] == 1
     assert rows["README.md"]["used_by"] == [] and rows["docs/notes/2026-10-01-idea.md"]["kind"] == "record"
-    assert "inventory: 3 Markdown files" in out.stderr, out.stderr
-    return "inventory selftest ok: 3 rows of 3 pages, 1 path user, 1 broken link"
+    assert "inventory: 4 Markdown files" in out.stderr, out.stderr
+    return "inventory selftest ok: 4 rows of 4 pages, 1 path user, 1 broken link, the project's CONFIG"
 
 
 if __name__ == "__main__":
