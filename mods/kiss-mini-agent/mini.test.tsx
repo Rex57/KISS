@@ -29,6 +29,9 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     merging: false,
     /** The task's branch is in its base (merged by the harness or by hand). */
     merged: false,
+    /** Commits on the worker's branch past its base, and what `git status --porcelain` says in its worktree. */
+    ahead: 1,
+    dirty: '',
     clock: undefined as unknown as ReturnType<typeof mock.clock>,
     /** What `gh pr view` and `gh run view` answer, and the clock time of each gh call. */
     gh: { pr: 'OPEN', run: 'in_progress ' },
@@ -78,6 +81,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
       const failed = e.argv[2]?.includes('fail')
       return { value: { exitCode: failed ? 1 : 0, stdout: failed ? 'collected 3\nline a\nFAILED test_add - assert -1 == 5\n' : 'ok\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    if (e.argv.includes('rev-list')) return { value: { exitCode: 0, stdout: `${w.ahead}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv.includes('--porcelain') && e.argv.includes('status')) return { value: { exitCode: 0, stdout: w.dirty, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--is-ancestor')) return { value: { exitCode: w.merged ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('MERGE_HEAD')) return { value: { exitCode: w.merging ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--abort')) w.merging = false
@@ -134,9 +139,9 @@ test('/mini ask records a working task and the band reads 1 working; the report 
   expect((await ui.find({ type: 'Text', text: /mini:/ }))?.text).toBe('mini: 1 working')
   expect(w.spawned.length).toBe(1)
   expect(w.spawned[0]?.subagentType).toBe('kiss:kiss-worker')
-  // A question reads a detached worktree of the checkout, never the checkout itself.
-  expect(git(w)).toContain(`git -C /repo worktree add --detach /tmp/kiss-mini/${ID}/wt HEAD`)
-  expect(w.spawned[0]?.cwd).toBe(`/tmp/kiss-mini/${ID}/wt`)
+  // A question reads the owner's own working tree.
+  expect(w.spawned[0]?.cwd).toBe('/repo')
+  expect(git(w).some(line => line.includes('worktree add'))).toBe(false)
   expect(w.spawned[0]?.prompt).toContain('mcp__kiss__progress')
   expect(w.spawned[0]?.prompt).toContain('State: done|ready|failed|waiting for you')
   expect(w.spawned[0]?.prompt).toContain('Kind: question')
@@ -377,7 +382,7 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
     const r = await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
     expect(JSON.stringify(r)).toContain('press in the /mini pane')
   }
-  const allowed = ['git commit -m "docs: how to git push a branch"', 'git commit -m fix', 'git add merge.py', 'git commit -m "merge the push docs"', 'git merge-base main HEAD', 'git log --grep merge', 'gh pr view 12']
+  const allowed = ['git commit -m "docs: how to git push a branch"', 'git commit -m fix', 'git add merge.py', './build.sh && git commit -m "docs: how to git push a branch"', 'git add run.sh && git commit -m "explain git merge in the readme"', 'git commit -m "bash: git merge notes"', 'git commit -m "merge the push docs"', 'git merge-base main HEAD', 'git log --grep merge', 'gh pr view 12']
   for (const command of allowed) await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
   await $.tool.call({ tool: 'Bash', command: 'git push', agentId: 'other' } as never)
   expect(ran).toEqual([...allowed, 'git push'])
@@ -791,7 +796,7 @@ test('ANSWER: a model-written peer message (no plugin) is not taken as the owner
   expect(w.sent.some(m => m.to === 'w1' || JSON.stringify(m.to).includes('w1'))).toBe(false)
 })
 
-test('the question task\'s worktree goes when it ends; the pane names the full text; no State line on a question is done', async ($, on) => {
+test('a question leaves no worktree; the pane names the full text; no State line on a question is done', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'mini', args: 'ask why?' } as never)
@@ -799,7 +804,7 @@ test('the question task\'s worktree goes when it ends; the pane names the full t
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
   await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: 'Because add subtracts.', durationMs: 1, isAborted: false, turnId: 't1' } as never)
   expect(w.store[`kiss-mini/task/${ID}`].state).toBe('done')
-  expect(git(w)).toContain(`git -C /repo worktree remove --force /tmp/kiss-mini/${ID}/wt`)
+  expect(git(w).some(line => line.includes('worktree'))).toBe(false)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /full text: \/tmp\/kiss-mini\/.*report\.md/ })).toBeDefined()
   await ui.unmount()
@@ -854,4 +859,78 @@ test('the host denies a worker\'s GitHub write tools of an MCP server', async ($
   await ready($, w)
   const r = await $.tool.call({ tool: 'mcp__github__create_pull_request', title: 'x', agentId: 'w1' } as never)
   expect(JSON.stringify(r)).toContain('writes to GitHub')
+})
+
+test('a question may not write a file, and its commands leave no Python or pytest cache', async ($, on) => {
+  const w = world(on)
+  const ran: string[] = []
+  on('tool.call', ($, e) => (ran.push(String((e as { command?: string }).command ?? e.tool)), { result: {}, text: 'ok' }) as never)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'mini', args: 'ask does pytest pass?' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
+  const r = await $.tool.call({ tool: 'Write', file_path: '/repo/x.py', content: 'x', agentId: 'w1' } as never)
+  expect(JSON.stringify(r)).toContain('changes no file')
+  await $.tool.call({ tool: 'Bash', command: 'pytest -q', agentId: 'w1' } as never)
+  expect(ran).toEqual(['export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; pytest -q'])
+})
+
+test('a ready task with no commit is not taken as merged', async ($, on) => {
+  const w = world(on)
+  w.ahead = 0
+  await ready($, w)
+  w.merged = true
+  await w.clock.advance(60_000)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('ready')
+  expect(git(w).some(line => line.includes('worktree remove'))).toBe(false)
+})
+
+test('a merged task whose worktree has uncommitted changes ends done and keeps the worktree, with a toast', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  w.merged = true
+  w.dirty = ' M calc.py\n'
+  await w.clock.advance(60_000)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('done')
+  expect(w.store[`kiss-mini/task/${ID}`].worktree).toBe(WT)
+  expect(git(w).some(line => line.includes('worktree remove'))).toBe(false)
+  expect(w.toasts.at(-1)).toContain(`uncommitted changes: ${WT}`)
+})
+
+test('the live host takes over a ready task of a gone host, so its merge is seen', async ($, on) => {
+  const t = { id: 'r1', kind: 'code', title: 'r', sender: 's0', cwd: '/repo', state: 'ready', started: NOW, host: 'gone', agentId: 'x', base: 'main', branch: 'mini/r1', worktree: '/tmp/r1', ahead: 1 }
+  const w = world(on, { store: { 'kiss-mini/task/r1': t } })
+  w.merged = true
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  await w.clock.advance(60_000)
+  expect(w.store['kiss-mini/task/r1'].state).toBe('done')
+})
+
+test('an aborted turn with no answer is no report: the task waits for the orphan check', async ($, on) => {
+  const w = world(on)
+  tools(on)
+  await working($, w)
+  await $.turn.complete({ agentId: 'w1', reason: 'aborted', answer: '', durationMs: 1, isAborted: true, turnId: 't9' } as never)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('working')
+})
+
+test('a host whose beat is over 3 minutes old is not sent to: a new host starts', async ($, on) => {
+  const w = world(on, { store: { 'kiss-mini/host': { sessionId: 'old', beat: NOW - 4 * 60_000 } } })
+  w.session = 's9'
+  const r = await $.command.run({ command: 'mini', args: 'ask why?' } as never)
+  expect(w.sent).toEqual([])
+  expect(r.text).toContain('started a new host')
+})
+
+test('/mini --now skips the three checks; a plain /mini runs them', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'mini', args: '--now fix it --base main' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
+  expect(w.spawned[0]?.prompt).toContain('Checks: skip (owner)')
+  expect(w.spawned[0]?.prompt).toContain('# Mini task 1102-143005: fix it')
+  await w.clock.advance(1_000)
+  await $.command.run({ command: 'mini', args: 'ask why?' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
+  expect(w.spawned[1]?.prompt).toContain('Checks: run')
 })

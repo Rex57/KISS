@@ -52,6 +52,7 @@ export function parseReport(answer: string, kind?: Task['kind']): { state: State
 
 const BRIEF_MAX = 1500
 const NO_HOST = 'could not start a host'
+const HOST_GONE = 3 * 60_000
 // A command that pushes, merges or opens a pull request: git's push or merge subcommand after any options (quoted
 // text, such as a commit message, is not read), gh pr create|merge|ready, or a gh api call that writes to `pulls`.
 const GIT_DELIVERS = /\bgit(?:\s+(?:-C\s*\S+|-c\s+\S+|--?[\w-]+(?:=\S+)?))*\s+(?:subtree\s+)?(?:push|merge)(?=\s|$|[;&|)'"])/
@@ -59,9 +60,10 @@ const GIT_DELIVERS = /\bgit(?:\s+(?:-C\s*\S+|-c\s+\S+|--?[\w-]+(?:=\S+)?))*\s+(?
 const GIT_ALIAS = /\bgit\b[^;&|]*-c\s*['"]?alias\.[\w-]+=[^;&|]*\b(?:push|merge)\b/
 const GH_DELIVERS = /\bgh\s+pr\s+(?:create|merge|ready)\b|\bgh\s+api\b(?=[^;&|]*pulls\/\d+\/merge)|\bgh\s+api\b(?=[^;&|]*pulls)(?=[^;&|]*(?:-X\s*POST|--method[\s=]POST|\s-[fF]\s|--(?:raw-)?field|--input))/
 // Quoted text is not read (a commit message), except where a shell or eval runs it as a command.
-const RUNS_TEXT = /\b(?:bash|sh|zsh|eval)\b/
+const RUNS_TEXT = /\b(?:(?:bash|sh|zsh)\s+-c|eval)\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
 const delivers = (command: string) =>
-  GIT_DELIVERS.test(RUNS_TEXT.test(command) ? command : command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")) ||
+  GIT_DELIVERS.test(command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")) ||
+  [...command.matchAll(RUNS_TEXT)].some(m => GIT_DELIVERS.test(m[1] ?? m[2] ?? '')) ||
   GIT_ALIAS.test(command) || GH_DELIVERS.test(command)
 // A GitHub tool of an MCP server that writes (a pull request, a merge, a push).
 const GITHUB_WRITES = /^mcp__.*github.*__.*(?:create|merge|update|push|delete)/i
@@ -73,13 +75,13 @@ const isCode = (t: Task) => t.kind === 'code' || t.kind === 'bug'
 function briefLines(t: Task, text: string, rules: string, dir: string) {
   const where = isCode(t)
     ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`]
-    : [`Checkout: ${t.worktree ?? t.cwd} (read only)    Task folder: ${dir}`]
+    : [`Checkout: ${t.cwd} (read only)    Task folder: ${dir}`]
   // The report's first line and the progress tool are in the brief itself: a worker may not open the Rules file.
   const rule = 'Report: your final message starts "State: done|ready|failed|waiting for you", then "Summary:". Call mcp__kiss__progress (step, total) as you start each step.'
   if (t.brief !== undefined) {
-    return [`# Mini task ${t.id}: ${t.title.slice(0, 120)}`, ...where, `Return: ${t.return ? 'harness' : 'owner'}    Owner order: no`, `Rules: ${rules}`, rule, text].join('\n')
+    return [`# Mini task ${t.id}: ${t.title.slice(0, 120)}`, ...where, `Return: ${t.return ? 'harness' : 'owner'}    Checks: run`, `Rules: ${rules}`, rule, text].join('\n')
   }
-  const head = [`# Mini task ${t.id}: ${text}`, `Kind: ${t.kind}`, ...where, 'Return: owner    Owner order: yes', `Rules: ${rules}`, rule]
+  const head = [`# Mini task ${t.id}: ${text}`, `Kind: ${t.kind}`, ...where, `Return: owner    Checks: ${t.now ? 'skip (owner)' : 'run'}`, `Rules: ${rules}`, rule]
   if (t.kind === 'question') {
     return [...head,
       "Summary: answer the owner's question in the first line.",
@@ -181,9 +183,7 @@ async function look($: $, t: Task): Promise<{ state: State; status: string }> {
 
 /** Host: ends a task's worker by denying its every tool call; its last report is ignored. A slot frees. */
 async function stop($: $, t: Task, why: string) {
-  const wt = t.kind === 'question' && t.worktree
-  if (wt) await $.process.run(['git', '-C', t.cwd, 'worktree', 'remove', '--force', wt])
-  await save($, { ...t, state: 'failed', report: why, stopped: true, finished: await $.clock.now(), ...(wt ? { worktree: undefined } : {}) })
+  await save($, { ...t, state: 'failed', report: why, stopped: true, finished: await $.clock.now() })
   for (const x of await tasks($)) if (!x.host) await run($, x.id)
   await refresh($)
 }
@@ -207,11 +207,15 @@ async function tick($: $) {
   const me = await $.session.id()
   await orphans($)
   for (const t of await tasks($)) {
-    // A ready task whose branch is already in its base was merged (by the harness, by hand): it is done.
-    if (isCode(t) && t.state === 'ready' && t.host === me && t.branch && t.worktree && !t.busy &&
+    // A ready task whose commits are already in its base was merged (by the harness, by hand): it is done. A branch
+    // with no commit of its own is in its base too, so it counts only with commits at its report.
+    if (isCode(t) && t.state === 'ready' && t.host === me && t.branch && t.worktree && !t.busy && (t.ahead ?? 0) > 0 &&
       (await $.process.run(['git', '-C', t.cwd, 'merge-base', '--is-ancestor', t.branch, t.base!])).exitCode === 0) {
-      await $.process.run(['git', '-C', t.cwd, 'worktree', 'remove', '--force', t.worktree])
-      await save($, { ...t, state: 'done', delivered: 'merge', worktree: undefined })
+      // A worktree with changes nobody committed is never forced away.
+      const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.trim()
+      if (dirty) $.ui.toast(`mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
+      else await $.process.run(['git', '-C', t.cwd, 'worktree', 'remove', '--force', t.worktree])
+      await save($, { ...t, state: 'done', delivered: 'merge', ...(dirty ? {} : { worktree: undefined }) })
       continue
     }
     if (isCode(t) && t.state === 'working' && t.host === me && t.claimed && now - t.claimed > CODE_MAX) await stop($, t, 'timed out after 30 minutes')
@@ -247,8 +251,9 @@ async function tick($: $) {
 async function orphans($: $) {
   const me = await $.session.id()
   for (const t of await tasks($)) {
-    if (!t.host || t.host === me || ENDED.includes(t.state) || t.state === 'ready') continue
-    if (t.kind === 'watch') await save($, { ...t, host: me })
+    if (!t.host || t.host === me || ENDED.includes(t.state)) continue
+    // A watch and a ready task go on under the live host (its merged check reaches the ready one).
+    if (t.kind === 'watch' || t.state === 'ready') await save($, { ...t, host: me })
     else await stop($, t, 'its host session ended')
   }
 }
@@ -278,14 +283,6 @@ async function run($: $, id: string) {
   await save($, { ...t, host: await $.session.id(), claimed, ...(t.kind === 'watch' ? { next: claimed } : {}) })
   // The host's minute timer checks a watch: a check never runs inside the message that brought the task.
   if (t.kind === 'watch') return
-  if (t.kind === 'question') {
-    // A question reads a detached worktree of the checkout, so nothing it runs writes in the owner's files.
-    const wt = `${await folder($, id)}/wt`
-    if ((await $.process.run(['git', '-C', t.cwd, 'worktree', 'add', '--detach', wt, 'HEAD'])).exitCode === 0) {
-      Object.assign(t, { worktree: wt })
-      await save($, { ...((await $.store.get(TASK + id)) as Task), worktree: wt })
-    }
-  }
   if (isCode(t)) {
     const made = await $.process.run(['git', '-C', t.cwd, 'worktree', 'add', '-b', t.branch!, t.worktree!, t.base!])
     // No worktree was made: nothing is left to Discard.
@@ -312,8 +309,10 @@ async function run($: $, id: string) {
 /** Sender: wakes the host; when no host takes the message, starts one (it takes every waiting task as it starts). */
 /** Sender: one message to the host (a task, an answer, a stop); a new host when none takes it. */
 async function wake($: $, text: string) {
-  const host = (await $.store.get(HOST)) as { sessionId: string } | undefined
-  if (host && (await $.session.send({ to: { sessionId: host.sessionId }, text })).isDelivered) return 'sent'
+  const host = (await $.store.get(HOST)) as { sessionId: string; beat: number } | undefined
+  // A host whose beat (every minute) is 3 minutes old is gone: no send to it.
+  const live = host && (await $.clock.now()) - host.beat < HOST_GONE
+  if (live && (await $.session.send({ to: { sessionId: host.sessionId }, text })).isDelivered) return 'sent'
   // No prompt: the host's own model never runs. Haiku in case the person attaches and types. The flag rides in
   // --settings: a session started from a background session does not get the caller's environment.
   const settings = JSON.stringify({ env: { KISS_MINI_HOST: '1' } })
@@ -409,8 +408,8 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'mini',
-      description: 'kiss-mini-agent: /mini <task> a code change, /mini ask <question>, /mini status (alone) the list; no argument opens the pane',
-      argumentHint: '<task> [--base <branch>] | ask <question> | watch pr <n> | watch run <id> | watch <test command> | stop <id> | status',
+      description: 'kiss-mini-agent: /mini <task> a code change, /mini ask <question>, /mini status (alone) the list; --now skips the worker\'s checks; no argument opens the pane',
+      argumentHint: '[--now] <task> [--base <branch>] | ask <question> | watch pr <n> | watch run <id> | watch <test command> | stop <id> | status',
     })
     await $.tool.register({
       name: 'handoff',
@@ -458,7 +457,10 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'mini' }, async ($, e) => {
-    const [verb = '', ...rest] = e.args.trim().split(/\s+/).filter(Boolean)
+    // --now: the owner orders the task outright, and the worker skips the three checks.
+    const all = e.args.trim().split(/\s+/).filter(Boolean)
+    const now = all.includes('--now')
+    const [verb = '', ...rest] = all.filter(word => word !== '--now')
     if (verb === '') {
       await $.ui.open({ id: PANE, title: 'mini' })
       return { text: 'mini: pane opened.' }
@@ -466,7 +468,7 @@ export const register: Register = on => {
     if (e.args.trim() !== 'status') {
       const id = await newId($)
       const cwd = await $.session.cwd()
-      const t: Task = { id, kind: 'question', title: rest.join(' '), sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now(), key: crypto.randomUUID() }
+      const t: Task = { id, kind: 'question', title: rest.join(' '), sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now(), key: crypto.randomUUID(), ...(now ? { now } : {}) }
       if (verb === 'stop') {
         const known = (await $.store.get(TASK + (rest[0] ?? ''))) as Task | undefined
         if (!known) return { text: `mini: no task ${rest[0] ?? ''}. /mini status lists them.` }
@@ -534,7 +536,12 @@ export const register: Register = on => {
     const t = (await tasks($)).find(x => x.agentId === e.agentId)
     if (t?.stopped) return { deny: `kiss-mini-agent: the owner stopped this task (${t.report}). Make no more tool calls; end now.` }
     if (t && GITHUB_WRITES.test(String(e.tool))) return { deny: 'kiss-mini-agent: only the owner\'s press in the /mini pane writes to GitHub. Commit on your branch and report.' }
-    const r = await next(e)
+    // A question reads the owner's own working tree: it writes no file there, and its commands leave no caches.
+    if (t?.kind === 'question' && ['Edit', 'Write', 'NotebookEdit'].includes(String(e.tool))) {
+      return { deny: 'kiss-mini-agent: a question changes no file. Answer from what you read.' }
+    }
+    const quiet = t?.kind === 'question' && String(e.tool) === 'Bash'
+    const r = await next(quiet ? { ...e, command: `export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; ${(e as { command: string }).command}` } as typeof e : e)
     if (!t || String(e.tool) === 'mcp__kiss__progress') return r
     const a = e as unknown as Record<string, unknown>
     const arg = [a.command, a.file_path, a.pattern, a.description, a.url].find(v => typeof v === 'string') as string | undefined
@@ -547,7 +554,8 @@ export const register: Register = on => {
     const due = now - (fresh.statusAt ?? 0) >= STATUS_EVERY
     await save($, { ...fresh, lastTool: call, calls, ...(due ? { statusAt: now } : {}) })
     // The status line does not hold up the worker's tool result.
-    if (due) void statusLine($, t.id, fresh.title, calls)
+    // Its failure (a session that ended meanwhile) costs only the line.
+    if (due) void statusLine($, t.id, fresh.title, calls).catch(() => undefined)
     await refresh($)
     return r
   })
@@ -586,7 +594,8 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined || !(await isHost($))) return next(e)
     const t = (await tasks($)).find(x => x.agentId === e.agentId)
-    if (!t || t.stopped) return next(e)
+    // An aborted turn with no answer is no report (its host stopped): orphans() ends the task.
+    if (!t || t.stopped || (e.isAborted && !e.answer.trim())) return next(e)
     const { state, summary } = parseReport(e.answer, t.kind)
     const log = `${await folder($, t.id)}/report.md`
     await $.fs.write(log, e.answer)
@@ -594,6 +603,7 @@ export const register: Register = on => {
     if (isCode(t)) {
       const stat = await $.process.run(['git', '-C', t.cwd, 'diff', '--shortstat', `${t.base}...${t.branch}`])
       fields.diff = stat.stdout.trim() || 'no change'
+      fields.ahead = Number((await $.process.run(['git', '-C', t.cwd, 'rev-list', '--count', `${t.base}..${t.branch}`])).stdout.trim()) || 0
       fields.tests = /^Tests:\s*(.*)$/m.exec(e.answer)?.[1]?.trim() ?? 'not reported'
       fields.pr = /^## Pull request body\s*\n([\s\S]*)/m.exec(e.answer)?.[1]?.trim() || summary
     }
@@ -601,10 +611,6 @@ export const register: Register = on => {
     const fresh = (await $.store.get(TASK + t.id)) as Task
     if (fresh.stopped) return next(e)
     const done: Task = { ...fresh, ...fields }
-    if (t.kind === 'question' && fresh.worktree) {
-      await $.process.run(['git', '-C', t.cwd, 'worktree', 'remove', '--force', fresh.worktree])
-      done.worktree = undefined
-    }
     await save($, done)
     // A slot is free: start the tasks that wait for one.
     for (const x of await tasks($)) if (!x.host) await run($, x.id)

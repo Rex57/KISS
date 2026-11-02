@@ -31,6 +31,8 @@ export type Task = {
   seen?: number
   /** A hand-off's own brief (handoff.md's format); absent for the owner's /mini, whose brief is built from the title. */
   brief?: string
+  /** /mini --now: the owner ordered it outright; the worker skips the three checks. */
+  now?: boolean
   /** True: the report goes back to the sender session as one message. */
   return?: boolean
   title: string
@@ -49,6 +51,8 @@ export type Task = {
   branch?: string
   worktree?: string
   diff?: string
+  /** Commits on the branch past its base at the report. */
+  ahead?: number
   tests?: string
   pr?: string
   delivered?: Delivery
