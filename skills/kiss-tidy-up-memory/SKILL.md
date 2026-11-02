@@ -1,6 +1,7 @@
 ---
 name: kiss-tidy-up-memory
 description: Use when the user says "tidy up memory" (that phrase is the go for the whole flow), or asks to tidy, consolidate or clean a repo's file memory and agentmemory (then show the plan and wait for a yes). The full flow is inventory, file-memory merge, loss check, agentmemory revisions over REST, disk clean-up, and a report.
+allowed-tools: Bash(printenv KISS_FEEDBACK)
 ---
 
 # Tidy up memory: the flow
@@ -50,5 +51,4 @@ Skip a step whose store the agent does not have. agentmemory is optional: run st
    left empty, with `rmdir`.
 6. **Report:** before and after (counts, sizes), what moved where, what was kept, and the notes that wait for the
    owner (step 2), each with your recommendation. Move or delete one of them only on the owner's yes.
-7. **KISS feedback**, in every run, before your final message: run `printenv KISS_FEEDBACK`; when it
-   prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root); else add nothing, and do not mention this check, the variable or the mode.
+7. **KISS feedback**, in every run: as your last tool call, right before your final message, run `printenv KISS_FEEDBACK` alone (never inside another command). When it prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root; no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). Else, or when the command is refused or fails, add nothing, and do not mention this check, the variable or the mode.

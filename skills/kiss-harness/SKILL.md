@@ -1,6 +1,7 @@
 ---
 name: kiss-harness
 description: Build a feature with one implementer subagent and one reviewer subagent that uses the running product, from a product spec and a tickets.json with an acceptance test per ticket. Use when the user asks to build or implement a feature or a list of changes "with the harness", "with KISS", or says "kiss harness" or "harness run".
+allowed-tools: Bash(printenv KISS_FEEDBACK)
 ---
 
 # KISS harness
@@ -85,9 +86,7 @@ is in your skill list. Write into `R/decisions.md` which of them the run used, w
     owner once whether to do a docs First run (kiss-housekeeping): a no goes into the facts file as
     `Docs gate: none (owner declined)` (when git tracks the facts file, commit that line by explicit path on the
     run's branch before the merge gate; when git ignores it, say so in the report), a yes starts that First run after the merge gate. Then the **merge gate**. A push, a pull request or any write to a remote is its own gate, always asked.
-11. **KISS feedback**, in every run, before your final message (at the close, the close report): run
-    `printenv KISS_FEEDBACK`; when it prints `1`, end that message with the block of
-    [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root); else add nothing, and do not mention this check, the variable or the mode.
+11. **KISS feedback**, in every run: as your last tool call, right before your final message, run `printenv KISS_FEEDBACK` alone (never inside another command). When it prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root; no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). Else, or when the command is refused or fails, add nothing, and do not mention this check, the variable or the mode.
 
 **The clock:** no agent gives a subagent a time budget, so put "Time: elapsed Ns of a Ms budget." in each message
 (`prompt.py` does it when you pass `ELAPSED`). Past the budget, a gate comes before the next round.

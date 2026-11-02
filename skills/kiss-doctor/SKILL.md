@@ -2,6 +2,7 @@
 name: kiss-doctor
 description: Check this device's KISS setup - the CodeGraph rule in the global instructions file, the skills KISS calls and the tools.
 disable-model-invocation: true
+allowed-tools: Bash(printenv KISS_FEEDBACK)
 ---
 
 # KISS doctor
@@ -22,5 +23,4 @@ You check the setup and report it; the owner installs. `KD` is this skill's fold
 4. **Fix on the owner's yes.** The owner installs tools and skills, by the README commands. With a yes you may make
    a file fix: append `$KD/../../rules/codegraph.md` to the global instructions file once (read the file
    first), or delete a `CODEGRAPH_START` block. Then run step 1 again.
-5. **KISS feedback**, in every run, before your final message: run `printenv KISS_FEEDBACK`; when it
-   prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root); else add nothing, and do not mention this check, the variable or the mode.
+5. **KISS feedback**, in every run: as your last tool call, right before your final message, run `printenv KISS_FEEDBACK` alone (never inside another command). When it prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root; no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). Else, or when the command is refused or fails, add nothing, and do not mention this check, the variable or the mode.
