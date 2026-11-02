@@ -54,8 +54,10 @@ def tracked(repo, *globs, config=CONFIG):
 
 
 def config_node(tree):
-    """The last `CONFIG = ...` assignment of a parsed gate: the one Python uses."""
-    return [n for n in tree.body if isinstance(n, ast.Assign)
+    """The CONFIG a parsed gate's functions use: its last `CONFIG = ...` assignment before the first
+    def (their default arguments bind it there; a later one changes nothing)."""
+    first_def = next((n.lineno for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))), float("inf"))
+    return [n for n in tree.body if isinstance(n, ast.Assign) and n.lineno < first_def
             and any(isinstance(t, ast.Name) and t.id == "CONFIG" for t in n.targets)][-1]
 
 
@@ -298,6 +300,8 @@ def selftest(copy=True):
     assert any(c == "name" for c, _, _ in fail), fail
     fail, _, _ = run(dict(clean, **{"docs/README.md": clean["docs/README.md"].replace("[front](../README.md) ", "")}))
     assert any(c == "map" and p == "README.md" and "does not link it" in d for c, p, d in fail), fail   # the map links the front door
+    two = ast.parse("CONFIG = {'logs': ['a.md']}\nCONFIG = {'logs': ['b.md']}\ndef f():\n    pass\nCONFIG = {'logs': ['c.md']}\n")
+    assert ast.literal_eval(config_node(two).value) == {"logs": ["b.md"]}   # the one the defaults bind
     with tempfile.TemporaryDirectory() as d:          # a project copy that does not parse: one clear line
         os.makedirs(os.path.join(d, "tools"))
         open(os.path.join(d, "tools", "check_docs.py"), "w").write("CONFIG = {\n")
