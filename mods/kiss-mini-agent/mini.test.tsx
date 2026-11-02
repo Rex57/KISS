@@ -70,6 +70,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  on('tool.register', ($, e) => ({ value: { tool: `mcp__kiss__${e.name}` } }) as never)
   on('fs.write', ($, e) => {
     w.files[e.path] = e.text
     return { value: undefined }
@@ -132,6 +133,7 @@ test('when the send to the host is refused, the mod starts a new host and the ta
   expect(w.spawned.length).toBe(0)
   const start = w.runs.find(argv => argv.includes('--bg'))
   expect(start?.slice(0, 4)).toEqual(['claude', '--bg', '--name', 'kiss-mini-agent'])
+  expect(start).toContain(JSON.stringify({ env: { KISS_MINI_HOST: '1' } }))
 
   // The new host session starts: it takes the task that waits in the ledger.
   w.session = 'h2'
@@ -447,4 +449,50 @@ test('Discard clears a worktree git no longer lists, so the task can leave the l
   expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].worktree]).toEqual(['done', undefined])
   expect(w.toasts.some(text => text.includes('worktree kept'))).toBe(false)
   await ui.unmount()
+})
+
+const HANDOFF_BRIEF = [
+  'Kind: bug',
+  'Summary: add() subtracts.',
+  'Current behaviour: add(2, 3) gives -1.',
+  'Expected behaviour: add(2, 3) gives 5.',
+  'Key interfaces: calc.py add()',
+  'Acceptance checks:',
+  '- python3 -c "from calc import add; assert add(2, 3) == 5"',
+  'Out of scope: other functions.',
+  'Suggested skills: diagnosing-bugs, tdd',
+].join('\n')
+
+async function handoff($: any, w: ReturnType<typeof world>, back: boolean) {
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const r = await $.tool.call({ tool: 'mcp__kiss__handoff', kind: 'bug', title: 'add subtracts', brief: HANDOFF_BRIEF, base: 'kiss-run', return: back })
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' })
+  await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1000, isAborted: false, turnId: 't1' })
+  return r
+}
+
+test('a hand-off from the harness branches from the base it names and returns one report in the report format', async ($, on) => {
+  const w = world(on, { branch: 'dev' })
+  const r = await handoff($, w, true)
+  expect(JSON.stringify(r)).toContain(ID)
+  expect(git(w)).toContain(`git -C /repo worktree add -b mini/${ID} ${WT} kiss-run`)
+  expect(w.spawned[0]?.prompt).toContain('Return: harness')
+  expect(w.spawned[0]?.prompt).toContain('Current behaviour: add(2, 3) gives -1.')
+  const back = w.sent.filter(m => !m.text.startsWith('KISS-MINI task'))
+  expect(back.length).toBe(1)
+  expect(back[0]?.to).toContain('s1')
+  const text = back[0]?.text ?? ''
+  expect(text).toContain('State: ready')
+  expect(text).toContain('Summary: add(a, b) now returns the sum.')
+  expect(text).toContain(`Branch: mini/${ID}    Commits: abc1234 fix: add returns the sum`)
+  expect(text).toContain('Tests: python3 -m pytest: 3 passed')
+  expect(text).toContain(`Full log: /tmp/kiss-mini/${ID}/report.md`)
+})
+
+test('a hand-off with return off sends nothing back', async ($, on) => {
+  const w = world(on)
+  await handoff($, w, false)
+  expect(w.sent.filter(m => !m.text.startsWith('KISS-MINI task'))).toEqual([])
+  expect(await status($)).toContain(`${ID} bug ready: add subtracts`)
 })

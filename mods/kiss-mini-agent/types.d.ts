@@ -5,7 +5,11 @@ export type State = 'working' | 'waiting for you' | 'ready' | 'watching' | 'done
 /** One ledger entry, kept in `$.store` under `kiss-mini/task/<id>` and shared by every session. */
 export type Task = {
   id: string
-  kind: 'question' | 'code'
+  kind: 'question' | 'code' | 'bug'
+  /** A hand-off's own brief (handoff.md's format); absent for the owner's /mini, whose brief is built from the title. */
+  brief?: string
+  /** True: the report goes back to the sender session as one message. */
+  return?: boolean
   title: string
   sender: string
   cwd: string

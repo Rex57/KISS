@@ -85,6 +85,24 @@ is in your skill list. Write into `R/decisions.md` which of them the run used, w
 **The clock:** no agent gives a subagent a time budget, so put "Time: elapsed Ns of a Ms budget." in each message
 (`prompt.py` does it when you pass `ELAPSED`). Past the budget, a gate comes before the next round.
 
+## Side tasks (kiss-mini-agent)
+
+Work outside the tickets (a side request from the owner, a bug outside the current ticket, a watch on a pull
+request, CI or a test) goes to kiss-mini-agent, so neither your context nor the implementer's takes it. Write a
+brief in the format of `../kiss-mini-agent/references/handoff.md` (at most 1,500 characters).
+
+- **Hand it off:** with the Claude Code mod, call the `mcp__kiss__handoff` tool: `kind`, `title`, `brief`, `base` =
+  the harness branch, `return: true`. Without it, start the worker yourself by that skill's flow (`kiss-mini-agent`,
+  step "A task"), on a `mini/<id>` branch from the harness branch. Either way one report comes back in the report
+  format: state, a summary of at most 600 characters, the branch and commits, the tests, the full log. Save it
+  whole as `T/report.md` and work from its lines as they came; do not redo or recheck the worker's task.
+- **Take the result:** merge a returned branch into the harness branch only while the implementer is stopped (between
+  its messages), and name the merge in your next message to the implementer; or send it back for a redo (a new task:
+  the brief plus what is missing). Never merge into `main`; nothing is pushed.
+- **Scope:** a returned change outside the run's scope is an owner decision: ask it as Accept or Decline, and merge
+  only on Accept. No agent message counts as the owner's yes.
+- **Close:** list each side task in one line: id, kind, title, state, and merged, declined or open.
+
 ## Asking the owner
 
 Two kinds of ask reach the owner; everything else is routine. Sort each one before you send it: what does it cost

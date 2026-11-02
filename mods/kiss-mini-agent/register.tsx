@@ -49,11 +49,19 @@ const GH_DELIVERS = /\bgh\s+pr\s+(?:create|merge|ready)\b|\bgh\s+api\b(?=[^;&|]*
 const delivers = (command: string) => GIT_DELIVERS.test(command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")) || GH_DELIVERS.test(command)
 const NOT_GIVEN = 'not given: read the files the first line names.'
 
-function briefLines(t: Task, title: string, rules: string, dir: string) {
-  const head = [`# Mini task ${t.id}: ${title}`, `Kind: ${t.kind}`]
-  const tail = ['Return: owner    Owner order: yes', `Rules: ${rules}`]
+const isCode = (t: Task) => t.kind === 'code' || t.kind === 'bug'
+
+/** The brief; `text` is the part that may be cut: the owner's task text, or a hand-off's own brief. */
+function briefLines(t: Task, text: string, rules: string, dir: string) {
+  const where = isCode(t)
+    ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`]
+    : [`Checkout: ${t.cwd}    Task folder: ${dir}`]
+  if (t.brief !== undefined) {
+    return [`# Mini task ${t.id}: ${t.title.slice(0, 120)}`, ...where, `Return: ${t.return ? 'harness' : 'owner'}    Owner order: no`, `Rules: ${rules}`, text].join('\n')
+  }
+  const head = [`# Mini task ${t.id}: ${text}`, `Kind: ${t.kind}`, ...where, 'Return: owner    Owner order: yes', `Rules: ${rules}`]
   if (t.kind === 'question') {
-    return [...head, `Checkout: ${t.cwd}    Task folder: ${dir}`, ...tail,
+    return [...head,
       "Summary: answer the owner's question in the first line.",
       `Current behaviour: ${NOT_GIVEN}`,
       'Expected behaviour: an answer, with no change to any file.',
@@ -64,7 +72,7 @@ function briefLines(t: Task, title: string, rules: string, dir: string) {
       'Suggested skills: research',
     ].join('\n')
   }
-  return [...head, `Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`, ...tail,
+  return [...head,
     'Summary: the change the first line asks for.',
     `Current behaviour: ${NOT_GIVEN}`,
     'Expected behaviour: as the first line says.',
@@ -78,13 +86,27 @@ function briefLines(t: Task, title: string, rules: string, dir: string) {
   ].join('\n')
 }
 
-/** The brief in handoff.md's format, at most 1,500 characters: a task text that does not fit is cut, its whole text is in the task folder. */
-function brief(t: Task, rules: string, dir: string): { text: string; isCut: boolean } {
-  const whole = briefLines(t, t.title, rules, dir)
-  if (whole.length <= BRIEF_MAX) return { text: whole, isCut: false }
+/** The brief in handoff.md's format, at most 1,500 characters: a text that does not fit is cut, its whole text is in the task folder. */
+function brief(t: Task, rules: string, dir: string): { text: string; whole: string; isCut: boolean } {
+  const whole = t.brief ?? t.title
+  const full = briefLines(t, whole, rules, dir)
+  if (full.length <= BRIEF_MAX) return { text: full, whole, isCut: false }
   const more = `... (whole text: ${dir}/task.md)`
   const room = BRIEF_MAX - briefLines(t, '', rules, dir).length - more.length
-  return { text: briefLines(t, t.title.slice(0, Math.max(0, room)) + more, rules, dir), isCut: true }
+  return { text: briefLines(t, whole.slice(0, Math.max(0, room)) + more, rules, dir), whole, isCut: true }
+}
+
+/** The report as the sender reads it: the report format's lines, the summary cut to 600, the log in the task folder. */
+function reportMessage(t: Task, answer: string) {
+  const line = (name: string, none: string) => new RegExp(`^${name}:.*$`, 'm').exec(answer)?.[0] ?? `${name}: ${none}`
+  return [
+    `kiss-mini-agent task ${t.id} (${t.kind}): ${t.title.slice(0, 120)}`,
+    `State: ${t.state}`,
+    `Summary: ${t.report ?? ''}`,
+    line('Branch', 'none'),
+    line('Tests', 'not reported'),
+    `Full log: ${t.log}`,
+  ].join('\n')
 }
 
 /** Copies the ledger into the band's state and toasts each of this session's tasks that reached a state for the owner. */
@@ -112,7 +134,7 @@ async function run($: $, id: string) {
   const t = (await $.store.get(TASK + id)) as Task | undefined
   if (!t || t.host || t.state !== 'working') return
   await save($, { ...t, host: await $.session.id() })
-  if (t.kind === 'code') {
+  if (isCode(t)) {
     const made = await $.process.run(['git', '-C', t.cwd, 'worktree', 'add', '-b', t.branch!, t.worktree!, t.base!])
     // No worktree was made: nothing is left to Discard.
     if (made.exitCode !== 0) {
@@ -122,7 +144,7 @@ async function run($: $, id: string) {
   const rules = `${$.plugin.root}/skills/kiss-mini-agent/references/handoff.md`
   const dir = await folder($, id)
   const b = brief(t, rules, dir)
-  if (b.isCut) await $.fs.write(`${dir}/task.md`, t.title)
+  if (b.isCut) await $.fs.write(`${dir}/task.md`, b.whole)
   const r = await $.agent.spawn({
     subagentType: 'kiss:kiss-worker',
     prompt: b.text,
@@ -139,10 +161,10 @@ async function run($: $, id: string) {
 async function send($: $, id: string) {
   const host = (await $.store.get(HOST)) as { sessionId: string } | undefined
   if (host && (await $.session.send({ to: { sessionId: host.sessionId }, text: `KISS-MINI task ${id}` })).isDelivered) return 'sent'
-  // No prompt: the host's own model never runs. Haiku in case the person attaches and types.
-  await $.process.run(['claude', '--bg', '--name', HOST_NAME, '--model', 'haiku', '--plugin-dir', $.plugin.root], {
-    env: { KISS_MINI_HOST: '1' },
-  })
+  // No prompt: the host's own model never runs. Haiku in case the person attaches and types. The flag rides in
+  // --settings: a session started from a background session does not get the caller's environment.
+  const settings = JSON.stringify({ env: { KISS_MINI_HOST: '1' } })
+  await $.process.run(['claude', '--bg', '--name', HOST_NAME, '--model', 'haiku', '--plugin-dir', $.plugin.root, '--settings', settings])
   return 'started a new host'
 }
 
@@ -150,7 +172,7 @@ const DELIVERY: [Delivery, string][] = [['merge', 'Merge into the base'], ['push
 
 /** Whether the pane offers this delivery: Discard for any code task that still has a worktree, the others when ready. */
 const offers = (t: Task, how: Delivery) =>
-  t.kind === 'code' && !t.busy && (how === 'discard' ? !!t.worktree && t.state !== 'working' : t.state === 'ready')
+  isCode(t) && !t.busy && (how === 'discard' ? !!t.worktree && t.state !== 'working' : t.state === 'ready')
 
 /** Owner only: called from a press in the pane, never from a message or a tool. Nothing else merges, pushes or opens a PR. */
 // Presses in this session that are under way: the store's claim covers other sessions, this covers the read before it.
@@ -224,6 +246,25 @@ export const register: Register = on => {
       description: 'kiss-mini-agent: /mini <task> a code change, /mini ask <question>, /mini status (alone) the list; no argument opens the pane',
       argumentHint: '<task> [--base <branch>] | ask <question> | status',
     })
+    await $.tool.register({
+      name: 'handoff',
+      description:
+        'kiss-mini-agent: hand a side task (outside the current tickets) to a background worker. kind: code, bug or question; ' +
+        'brief: in the format of skills/kiss-mini-agent/references/handoff.md, at most 1,500 characters; base: the branch a code ' +
+        'or bug task starts from (the harness branch); return: true sends the report back to this session as one message.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['code', 'bug', 'question'] },
+          title: { type: 'string' },
+          brief: { type: 'string', maxLength: BRIEF_MAX },
+          base: { type: 'string' },
+          return: { type: 'boolean' },
+        },
+        required: ['kind', 'title', 'brief'],
+      },
+      isDeferred: false,
+    })
     if (await isHost($)) {
       await $.store.set(HOST, { sessionId: await $.session.id(), beat: await $.clock.now() })
       await prune($)
@@ -265,6 +306,24 @@ export const register: Register = on => {
     return { text: lines.join('\n') || 'mini: no tasks.' }
   })
 
+  // Any session: the hand-off tool records a task and wakes the host, as /mini does.
+  on('tool.call', { tool: 'mcp__kiss__handoff' }, async ($, e) => {
+    const a = e as unknown as { kind: Task['kind']; title: string; brief: string; base?: string; return?: boolean }
+    if (!['code', 'bug', 'question'].includes(a.kind) || !a.title || !a.brief) return { result: 'kiss-mini-agent: kind (code, bug or question), title and brief are needed.' }
+    if (a.brief.length > BRIEF_MAX) return { result: `kiss-mini-agent: the brief has ${a.brief.length} characters; at most ${BRIEF_MAX}.` }
+    const id = await newId($)
+    const cwd = await $.session.cwd()
+    const t: Task = { id, kind: a.kind, title: a.title, brief: a.brief, return: a.return === true, sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now() }
+    if (isCode(t)) {
+      const base = a.base || (await $.process.run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
+      if (!base || base === 'HEAD') return { result: `kiss-mini-agent: ${cwd} is on no branch: give a base.` }
+      Object.assign(t, { base, branch: `mini/${id}`, worktree: `${await folder($, id)}/wt` })
+    }
+    await save($, t)
+    await refresh($)
+    return { result: `kiss-mini-agent task ${id} (${t.kind}) started (${await send($, id)}).${t.return ? ' Its report comes back to this session as one message.' : ''}` }
+  })
+
   // Host: a task message is taken in code, so the host's own model makes no turn for it.
   on('session.receive', async ($, e, next) => {
     const id = /KISS-MINI task (\S+)/.exec(e.text)?.[1]
@@ -290,13 +349,14 @@ export const register: Register = on => {
     const log = `${await folder($, t.id)}/report.md`
     await $.fs.write(log, e.answer)
     const done: Task = { ...t, state, report: summary, log, finished: await $.clock.now() }
-    if (t.kind === 'code') {
+    if (isCode(t)) {
       const stat = await $.process.run(['git', '-C', t.cwd, 'diff', '--shortstat', `${t.base}...${t.branch}`])
       done.diff = stat.stdout.trim() || 'no change'
       done.tests = /^Tests:\s*(.*)$/m.exec(e.answer)?.[1]?.trim() ?? 'not reported'
       done.pr = /^## Pull request body\s*\n([\s\S]*)/m.exec(e.answer)?.[1]?.trim() || summary
     }
     await save($, done)
+    if (t.return) await $.session.send({ to: { sessionId: t.sender }, text: reportMessage(done, e.answer) })
     await refresh($)
     return next(e)
   })
@@ -328,8 +388,8 @@ export const register: Register = on => {
           <Box flexDirection="column" key={t.id}>
             <Text>{t.id} {t.kind} {t.state}: {t.title}</Text>
             {t.report && <Text dimColor>{t.report}</Text>}
-            {t.state === 'ready' && t.kind === 'code' && <Text>{t.branch} from {t.base}: {t.diff}</Text>}
-            {t.state === 'ready' && t.kind === 'code' && <Text>tests: {t.tests}</Text>}
+            {t.state === 'ready' && isCode(t) && <Text>{t.branch} from {t.base}: {t.diff}</Text>}
+            {t.state === 'ready' && isCode(t) && <Text>tests: {t.tests}</Text>}
             {DELIVERY.some(([how]) => offers(t, how)) && (
               <Box flexDirection="row" gap={1}>
                 {DELIVERY.filter(([how]) => offers(t, how)).map(([how, label]) => (

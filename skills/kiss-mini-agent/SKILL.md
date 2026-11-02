@@ -9,6 +9,9 @@ You start a background worker for a small task and pass on its report. You do no
 this skill's folder (the folder of this file). Read [references/handoff.md](references/handoff.md) once, before
 the first task: it holds the kinds, the states, the brief, the report and the worker's rules.
 
+On Claude Code with the KISS mod, `/mini` and the `mcp__kiss__handoff` tool run the same flow through a background
+host, and the `/mini` pane shows the tasks: use them, not the steps below. These steps are for an agent without it.
+
 ## The asks
 
 - `<task>`: a code task (`bug` when it reports a failure). `--base <branch>` names its base; else the checkout's
