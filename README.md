@@ -191,6 +191,21 @@ Read the file first: append it once, not again on each update. If `codegraph ins
 The whole flow is in [`skills/kiss-harness/SKILL.md`](skills/kiss-harness/SKILL.md). How each agent starts and
 continues a subagent is in [`references/agents.md`](skills/kiss-harness/references/agents.md).
 
+## Feedback mode
+
+Off by default. When it is on, every KISS skill ends its run with one **KISS feedback** block: the skill and the
+KISS version, what went wrong or was unclear, and each proposed change as a KISS file, a line and the new text. The
+block holds no name, path, code, data or secret of your project. The rule is [`rules/feedback.md`](rules/feedback.md).
+
+Turn it on with the environment variable `KISS_FEEDBACK=1`, in one of two places:
+
+- your shell profile (every agent reads it): `export KISS_FEEDBACK=1`;
+- Claude Code's `~/.claude/settings.json`: `"env": { "KISS_FEEDBACK": "1" }`.
+
+Unset it, or set any other value, to turn it off. Post the block as an issue on the KISS repo with the
+[KISS feedback template](https://github.com/Rex57/KISS/issues/new?template=kiss-feedback.md), or paste it into an
+agent session in a KISS checkout to apply it. Read it before you post: the repo is public.
+
 ## Layout
 
 ```
@@ -200,6 +215,8 @@ continues a subagent is in [`references/agents.md`](skills/kiss-harness/referenc
 .antigravity-plugin/         Antigravity manifest
 gemini-extension.json        Gemini CLI manifest
 rules/codegraph.md           the CodeGraph rule for the global instructions file
+rules/feedback.md            the feedback mode: the block each skill ends with when KISS_FEEDBACK=1
+.github/ISSUE_TEMPLATE/      the issue template for a KISS feedback block
 skills/kiss-harness/         SKILL.md, scripts/, templates/, references/
 skills/kiss-doctor/          SKILL.md, scripts/doctor.py
 skills/kiss-tidy-up-memory/  SKILL.md

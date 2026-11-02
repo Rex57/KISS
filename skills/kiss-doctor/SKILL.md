@@ -22,3 +22,5 @@ You check the setup and report it; the owner installs. `KD` is this skill's fold
 4. **Fix on the owner's yes.** The owner installs tools and skills, by the README commands. With a yes you may make
    a file fix: append `$KD/../../rules/codegraph.md` to the global instructions file once (read the file
    first), or delete a `CODEGRAPH_START` block. Then run step 1 again.
+
+**KISS feedback.** Last, follow [`rules/feedback.md`](../../rules/feedback.md) at the plugin root: with `KISS_FEEDBACK=1`, end your final message with one KISS feedback block; else add nothing.

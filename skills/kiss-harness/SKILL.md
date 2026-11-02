@@ -135,3 +135,5 @@ to undo?
 
 Read [references/traps.md](references/traps.md) once, before step 3. The implementer and reviewer prompts name it
 too, so every agent of the run reads the same traps.
+
+**KISS feedback.** Last, follow [`rules/feedback.md`](../../rules/feedback.md) at the plugin root: with `KISS_FEEDBACK=1`, end your final message with one KISS feedback block; else add nothing.
