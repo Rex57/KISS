@@ -99,8 +99,10 @@ If a skill is missing, a run still works: KISS follows its own copy of the same 
 
 ## How a run goes
 
-1. **Questions.** The controller settles every open decision with you, in rounds, each question with its
+1. **Questions.** The controller settles every open decision with you, in rounds, each numbered `D<n>` with its
    recommended answer (Matt Pocock's `grilling` when installed). Each answer goes into `decisions.md` at once.
+   Only a choice that is costly to undo is a question; a two-way door (a name, a default you can change later)
+   takes the recommended answer, and you see it at the tickets gate.
 2. **Spec and tickets**, by rules adapted from Matt Pocock's `to-spec` and `to-tickets`: user stories, test seams,
    thin slices through every layer, a refactor first, blocking links. Each acceptance line names its seam. You
    approve the tickets and the seams.
@@ -109,7 +111,13 @@ If a skill is missing, a run still works: KISS follows its own copy of the same 
 4. **Review:** one reviewer uses the running product, with rubric A to G (`ponytail-review` for risk, load and
    speed). A severity pass sorts the findings; the same implementer fixes them and the same reviewer checks again,
    at most 3 rounds.
-5. **Close:** the project's full check, the list of new `shortcut:` comments (`ponytail-debt`), and your merge.
+5. **Close:** the project's full check, the list of new `shortcut:` comments (`ponytail-debt`), and the merge
+   gate: one yes, or none when `.kiss/project.md` says `Merge: after a green close`. A push always asks.
+
+The controller asks you two kinds of thing. A **decision** (`D<n>`) is a choice about the product, its data, its
+interfaces or its tests, and goes into `decisions.md`. A **gate** (the tickets, more rounds, the budget, the
+merge, a push) is a go or no-go with its evidence, and has no number. Routine steps (the branch, a commit per
+ticket, the docs) are not questions.
 
 Matt Pocock's `code-review` is not part of a run: the reviewer and `ponytail-review` cover it.
 
@@ -174,7 +182,7 @@ Read the file first: append it once, not again on each update. If `codegraph ins
    domain docs (a glossary and ADRs) are on.
 3. Add `.kiss/runs/` to the repo's `.gitignore` (or `.git/info/exclude`).
 4. Ask your agent: "build <feature> with the KISS harness". The skill takes you through the spec and the tickets,
-   and asks for your yes before the build, each owner question, the merge and any push.
+   asks you each decision, and waits for your yes at each gate: the tickets, the merge and any push.
 
 The whole flow is in [`skills/kiss-harness/SKILL.md`](skills/kiss-harness/SKILL.md). How each agent starts and
 continues a subagent is in [`references/agents.md`](skills/kiss-harness/references/agents.md).

@@ -12,6 +12,8 @@ project's instructions file (CLAUDE.md, AGENTS.md or GEMINI.md) already says.
 - Build steps: which change needs which build, and what goes in the same commit (for example: a change under
   `web/` ends with `npm run build`, and the built files go in the same commit).
 - Commit trailer: the exact lines each commit message ends with, or "none".
+- Merge: `ask` (the merge gate asks the owner) or `after a green close` (a standing yes: merge when the full check
+  passes and no decision is open). A push always asks.
 
 ## Start the product for a reviewer
 

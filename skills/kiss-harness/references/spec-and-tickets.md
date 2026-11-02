@@ -6,18 +6,22 @@ Pocock), so that a run without his skills follows the same rules.
 
 ## The questions (step 1)
 
-When the `grilling` skill is installed, use it. Otherwise, ask the same way:
+When the `grilling` skill is installed, use it, with two changes: its `Q<n>` label becomes `D<n>`, and only a
+one-way door goes into a round (SKILL.md, "Asking the owner"). A gate never uses the round format. Otherwise, ask
+the same way:
 
 - **Map the decisions as a tree:** each decision opens the ones that depend on it.
 - **Ask in rounds.** One round asks every open decision whose earlier decisions are settled (the frontier). Number
-  each question and give your recommended answer, worded so that "yes" accepts it. Then wait for the answers.
+  each one `D<n>`, in one sequence for the whole run, and give your recommended answer, worded so that "yes" accepts
+  it. Then wait for the answers.
 - **Facts are your job, decisions are the owner's.** Never ask the owner what the code, the docs or a tool can tell
-  you: look it up (a subagent, for a long search). Put each decision to the owner.
+  you: look it up (a subagent, for a long search). Put each one-way door to the owner; a two-way door takes your
+  recommended answer as a default.
 - **Stop when no decision is open**, then ask the owner to confirm that you share one understanding. Act only after
   that yes.
 
-Write each settled decision into `R/decisions.md` at once, one line each:
-`D<n>. <the question>: <the answer> (owner | recommended, accepted)`.
+Write each settled decision into `R/decisions.md` at once, one line each, under the same `D<n>` the owner saw:
+`D<n>. <the question>: <the answer> (owner | recommended, accepted | default)`.
 When the facts file sets domain docs on, also use the `domain-modeling` skill (or the project's own way) for a term
 that needs a fixed meaning (`GLOSSARY.md`) and for a decision that is hard to reverse (an ADR).
 

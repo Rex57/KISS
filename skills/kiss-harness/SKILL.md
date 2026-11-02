@@ -43,7 +43,7 @@ is in your skill list. Write into `R/decisions.md` which of them the run used, w
 ## A run
 
 1. **Decisions and spec.** Make the run folder `R = <repo>/.kiss/runs/<YYYY-MM-DD>-<name>/`. Settle every open
-   decision with the owner: `grilling` when installed, else the rounds in
+   decision (see "Asking the owner") with the owner: `grilling` when installed, else the rounds in
    [references/spec-and-tickets.md](references/spec-and-tickets.md). Write each settled answer into `R/decisions.md`
    at once. With domain docs on, also use `domain-modeling`. Then write `R/spec.md` from `templates/spec.md` by the
    spec rules in that file, and confirm the test seams with the owner.
@@ -53,8 +53,9 @@ is in your skill list. Write into `R/decisions.md` which of them the run used, w
    links, a wide refactor in three stages, and an acceptance line that names its seam. A ticket with a time window
    (freshness, a timeout, staleness) asks for a test that runs the clock past that window. Mark the safety rule, the
    guard whose failure harms real data, `risky`. Then `tickets.py check R`, and a ponytail pass at **full** level
-   (cut each line that no person asked for, and record the cut in `decisions.md`). Ask the owner about the
-   breakdown, change it until the owner says yes (that yes also confirms the seams), then `tickets.py render R`.
+   (cut each line that no person asked for, and record the cut in `decisions.md`). Then the **tickets gate**: ask
+   about the breakdown and show the defaults you took; change it until the owner says yes (that yes also confirms
+   the seams), then `tickets.py render R`.
 3. **Worktree** `W` on a new branch from the main branch; `codegraph init -y "W"`; `tickets.py freeze R` (from then
    on `check` refuses any change but `passes`); an empty `R/progress.md`. The time budget is 10 minutes per ticket
    plus 2 hours for the reviews and fix rounds; `prompt.py` computes it.
@@ -65,25 +66,43 @@ is in your skill list. Write into `R/decisions.md` which of them the run used, w
    ponytail and `tdd`, and tests through the confirmed seams.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` and `git -C MAIN status` (both
    empty), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). Open tickets and no
-   BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer. After 3 continuations, or
-   on BLOCKED, the owner decides.
+   BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer. After 3 continuations, a
+   gate. On BLOCKED: a decision when the block needs a choice, else a gate.
 6. **A risky ticket** is reviewed alone as soon as the implementer names it (step 7 on its commits), before the
    rest of the build depends on it.
 7. **Review once at the end:** `prompt.py reviewer ... HEAD=<head> APP="<how to start the product, and its test
    data>"` → a NEW subagent on your strongest model. It uses the product, loads `ponytail-review` for rubric G, and
    reports every issue it finds.
-8. **Sort:** `prompt.py severity ... FINDINGS=@<findings file>` (a subagent, or you): fix, owner or log. Ask the
-   owner the owner questions.
+8. **Sort:** `prompt.py severity ... FINDINGS=@<findings file>` (a subagent, or you): fix, owner or log. Each
+   owner finding is a decision.
 9. **Fix rounds:** `prompt.py fix ... ROUND=<n> FINDINGS=@<fix list>` → the SAME implementer; then
    `prompt.py recheck ... ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha> ANSWER=@<its answer>` → the SAME reviewer.
-   At most 3 rounds; then the owner decides.
+   At most 3 rounds; then a gate.
 10. **Close:** the project's full check once (the facts file names it). Then `ponytail-debt` on the run's changes
-    (`git -C W diff <base>..<head>`): the report lists each new `shortcut:` comment with its limit. Then the
-    docs, and the merge on the owner's yes. Never push, open a pull request or write to a remote without the owner's
-    explicit go.
+    (`git -C W diff <base>..<head>`): the report lists each new `shortcut:` comment with its limit. Then the docs,
+    and the **merge gate**. A push, a pull request or any write to a remote is its own gate, always asked.
 
 **The clock:** no agent gives a subagent a time budget, so put "Time: elapsed Ns of a Ms budget." in each message
-(`prompt.py` does it when you pass `ELAPSED`). Past the budget, stop and ask the owner before the next round.
+(`prompt.py` does it when you pass `ELAPSED`). Past the budget, a gate comes before the next round.
+
+## Asking the owner
+
+Two kinds of ask reach the owner; everything else is routine. Sort each one before you send it: what does it cost
+to undo?
+
+- **Decision:** a one-way door, a choice that is costly to undo: what the product does, its interfaces, data or
+  schema, its structure, its test seams, its scope, a new dependency. Number it `D<n>` (one sequence per run), ask
+  it in a round with your recommended answer, and write it into `R/decisions.md` at once. A two-way door inside
+  step 1 (a name, a default the owner can change later at no cost) takes your recommended answer without a
+  question: write it as `D<n>. <question>: <answer> (default)`; the tickets gate shows it. When in doubt, it is a
+  one-way door: ask.
+- **Gate:** a fixed checkpoint where the owner says go: the tickets (step 2), more continuations (step 5), more fix
+  rounds (step 9), the budget, the merge and a push (step 10). It has a name, never a number, and goes in no list.
+  Ask it in one message: what is ready, the evidence (each check and its result), and the word that passes it
+  ("merge"). When the facts file says `Merge: after a green close`, the merge gate passes without the ask once the
+  full check passes and no decision is open; a push always asks.
+- **Routine:** what the rules or the facts file already settle: the run folder, branch and worktree, one commit per
+  ticket, the commit trailer, which tests to run, the docs at the close. Do it, and name it in your status line.
 
 ## Rules
 
@@ -92,7 +111,7 @@ is in your skill list. Write into `R/decisions.md` which of them the run used, w
   `R/progress.md` first: it is the handoff".
 - One commit per ticket, files added by explicit path, never `git add -A`.
 - Read a subagent's report as a claim: check its JSON against `git`, `tickets.py check` and the files.
-- The owner's word decides every open question, every merge and every push.
+- The owner's word decides every decision and every gate; a standing yes in the facts file is the owner's word.
 
 ## Traps
 
