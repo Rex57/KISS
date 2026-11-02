@@ -11,9 +11,11 @@ const NOW = Date.UTC(2026, 10, 2, 14, 30, 5)
 const ID = '1102-143005'
 
 /** The engine beneath the mod: one session that is both the sender and the host. */
-function world(on: On, delivered = true) {
+type Opts = { delivered?: boolean; branch?: string; fail?: Record<string, { stdout?: string; stderr?: string }> }
+function world(on: On, { delivered = true, branch = 'main', fail = {} }: Opts = {}) {
   const w = {
     session: 's1',
+    branch,
     sent: [] as { to: string; text: string }[],
     spawned: [] as { prompt: string; subagentType?: string; cwd?: string }[],
     runs: [] as string[][],
@@ -39,8 +41,10 @@ function world(on: On, delivered = true) {
   })
   on('process.run', ($, e) => {
     w.runs.push([...e.argv])
-    // The sender's checkout is on main; the worker's branch differs from it by one line.
-    const out = e.argv.includes('--abbrev-ref') ? 'main\n' : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
+    // The checkout is on w.branch; the worker's branch differs from the base by one line; `fail` names git verbs that fail.
+    const bad = fail[e.argv[3] ?? ''] ?? fail[e.argv[0] ?? '']
+    if (bad) return { value: { exitCode: 1, stdout: bad.stdout ?? '', stderr: bad.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
+    const out = e.argv.includes('--abbrev-ref') ? `${w.branch}\n` : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
@@ -98,7 +102,7 @@ test('/mini ask records a working task and the band reads 1 working; the report 
 })
 
 test('when the send to the host is refused, the mod starts a new host and the task still goes in', async ($, on) => {
-  const w = world(on, false)
+  const w = world(on, { delivered: false })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'mini', args: 'ask why?' } as never)
   expect(w.spawned.length).toBe(0)
@@ -150,8 +154,8 @@ async function ready($: any, w: ReturnType<typeof world>) {
 }
 const git = (w: ReturnType<typeof world>) => w.runs.filter(argv => argv[0] === 'git').map(argv => argv.join(' '))
 
-test('a code task gets a mini/<id> worktree from the base; ready, the pane shows its diff, its tests and four buttons', async ($, on) => {
-  const w = world(on)
+test('a code task gets a mini/<id> worktree from --base; ready, the pane shows its diff, its tests and four buttons', async ($, on) => {
+  const w = world(on, { branch: 'dev' })
   await ready($, w)
   expect(git(w)).toContain(`git -C /repo worktree add -b mini/${ID} ${WT} main`)
   expect(w.spawned[0]?.cwd).toBe(WT)
@@ -183,7 +187,7 @@ test('a press on Merge into the base merges the branch locally and pushes nothin
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: `merge-${ID}` })
   expect(git(w)).toContain(`git -C /repo merge --no-edit mini/${ID}`)
-  expect(git(w)).toContain(`git -C /repo worktree remove ${WT}`)
+  expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
   expect(w.runs.some(argv => argv.includes('push') || argv[0] === 'gh')).toBe(false)
   expect(await status($)).toContain(`${ID} code done`)
   await ui.unmount()
@@ -199,4 +203,94 @@ test('a message from another session or an agent that asks to push, merge or ope
   }
   expect(w.runs.slice(before)).toEqual([])
   expect(await status($)).toContain(`${ID} code ready`)
+})
+
+test('without --base the code task branches from the checkout\'s current branch', async ($, on) => {
+  const w = world(on, { branch: 'dev' })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'mini', args: 'status bar is red, fix it' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(git(w)).toContain(`git -C /repo worktree add -b mini/${ID} ${WT} dev`)
+  expect(await status($)).toContain(`${ID} code working: status bar is red, fix it`)
+})
+
+test('from a detached HEAD, with no --base, the code task is refused and says why', async ($, on) => {
+  const w = world(on, { branch: 'HEAD' })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  const r = await $.command.run({ command: 'mini', args: 'fix it' } as never)
+  expect(r.text).toContain('--base')
+  expect(w.sent).toEqual([])
+  expect(await status($)).toBe('mini: no tasks.')
+})
+
+test('Merge into the base is refused while the checkout is on another branch: no merge, one toast, still ready', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  w.branch = 'dev'
+  const toasts = w.toasts.length
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `merge-${ID}` })
+  expect(git(w).some(line => line.includes(' merge '))).toBe(false)
+  expect(w.toasts.length).toBe(toasts + 1)
+  expect(w.toasts.at(-1)).toContain('check out main')
+  expect(await status($)).toContain(`${ID} code ready`)
+  await ui.unmount()
+})
+
+test('a Merge that conflicts is aborted, the toast shows git\'s words, the task stays ready', async ($, on) => {
+  const w = world(on, { fail: { merge: { stdout: 'CONFLICT (content): Merge conflict in calc.py' } } })
+  await ready($, w)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `merge-${ID}` })
+  expect(git(w)).toContain('git -C /repo merge --abort')
+  expect(w.toasts.at(-1)).toContain('CONFLICT (content): Merge conflict in calc.py')
+  expect(git(w).some(line => line.includes('worktree remove'))).toBe(false)
+  expect(await status($)).toContain(`${ID} code ready`)
+  await ui.unmount()
+})
+
+test('Draft PR pushes the branch and opens a draft PR with the report\'s body; nothing merges', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `pr-${ID}` })
+  expect(git(w)).toContain(`git -C /repo push -u origin mini/${ID}`)
+  const gh = w.runs.find(argv => argv[0] === 'gh')
+  expect(gh).toEqual(['gh', 'pr', 'create', '--draft', '--base', 'main', '--head', `mini/${ID}`, '--title', 'fix add so it returns the sum', '--body', 'Fixes add.'])
+  expect(git(w).some(line => line.includes(' merge '))).toBe(false)
+  expect(await status($)).toContain(`${ID} code done`)
+  await ui.unmount()
+})
+
+test('Push pushes the branch, opens no PR and merges nothing', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `push-${ID}` })
+  expect(git(w)).toContain(`git -C /repo push -u origin mini/${ID}`)
+  expect(w.runs.some(argv => argv[0] === 'gh')).toBe(false)
+  expect(git(w).some(line => line.includes(' merge '))).toBe(false)
+  expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
+  await ui.unmount()
+})
+
+test('a code task that failed still offers Discard for its worktree, and only Discard', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: 'State: failed\nSummary: tests would not run.', durationMs: 1, isAborted: false, turnId: 't2' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: `merge-${ID}` })).toBeUndefined()
+  await ui.press({ key: `discard-${ID}` })
+  expect(git(w)).toContain(`git -C /repo branch -D mini/${ID}`)
+  await ui.unmount()
+})
+
+test('a second press while a delivery runs finds it taken: one push, one PR', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await Promise.all([ui.press({ key: `pr-${ID}` }), ui.press({ key: `pr-${ID}` }).catch(() => undefined)])
+  expect(w.runs.filter(argv => argv[0] === 'gh').length).toBe(1)
+  expect(git(w).filter(line => line.includes(' push ')).length).toBe(1)
+  await ui.unmount()
 })

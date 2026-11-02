@@ -1,3 +1,5 @@
+export type Delivery = 'merge' | 'push' | 'pr' | 'discard'
+
 export type State = 'working' | 'waiting for you' | 'ready' | 'watching' | 'done' | 'failed'
 
 /** One ledger entry, kept in `$.store` under `kiss-mini/task/<id>` and shared by every session. */
@@ -22,7 +24,9 @@ export type Task = {
   diff?: string
   tests?: string
   pr?: string
-  delivered?: 'merge' | 'push' | 'pr' | 'discard'
+  delivered?: Delivery
+  /** A delivery under way, claimed before its first git call: a second press finds it taken. */
+  busy?: Delivery
 }
 
 declare module 'claude-code' {

@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { State, Task } from './types'
+import type { Delivery, State, Task } from './types'
 
 type $ = EngineInterface
 
@@ -106,29 +106,53 @@ async function send($: $, id: string) {
   return 'started a new host'
 }
 
-type Delivery = 'merge' | 'push' | 'pr' | 'discard'
 const DELIVERY: [Delivery, string][] = [['merge', 'Merge into the base'], ['push', 'Push'], ['pr', 'Draft PR'], ['discard', 'Discard']]
 
+/** Whether the pane offers this delivery: Discard for any code task that still has a worktree, the others when ready. */
+const offers = (t: Task, how: Delivery) =>
+  t.kind === 'code' && !t.busy && (how === 'discard' ? !!t.worktree && t.state !== 'working' : t.state === 'ready')
+
 /** Owner only: called from a press in the pane, never from a message or a tool. Nothing else merges, pushes or opens a PR. */
+// Presses in this session that are under way: the store's claim covers other sessions, this covers the read before it.
+const pressed = new Set<string>()
+
 async function deliver($: $, id: string, how: Delivery) {
+  if (pressed.has(id)) return
+  pressed.add(id)
+  try {
+    await deliverOnce($, id, how)
+  } finally {
+    pressed.delete(id)
+  }
+}
+
+async function deliverOnce($: $, id: string, how: Delivery) {
   const t = (await $.store.get(TASK + id)) as Task | undefined
-  if (!t || t.state !== 'ready' || !t.branch || !t.worktree) return
+  if (!t || !offers(t, how) || !t.branch || !t.worktree) return
+  await save($, { ...t, busy: how })
   const git = (...args: string[]) => $.process.run(['git', '-C', t.cwd, ...args])
-  let r = { exitCode: 0, stderr: '' }
+  let r = { exitCode: 0, stdout: '', stderr: '' }
   if (how === 'merge') {
     const head = (await git('rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim()
-    r = head === t.base ? await git('merge', '--no-edit', t.branch) : { exitCode: 1, stderr: `check out ${t.base} in ${t.cwd} first` }
+    if (head !== t.base) r = { exitCode: 1, stdout: '', stderr: `check out ${t.base} in ${t.cwd} first` }
+    else if ((r = await git('merge', '--no-edit', t.branch)).exitCode !== 0) await git('merge', '--abort')
   } else if (how !== 'discard') {
     r = await git('push', '-u', 'origin', t.branch)
     if (r.exitCode === 0 && how === 'pr') {
       r = await $.process.run(['gh', 'pr', 'create', '--draft', '--base', t.base!, '--head', t.branch, '--title', t.title, '--body', t.pr ?? t.report ?? ''], { cwd: t.cwd })
     }
   }
-  if (r.exitCode !== 0) return $.ui.toast(`mini ${id}: ${how} failed: ${r.stderr.trim().slice(0, 200)}`)
-  // Only a discard throws work away: elsewhere a worktree with uncommitted changes stays.
-  const gone = await git('worktree', 'remove', ...(how === 'discard' ? ['--force'] : []), t.worktree)
+  if (r.exitCode !== 0) {
+    await save($, t)
+    await refresh($)
+    return $.ui.toast(`mini ${id}: ${how} failed: ${`${r.stdout}\n${r.stderr}`.trim().slice(0, 400)}`)
+  }
+  // The delivered work is the branch (or, for a discard, nothing): the worktree goes, whatever it holds.
+  const gone = await git('worktree', 'remove', '--force', t.worktree)
   if (how === 'discard') await git('branch', '-D', t.branch)
-  await save($, { ...t, state: 'done', delivered: how, ...(gone.exitCode === 0 ? { worktree: undefined } : {}) })
+  if (gone.exitCode !== 0) $.ui.toast(`mini ${id}: worktree kept at ${t.worktree}: ${gone.stderr.trim().slice(0, 200)}`)
+  const { pr, diff, tests, ...rest } = t
+  await save($, { ...rest, state: 'done', delivered: how, ...(gone.exitCode === 0 ? { worktree: undefined } : {}) })
   await refresh($)
 }
 
@@ -144,7 +168,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'mini',
-      description: 'kiss-mini-agent: a small task in a background worker; no argument opens the pane',
+      description: 'kiss-mini-agent: /mini <task> a code change, /mini ask <question>, /mini status (alone) the list; no argument opens the pane',
       argumentHint: '<task> [--base <branch>] | ask <question> | status',
     })
     if (await isHost($)) {
@@ -165,7 +189,7 @@ export const register: Register = on => {
       await $.ui.open({ id: PANE, title: 'mini' })
       return { text: 'mini: pane opened.' }
     }
-    if (verb !== 'status') {
+    if (e.args.trim() !== 'status') {
       const id = await newId($)
       const cwd = await $.session.cwd()
       const t: Task = { id, kind: 'question', title: rest.join(' '), sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now() }
@@ -173,8 +197,9 @@ export const register: Register = on => {
         const words = [verb, ...rest]
         const at = words.indexOf('--base')
         const base = at >= 0 ? words.splice(at, 2)[1] : undefined
-        const head = await $.process.run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])
-        Object.assign(t, { kind: 'code', title: words.join(' '), base: base ?? head.stdout.trim(), branch: `mini/${id}`, worktree: `${await folder($, id)}/wt` })
+        const head = base ?? (await $.process.run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
+        if (!head || head === 'HEAD') return { text: `mini: ${cwd} is on no branch (or in no repository): name one with --base <branch>.` }
+        Object.assign(t, { kind: 'code', title: words.join(' '), base: head, branch: `mini/${id}`, worktree: `${await folder($, id)}/wt` })
       }
       if (!t.title) return { text: 'mini: say what to do: /mini <task>, /mini ask <question>.' }
       await save($, t)
@@ -236,15 +261,13 @@ export const register: Register = on => {
           <Box flexDirection="column" key={t.id}>
             <Text>{t.id} {t.kind} {t.state}: {t.title}</Text>
             {t.report && <Text dimColor>{t.report}</Text>}
-            {t.state === 'ready' && t.kind === 'code' && (
-              <Box flexDirection="column">
-                <Text>{t.branch} from {t.base}: {t.diff}</Text>
-                <Text>tests: {t.tests}</Text>
-                <Box flexDirection="row" gap={1}>
-                  {DELIVERY.map(([how, label]) => (
-                    <Button key={`${how}-${t.id}`} label={label} onPress={() => deliver($, t.id, how)} />
-                  ))}
-                </Box>
+            {t.state === 'ready' && t.kind === 'code' && <Text>{t.branch} from {t.base}: {t.diff}</Text>}
+            {t.state === 'ready' && t.kind === 'code' && <Text>tests: {t.tests}</Text>}
+            {DELIVERY.some(([how]) => offers(t, how)) && (
+              <Box flexDirection="row" gap={1}>
+                {DELIVERY.filter(([how]) => offers(t, how)).map(([how, label]) => (
+                  <Button key={`${how}-${t.id}`} label={label} onPress={() => deliver($, t.id, how)} />
+                ))}
               </Box>
             )}
           </Box>
