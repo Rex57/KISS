@@ -17,7 +17,8 @@ store have?", never "Is it 31?". Each one must have an answer in the code or a r
 ## 2. Truth
 
 Answer every question yourself from the code (CodeGraph, a store made fresh, the service), with the
-file and line, before any reader reports. A truth written after the readers report anchors on them.
+file and line, and write the answers to a scratch file (`Q | answer | file:line`) before you start the
+readers. A truth written after the readers report anchors on them.
 
 ## 3. Readers
 
