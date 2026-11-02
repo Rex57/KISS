@@ -26,11 +26,14 @@ from inventory import TEXT  # noqa: E402
 def plan(repo, tsv):
     files = set(C.tracked(repo, "*"))
     moves = {}
-    for line in open(tsv, encoding="utf-8"):
+    for n, line in enumerate(open(tsv, encoding="utf-8"), 1):
         line = line.split("#", 1)[0].rstrip("\n")
         if not line.strip():
             continue
-        old, new = [x.strip().rstrip("/") for x in line.split("\t")]
+        parts = line.split("\t")
+        if len(parts) != 2:
+            sys.exit("%s line %d: want old<TAB>new" % (tsv, n))
+        old, new = [x.strip().rstrip("/") for x in parts]
         under = sorted(f for f in files if f.startswith(old + "/"))
         if old in files:
             moves[old] = new
@@ -170,7 +173,7 @@ def selftest():
              "docs/old/setup.md": "# Setup\n## Install\n[back](../../README.md)\n",
              "tools/build.py": "PAGE = 'docs/old/setup.md'\n",
              "docs/archive/old.md": "# Old\nThe guide was docs/old/setup.md.\n",
-             "tools/check_docs.py": "CONFIG = {\"history\": [\"docs/archive/\"]}\n"}
+             "tools/check_docs.py": "CONFIG = {\"history\": [\"archive/\"]}\nCONFIG = {\"history\": [\"docs/archive/\"]}\n"}
     def tree(d):
         out = {}
         for root, dirs, names in os.walk(d):
@@ -190,9 +193,12 @@ def selftest():
         subprocess.run(git + ["add", "-A"], cwd=repo, check=True)
         subprocess.run(git + ["commit", "-qm", "pages"], cwd=repo, check=True)
         tsv = os.path.join(d, "moves.tsv")
-        open(tsv, "w").write("docs/old/setup.md\tdocs/setup.md\n")
+        open(tsv, "w").write("docs/old/setup.md docs/setup.md\n")       # a space, not a tab
         me = [sys.executable, "-I", os.path.abspath(__file__), repo, tsv]
         before = tree(repo)
+        out = subprocess.run(me, capture_output=True, text=True)
+        assert out.returncode == 1 and out.stderr.strip().endswith("line 1: want old<TAB>new"), out.stderr
+        open(tsv, "w").write("docs/old/setup.md\tdocs/setup.md\n")
         out = subprocess.run(me, capture_output=True, text=True)
         assert out.returncode == 0 and "dry run: 1 moves" in out.stdout, (out.stdout, out.stderr)
         assert tree(repo) == before, "the dry run changed the tree"
@@ -203,7 +209,7 @@ def selftest():
                    "docs/setup.md": "# Setup\n## Install\n[back](../README.md)\n",
                    "tools/build.py": "PAGE = 'docs/setup.md'\n",
                    "docs/archive/old.md": "# Old\nThe guide was docs/old/setup.md.\n",
-                   "tools/check_docs.py": "CONFIG = {\"history\": [\"docs/archive/\"]}\n"}, got
+                   "tools/check_docs.py": "CONFIG = {\"history\": [\"archive/\"]}\nCONFIG = {\"history\": [\"docs/archive/\"]}\n"}, got
     return "move_docs selftest ok: a dry run changes nothing; --apply fixes links, anchors, labels and paths; history keeps its words"
 
 
