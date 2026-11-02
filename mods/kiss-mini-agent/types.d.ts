@@ -19,6 +19,8 @@ export type Task = {
   lastTool?: string
   calls?: string[]
   statusAt?: number
+  /** The task's secret: an answer or a stop must carry it (only the mod reads the ledger). */
+  key?: string
   /** When the host gave it a worker; a worker past 30 minutes is stopped. */
   claimed?: number
   /** Stopped by the owner or the time limit: the worker's tool calls are denied, its last report ignored. */

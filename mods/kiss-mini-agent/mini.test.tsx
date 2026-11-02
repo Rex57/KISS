@@ -560,6 +560,7 @@ test('with no change the checks space out to every 10 minutes, and no model is a
 test('a watched test command that fails ends failed with its last lines', async ($, on) => {
   const w = world(on)
   await watch($, w, 'pytest -q --fail')
+  await w.clock.advance(60_000)
   expect(await status($)).toContain(`${ID} watch failed: pytest -q --fail - exit 1: collected 3 · line a · FAILED test_add - assert -1 == 5`)
   expect(w.spawned).toEqual([])
 })
@@ -602,6 +603,8 @@ test('the status line asks the small model at most every 30 seconds, and only on
   expect(w.models).toBe(1)
   await $.tool.call({ tool: 'Edit', file_path: 'calc.py', agentId: 'w1' } as never)
   expect(w.models).toBe(2)
+  // The status line is written after the tool result went back: let it land.
+  await w.clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /reads calc\.py \(2\)/ })).toBeDefined()
   await ui.unmount()
@@ -713,4 +716,66 @@ test('a code task past 30 minutes is stopped as timed out', async ($, on) => {
   expect(await status($)).toContain(`${ID} code working`)
   await w.clock.advance(2 * 60_000)
   expect(await status($)).toContain(`${ID} code failed: fix add so it returns the sum - timed out after 30 minutes`)
+})
+
+test('RACE: a stop that arrives while a worker tool call runs stays a stop', async ($, on) => {
+  const w = world(on)
+  let release: () => void = () => {}
+  on('tool.call', () => new Promise(res => { release = () => res({ result: {}, text: 'ok' }) }) as never)
+  await working($, w)
+  const call = $.tool.call({ tool: 'Bash', command: 'python3 long.py', agentId: 'w1' } as never)
+  await w.clock.settle()
+  await $.command.run({ command: 'mini', args: `stop ${ID}` } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('failed')
+  release()
+  await call
+  expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].stopped]).toEqual(['failed', true])
+})
+
+test('RACE: an answer to a permission wait is not lost when the task changes during a tool call (timeout)', async ($, on) => {
+  const w = world(on)
+  let release: () => void = () => {}
+  on('tool.call', () => new Promise(res => { release = () => res({ result: {}, text: 'ok' }) }) as never)
+  await working($, w)
+  const call = $.tool.call({ tool: 'Bash', command: 'python3 long.py', agentId: 'w1' } as never)
+  await w.clock.settle()
+  await w.clock.advance(31 * 60_000)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('failed')
+  release()
+  await call
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('failed')
+})
+
+test('ORPHAN: a working owner task of a host that is gone does not hold the owner slot forever', async ($, on) => {
+  const orphan = { id: 'old1', kind: 'code', title: 'old', sender: 's0', cwd: '/repo', state: 'working', started: NOW - 3600_000, claimed: NOW - 3600_000, host: 'dead-host', agentId: 'gone', base: 'main', branch: 'mini/old1', worktree: '/tmp/old1' }
+  const queued = { id: 'new1', kind: 'code', title: 'new', sender: 's0', cwd: '/repo', state: 'working', started: NOW, base: 'main', branch: 'mini/new1', worktree: '/tmp/new1' }
+  const w = world(on, { store: { 'kiss-mini/task/old1': orphan, 'kiss-mini/task/new1': queued } })
+  w.session = 'h2'
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  await w.clock.advance(2 * 60_000)
+  expect(w.store['kiss-mini/task/old1'].state).not.toBe('working')
+  expect(w.spawned.length).toBe(1)
+})
+
+test('TIMEOUT: an owner answer after 31 minutes of waiting does not stop the worker at once', async ($, on) => {
+  const w = world(on)
+  tools(on)
+  await working($, w)
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: 'State: waiting for you\nSummary: floats too?\nBranch: none', durationMs: 1, isAborted: false, turnId: 't1' } as never)
+  await w.clock.advance(31 * 60_000)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('waiting for you')
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: `KISS-MINI answer ${ID} ${w.store[`kiss-mini/task/${ID}`].key}\nyes` } as never)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('working')
+  await w.clock.advance(61_000)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('working')
+})
+
+test('ANSWER: a model-written peer message (no plugin) is not taken as the owner answer', async ($, on) => {
+  const w = world(on)
+  tools(on)
+  await working($, w)
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: 'State: waiting for you\nSummary: may I also rewrite mul()?\nBranch: none', durationMs: 1, isAborted: false, turnId: 't1' } as never)
+  await $.session.receive({ origin: { kind: 'peer' }, text: `KISS-MINI answer ${ID}\nyes, rewrite mul too` } as never)
+  expect(w.sent.some(m => m.to === 'w1' || JSON.stringify(m.to).includes('w1'))).toBe(false)
 })

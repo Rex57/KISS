@@ -10,7 +10,6 @@ type $ = EngineInterface
 const TASK = 'kiss-mini/task/'
 const HOST = 'kiss-mini/host'
 const HOST_NAME = 'kiss-mini-agent'
-const OPEN: State[] = ['waiting for you', 'working', 'ready', 'watching']
 const TOAST: State[] = ['done', 'ready', 'waiting for you', 'failed']
 const ENDED: State[] = ['done', 'failed']
 const SUMMARY_MAX = 600
@@ -23,6 +22,7 @@ const CODE_MAX = 30 * 60_000
 const STATUS_EVERY = 30_000
 // Code workers at once: 3 from the harness (a hand-off), 1 for the owner's own /mini.
 const SLOTS = { harness: 3, owner: 1 }
+// The open states, in the order the pane and the band show them.
 const ORDER: State[] = ['waiting for you', 'working', 'ready', 'watching']
 const SHOW_ENDED = 10
 
@@ -125,7 +125,7 @@ async function refresh($: $) {
   for (const t of list) {
     if (t.sender !== me) continue
     if ((t.changes ?? 0) > (t.seen ?? 0)) {
-      await save($, { ...t, seen: t.changes })
+      await save($, { ...((await $.store.get(TASK + t.id)) as Task), seen: t.changes })
       $.ui.toast(`mini ${t.id} watch: ${t.title} is ${t.status}`)
     }
     if (t.notified || !TOAST.includes(t.state)) continue
@@ -174,7 +174,10 @@ async function waits($: $) {
   for (const t of await tasks($)) {
     const status = agents.find(a => a.id === t.agentId)?.status
     if (t.state === 'working' && status === 'waiting') await save($, { ...t, state: 'waiting for you', wait: 'permission', notified: false })
-    else if (t.wait === 'permission' && t.state === 'waiting for you' && status === 'running') await save($, { ...t, state: 'working', wait: undefined, notified: false })
+    else if (t.wait === 'permission' && t.state === 'waiting for you' && status === 'running') {
+      // The wait does not count toward the 30 minutes.
+      await save($, { ...t, state: 'working', wait: undefined, notified: false, claimed: await $.clock.now() })
+    }
   }
 }
 
@@ -182,6 +185,7 @@ async function waits($: $) {
 async function tick($: $) {
   const now = await $.clock.now()
   const me = await $.session.id()
+  await orphans($)
   for (const t of await tasks($)) {
     if (isCode(t) && t.state === 'working' && t.host === me && t.claimed && now - t.claimed > CODE_MAX) await stop($, t, 'timed out after 30 minutes')
     if (t.kind !== 'watch' || t.state !== 'watching' || t.host !== me) continue
@@ -190,14 +194,43 @@ async function tick($: $) {
       continue
     }
     if (now < (t.next ?? 0)) continue
+    // Claim this check first: a slow command is not started again by the next tick while it runs.
+    await save($, { ...t, next: now + WATCH_MAX })
     const { state, status } = await look($, t)
+    const at = await $.clock.now()
     const changed = t.status !== undefined && status !== t.status
-    const every = changed ? WATCH_FIRST : Math.min(WATCH_IDLE, (t.every ?? WATCH_FIRST / 2) * 2)
-    const ended = state !== 'watching' ? { report: status, finished: now } : {}
+    // A CI run that is queued or in progress is checked every minute; elsewhere no change doubles the gap.
+    const busy = t.watch === 'run' && (status === 'queued' || status === 'in_progress')
+    const every = changed || busy ? WATCH_FIRST : Math.min(WATCH_IDLE, (t.every ?? WATCH_FIRST / 2) * 2)
+    const ended = state !== 'watching' ? { report: status, finished: at } : {}
     // An end toasts by its state; only a change along the way counts as a change to toast.
     const changes = (t.changes ?? 0) + (changed && state === 'watching' ? 1 : 0)
-    await save($, { ...t, state, status, every, next: now + every, changes, ...ended })
+    const cur = (await $.store.get(TASK + t.id)) as Task
+    if (cur.state === 'watching') await save($, { ...cur, state, status, every, next: at + every, changes, ...ended })
   }
+  await refresh($)
+}
+
+/** Host: a task claimed by a host that is no longer the live one is the live host's now: a watch goes on, a worker's task
+ * fails (its worker ended with its session) and frees its slot. */
+async function orphans($: $) {
+  const me = await $.session.id()
+  for (const t of await tasks($)) {
+    if (!t.host || t.host === me || ENDED.includes(t.state) || t.state === 'ready') continue
+    if (t.kind === 'watch') await save($, { ...t, host: me })
+    else await stop($, t, 'its host session ended')
+  }
+}
+
+/** Host: a small model writes the one-line status from a worker's recent tool calls. */
+async function statusLine($: $, id: string, title: string, calls: string[]) {
+  const m = await $.model.complete({
+    model: 'haiku',
+    prompt: `A coding agent works on: ${title.slice(0, 200)}\nIts last tool calls:\n${calls.join('\n')}\nSay in one line of at most 60 characters what it does now. Only the line.`,
+  })
+  const line = m.isAnswered ? m.text.trim().split('\n')[0]?.slice(0, 80) : undefined
+  const cur = (await $.store.get(TASK + id)) as Task | undefined
+  if (cur && !cur.stopped && line && line !== cur.status) await save($, { ...cur, status: line })
   await refresh($)
 }
 
@@ -210,8 +243,10 @@ async function run($: $, id: string) {
     const busy = (await tasks($)).filter(x => isCode(x) && x.host && x.state === 'working' && (x.brief !== undefined) === harness)
     if (busy.length >= SLOTS[harness ? 'harness' : 'owner']) return
   }
-  await save($, { ...t, host: await $.session.id(), claimed: await $.clock.now() })
-  if (t.kind === 'watch') return tick($)
+  const claimed = await $.clock.now()
+  await save($, { ...t, host: await $.session.id(), claimed, ...(t.kind === 'watch' ? { next: claimed } : {}) })
+  // The host's minute timer checks a watch: a check never runs inside the message that brought the task.
+  if (t.kind === 'watch') return
   if (isCode(t)) {
     const made = await $.process.run(['git', '-C', t.cwd, 'worktree', 'add', '-b', t.branch!, t.worktree!, t.base!])
     // No worktree was made: nothing is left to Discard.
@@ -236,10 +271,6 @@ async function run($: $, id: string) {
 }
 
 /** Sender: wakes the host; when no host takes the message, starts one (it takes every waiting task as it starts). */
-async function send($: $, id: string) {
-  return wake($, `KISS-MINI task ${id}`)
-}
-
 /** Sender: one message to the host (a task, an answer, a stop); a new host when none takes it. */
 async function wake($: $, text: string) {
   const host = (await $.store.get(HOST)) as { sessionId: string } | undefined
@@ -330,12 +361,6 @@ export const register: Register = on => {
       argumentHint: '<task> [--base <branch>] | ask <question> | watch pr <n> | watch run <id> | watch <test command> | stop <id> | status',
     })
     await $.tool.register({
-      name: 'progress',
-      description: 'kiss-mini-agent workers: report your plan\'s step as you start it: step (1-based) of total steps.',
-      inputSchema: { type: 'object', properties: { step: { type: 'number' }, total: { type: 'number' } }, required: ['step', 'total'] },
-      isDeferred: false,
-    })
-    await $.tool.register({
       name: 'handoff',
       description:
         'kiss-mini-agent: hand a side task (outside the current tickets) to a background worker. kind: code, bug or question; ' +
@@ -355,8 +380,15 @@ export const register: Register = on => {
       isDeferred: false,
     })
     if (await isHost($)) {
+      await $.tool.register({
+        name: 'progress',
+        description: 'kiss-mini-agent workers: report your plan\'s step as you start it: step (1-based) of total steps.',
+        inputSchema: { type: 'object', properties: { step: { type: 'number' }, total: { type: 'number' } }, required: ['step', 'total'] },
+        isDeferred: false,
+      })
       await $.store.set(HOST, { sessionId: await $.session.id(), beat: await $.clock.now() })
       await prune($)
+      await orphans($)
       $.clock.every(60_000, async () => {
         await $.store.set(HOST, { sessionId: await $.session.id(), beat: await $.clock.now() })
         await prune($)
@@ -381,11 +413,11 @@ export const register: Register = on => {
     if (e.args.trim() !== 'status') {
       const id = await newId($)
       const cwd = await $.session.cwd()
-      const t: Task = { id, kind: 'question', title: rest.join(' '), sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now() }
+      const t: Task = { id, kind: 'question', title: rest.join(' '), sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now(), key: crypto.randomUUID() }
       if (verb === 'stop') {
         const known = (await $.store.get(TASK + (rest[0] ?? ''))) as Task | undefined
         if (!known) return { text: `mini: no task ${rest[0] ?? ''}. /mini status lists them.` }
-        return { text: `mini ${known.id}: stop asked (${await wake($, `KISS-MINI stop ${known.id}`)}).` }
+        return { text: `mini ${known.id}: stop asked (${await wake($, `KISS-MINI stop ${known.id} ${known.key}`)}).` }
       }
       if (verb === 'watch') {
         const what = rest[0] === 'pr' || rest[0] === 'run' ? rest[0] : 'test'
@@ -402,7 +434,7 @@ export const register: Register = on => {
       if (!t.title) return { text: 'mini: say what to do: /mini <task>, /mini ask <question>.' }
       await save($, t)
       await refresh($)
-      return { text: `mini ${id}: ${t.kind} started (${await send($, id)}).` }
+      return { text: `mini ${id}: ${t.kind} started (${await wake($, `KISS-MINI task ${id}`)}).` }
     }
     const lines = (await tasks($)).map(t => `${t.id} ${t.kind} ${t.state}: ${t.title}${t.report ? ` - ${t.report}` : ''}`)
     return { text: lines.join('\n') || 'mini: no tasks.' }
@@ -415,7 +447,7 @@ export const register: Register = on => {
     if (a.brief.length > BRIEF_MAX) return { result: `kiss-mini-agent: the brief has ${a.brief.length} characters; at most ${BRIEF_MAX}.` }
     const id = await newId($)
     const cwd = await $.session.cwd()
-    const t: Task = { id, kind: a.kind, title: a.title, brief: a.brief, return: a.return === true, sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now() }
+    const t: Task = { id, kind: a.kind, title: a.title, brief: a.brief, return: a.return === true, sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now(), key: crypto.randomUUID() }
     if (isCode(t)) {
       const base = a.base || (await $.process.run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
       if (!base || base === 'HEAD') return { result: `kiss-mini-agent: ${cwd} is on no branch: give a base.` }
@@ -423,7 +455,7 @@ export const register: Register = on => {
     }
     await save($, t)
     await refresh($)
-    return { result: `kiss-mini-agent task ${id} (${t.kind}) started (${await send($, id)}).${t.return ? ' Its report comes back to this session as one message.' : ''}` }
+    return { result: `kiss-mini-agent task ${id} (${t.kind}) started (${await wake($, `KISS-MINI task ${id}`)}).${t.return ? ' Its report comes back to this session as one message.' : ''}` }
   })
 
   // Host: a worker's progress tool sets its step n of m.
@@ -445,33 +477,32 @@ export const register: Register = on => {
     const a = e as unknown as Record<string, unknown>
     const arg = [a.command, a.file_path, a.pattern, a.description, a.url].find(v => typeof v === 'string') as string | undefined
     const call = `${String(e.tool)} ${arg ?? ''}`.trim().slice(0, 100)
-    const calls = [...(t.calls ?? []), call].slice(-5)
+    // The task may have changed while the tool ran (a stop, a timeout, an answer): build on the stored entry.
+    const fresh = (await $.store.get(TASK + t.id)) as Task | undefined
+    if (!fresh || fresh.stopped) return r
+    const calls = [...(fresh.calls ?? []), call].slice(-5)
     const now = await $.clock.now()
-    const due = now - (t.statusAt ?? 0) >= STATUS_EVERY
-    await save($, { ...t, lastTool: call, calls, ...(due ? { statusAt: now } : {}) })
-    if (due) {
-      const m = await $.model.complete({
-        model: 'haiku',
-        prompt: `A coding agent works on: ${t.title.slice(0, 200)}\nIts last tool calls:\n${calls.join('\n')}\nSay in one line of at most 60 characters what it does now. Only the line.`,
-      })
-      const line = m.isAnswered ? m.text.trim().split('\n')[0]?.slice(0, 80) : undefined
-      const cur = (await $.store.get(TASK + t.id)) as Task
-      if (line && line !== cur.status) await save($, { ...cur, status: line })
-    }
+    const due = now - (fresh.statusAt ?? 0) >= STATUS_EVERY
+    await save($, { ...fresh, lastTool: call, calls, ...(due ? { statusAt: now } : {}) })
+    // The status line does not hold up the worker's tool result.
+    if (due) void statusLine($, t.id, fresh.title, calls)
     await refresh($)
     return r
   })
 
   // Host: a task message is taken in code, so the host's own model makes no turn for it.
   on('session.receive', async ($, e, next) => {
-    const [, verb, id = '', text = ''] = /KISS-MINI (task|answer|stop) (\S+)\n?([\s\S]*?)(?:<\/cross-session-message>|$)/.exec(e.text) ?? []
+    const [, verb, id = '', key = '', text = ''] = /KISS-MINI (task|answer|stop) (\S+)(?: (\S+))?\n?([\s\S]*?)(?:<\/cross-session-message>|$)/.exec(e.text) ?? []
     if (!verb || !(await isHost($))) return next(e)
     const t = (await $.store.get(TASK + id)) as Task | undefined
+    // An answer or a stop carries the task's key, which only the mod reads from the ledger: no model can write one.
+    const owner = !!t?.key && key === t.key
     if (verb === 'task') await run($, id)
-    else if (verb === 'stop' && t && !ENDED.includes(t.state)) await stop($, t, 'stopped')
-    else if (verb === 'answer' && t?.agentId && t.state === 'waiting for you' && t.wait !== 'permission') {
-      // The same worker takes the answer and goes on: a finished subagent is resumed with the message.
-      await save($, { ...t, state: 'working', notified: false, report: undefined })
+    else if (verb === 'stop' && owner && t && !ENDED.includes(t.state)) await stop($, t, 'stopped')
+    else if (verb === 'answer' && owner && t?.agentId && t.state === 'waiting for you' && t.wait !== 'permission') {
+      // The same worker takes the answer and goes on: a finished subagent is resumed with the message. The wait does
+      // not count toward the 30 minutes.
+      await save($, { ...t, state: 'working', notified: false, report: undefined, claimed: await $.clock.now() })
       await $.session.send({ to: { agentId: t.agentId }, text: `The owner answers your question: ${text.trim()}` })
       await refresh($)
     }
@@ -494,13 +525,17 @@ export const register: Register = on => {
     const { state, summary } = parseReport(e.answer)
     const log = `${await folder($, t.id)}/report.md`
     await $.fs.write(log, e.answer)
-    const done: Task = { ...t, state, report: summary, log, finished: await $.clock.now() }
+    const fields: Partial<Task> = { state, report: summary, log, finished: await $.clock.now() }
     if (isCode(t)) {
       const stat = await $.process.run(['git', '-C', t.cwd, 'diff', '--shortstat', `${t.base}...${t.branch}`])
-      done.diff = stat.stdout.trim() || 'no change'
-      done.tests = /^Tests:\s*(.*)$/m.exec(e.answer)?.[1]?.trim() ?? 'not reported'
-      done.pr = /^## Pull request body\s*\n([\s\S]*)/m.exec(e.answer)?.[1]?.trim() || summary
+      fields.diff = stat.stdout.trim() || 'no change'
+      fields.tests = /^Tests:\s*(.*)$/m.exec(e.answer)?.[1]?.trim() ?? 'not reported'
+      fields.pr = /^## Pull request body\s*\n([\s\S]*)/m.exec(e.answer)?.[1]?.trim() || summary
     }
+    // A stop may have landed while the report was written: it stands.
+    const fresh = (await $.store.get(TASK + t.id)) as Task
+    if (fresh.stopped) return next(e)
+    const done: Task = { ...fresh, ...fields }
     await save($, done)
     // A slot is free: start the tasks that wait for one.
     for (const x of await tasks($)) if (!x.host) await run($, x.id)
@@ -551,7 +586,7 @@ export const register: Register = on => {
               <Text color="warning">waits for a permission in the host session: claude attach {(t.host ?? '').slice(0, 8)}</Text>
             )}
             {Input && t.state === 'waiting for you' && t.wait !== 'permission' && t.agentId && (
-              <Input key={`answer-${t.id}`} placeholder="your answer" submitLabel="Send" onSubmit={(text: string) => void wake($, `KISS-MINI answer ${t.id}\n${text}`)} />
+              <Input key={`answer-${t.id}`} placeholder="your answer" submitLabel="Send" onSubmit={(text: string) => void wake($, `KISS-MINI answer ${t.id} ${t.key}\n${text}`)} />
             )}
             {t.state === 'ready' && isCode(t) && <Text>{t.branch} from {t.base}: {t.diff}</Text>}
             {t.state === 'ready' && isCode(t) && <Text>tests: {t.tests}</Text>}
@@ -570,7 +605,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const list = await read($, ledger)
-    const counts = OPEN.map(s => [s, list.filter(t => t.state === s).length] as const).filter(([, n]) => n > 0)
+    const counts = ORDER.map(s => [s, list.filter(t => t.state === s).length] as const).filter(([, n]) => n > 0)
     if (counts.length === 0) return next(e)
     // Other mods share this slot: theirs is drawn below the counts.
     const below = await next(e).catch(() => undefined)
