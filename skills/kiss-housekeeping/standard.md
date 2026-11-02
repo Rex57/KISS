@@ -43,7 +43,7 @@ The kind comes from the path, so a person and the gate read it the same way **(g
 | log | listed in the gate's `logs` (CHANGELOG, the decision log) | Append-only, newest entry on top. Old entries keep their words. Has a status line. The map links it. |
 | record | a path part starts with `YYYY-MM-DD` | Kept as written. A living page or a log links it (its **index**). |
 | history | under `archive/` | Superseded. Never cited as current. `archive/README.md` indexes the folders. |
-| agent | `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/...` | Instructions for agents. Links and names are checked; no status line. |
+| agent | `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/...`, `.kiss/...` | Instructions for agents. Links and names are checked; no status line. |
 
 A record may get one line at its top that names its replacement: `Superseded by <link> (YYYY-MM-DD).` No other edit to a record, except a path update after a move.
 
@@ -121,7 +121,7 @@ Keep each pattern narrow. An old name that also means something else (`v2` for a
 |---|---|
 | a decision | a numbered entry in `docs/decisions.md` |
 | the reference of one thing: a store, a schema, an API | `docs/reference/<slug>.md`, and a question on the map |
-| a functional specification of a major version (for stakeholders) | `docs/reference/<product>-v<major>-api-v<x.y>.md`: living, on the map, a summary that links each fact's home. The next major version's spec replaces it, and the old one goes to `archive/` with "Superseded by" |
+| a functional specification of a major version (an FSD for stakeholders) | `docs/reference/<product>-v<major>-api-v<x.y>.md`: living, on the map, a summary that links each fact's home. The next major version's spec replaces it, and the old one goes to `archive/` with "Superseded by" |
 | a design before a build | `docs/design/YYYY-MM-DD-slug.md`, and a row in the design index |
 | a how-to for an operator | `docs/operations/` (one runbook per task) |
 | a fact about another system, or a note to its team | `docs/systems/<name>/` (its README holds the current state) |

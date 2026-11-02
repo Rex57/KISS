@@ -10,7 +10,7 @@ The end state: each fact has one **home**. Each page is a **living page** (kept 
 The skill keeps each page true to the code three ways: step 3 checks each claim of "current" against the code, U2 reads each page a change touched against the code before it gets a new `Reviewed` date, and the routing test scores each answer against the code.
 
 Pick the run:
-- **First run**: the repo has no gate yet, and the owner asks for a clean-up. Do steps 1 to 8. Only the owner's ask starts one.
+- **First run**: the owner asks for a clean-up. A repo with no gate gets one only on that ask. Do steps 1 to 8.
 - **Upkeep**: the gate exists, and a phase or a harness run closes, or a page is added. Do steps U1 to U3.
 
 `HK` is this skill's folder (the folder of this file). The scripts are in `$HK/scripts/`. Each one prints its own usage and has a `--selftest`. They use the standard library only, and each one is read-only or a dry run unless you pass `--apply`. Run them as `python3 -I "$HK/scripts/<name>.py"`: each adds its own folder to its import path, so they find each other there.
@@ -20,12 +20,12 @@ Pick the run:
 ### 1. Ground
 1. Make a branch by the repo's delivery rules, from a clean tree.
 2. List the open branches that change docs (`git log main..<branch> -- '*.md'`). A move under an open branch turns into a conflict later. Settle each with the owner: merge one whose content the owner approved into your branch (never into main), or leave its pages alone.
-3. Run the suite once, and note its denominator. The repo's own rules (lint, layering, "every selftest is collected") bind the gate's copy too (step 6).
+3. Run the suite once. The repo's own rules (lint, layering, "every selftest is collected") bind the gate's copy too (step 6).
 
 Done when the branch exists, the suite is green, and no open branch changes a page you will move.
 
 ### 2. Inventory
-Run `python3 -I "$HK/scripts/inventory.py" <repo> > inventory.json` (outside the repo, or in a git-ignored folder), and `python3 -I "$HK/scripts/check_docs.py" <repo>` for the baseline: the gate is read-only, so run it as a report from here on, and install it in the suite only in step 6. Each tracked `.md` file gets a row: kind, lines, last change, title, inbound links, broken links, old names, copies, and `used_by`. `used_by` lists the code, tests, tools and config that name the file's path; these are its **path users**.
+Run `python3 -I "$HK/scripts/inventory.py" <repo> > inventory.json`, and `python3 -I "$HK/scripts/check_docs.py" <repo>` for the baseline: the gate is read-only, so run it as a report from here on, and install it in the suite only in step 6. Each tracked `.md` file gets a row: kind, lines, last change, title, inbound links, broken links, old names, copies, and `used_by`. `used_by` lists the code, tests, tools and config that name the file's path; these are its **path users**.
 Done when the row count equals `git ls-files '*.md' | wc -l`. Print both numbers.
 
 ### 3. Classify
@@ -40,7 +40,7 @@ A date alone proves nothing: an old page can be true, and a page edited yesterda
 Done when every row has an action and every topic in the table has exactly one home.
 
 ### 4. Owner review
-Show the plan to the owner. With more than 40 rows, use a page with a filter table and the counts per action. Name the decisions that belong to the owner: a change to the agent's own instructions, a page that people use being retired, a split of a contract that tests read. Give your recommendation for each one.
+Publish the plan for the owner, with the topic table (topic, files, home). With more than 40 rows, use a page with a filter table and the counts per action. Name the decisions that belong to the owner: a change to the agent's own instructions, a page that people use being retired, a split of a contract that tests read. Give your recommendation for each one.
 Done when the owner has answered each decision.
 
 ### 5. Execute
@@ -69,8 +69,8 @@ Done when the gate passes on the repo and goes **red** on each plant.
 ### 7. Verify once
 Run the full suite and the gate on the exact commit you merge or tag, after the branch switch: a working tree can keep an empty folder that git no longer has, and a check can pass on it. Check everything that serves or packs docs: served pages, release packs, generated sites. Report before and after, each with its denominator: files per kind, broken links, old names in living pages, orphans.
 
-Then run the routing test, before and after ([routing.md](routing.md)). The steps above fix the structure and the names; they do not make a page true, and a page that moved keeps every stale line it had. Fix each wrong answer the test finds in this run, and list each partial one as upkeep.
-Done when the gate is green on the merged commit and every routing question is routed by links with no wrong answer.
+Then run the routing test, before and after ([routing.md](routing.md)). The steps above fix the structure and the names; they do not make a page true, and a page that moved keeps every stale line it had. Fix each wrong answer the test finds in this run, and list each partial one as upkeep. When you cannot start fresh readers, say that the routing test did not run: the run is then not done. Report the number of topics with more than one home: it must be 0.
+Done when the gate is green on the merged commit, every routing question is routed by links with no wrong answer, and no topic has more than one home.
 
 ### 8. Fold back
 Write down what the run taught, where it belongs:
@@ -81,7 +81,7 @@ Done when each lesson of the run is in one of the two.
 
 ## Upkeep
 
-- **U1.** Run the gate. Fix each failure at its home.
+- **U1.** Copy the code below `CONFIG` from `$HK/scripts/check_docs.py` over the project's `tools/check_docs.py`, and keep the project's `CONFIG`. Run the gate. Fix each failure at its home.
 - **U2.** Read each living page that the phase touched against what changed. Make it true, and set its `Reviewed` date. A page too long to read in one pass (a contract, a guide): split it by section across parallel reviewers. First list the exact strings the tests read from the page (search the tests for the page's file name; an `index("...")` on its text is a pointer like a path), and give that list to every reviewer and to the editor. Each reviewer checks every claim in its section against the code and returns its findings as text, each with the evidence (file and line) and the replacement. One editor then checks each finding against the code and applies them all in one scripted pass, where each edit must match exactly once. A names pass is not a review: only a review earns today's `Reviewed` date.
 - **U3.** Put each new page where [standard.md](standard.md) "Where a new page goes" says. Add each new record to its index.
 - **U4.** When the map changes, or an outside document (a spec, an audit, a stakeholder's questions) arrives to be checked against the system, run the routing test ([routing.md](routing.md)) on the tree as it is. Fix each wrong answer at its home.

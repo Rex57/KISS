@@ -30,7 +30,7 @@ Fix each report in the same commit.
 
 ## The commit
 
-1. Write the moves for one step in a `moves.tsv` (`old<TAB>new`; a folder moves everything under it), outside the repo or in a git-ignored folder.
+1. Write the moves for one step in a `moves.tsv` (`old<TAB>new`; a folder moves everything under it).
 2. Run `python3 -I "$HK/scripts/move_docs.py" <repo> moves.tsv`. Read the dry run: it changes nothing.
 3. Run it again with `--apply`.
 4. Fix the path users it reports, and the ones listed above.
