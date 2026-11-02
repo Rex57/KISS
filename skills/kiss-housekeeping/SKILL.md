@@ -82,11 +82,13 @@ Done when each lesson of the run is in one of the two.
 ### The report
 Start the First run's report with one line per step (1 to 8): its Done line, and met or not met, with the reason when not met. The green results (the gate, the suite, the routing totals) come after that table.
 
+### 9. KISS feedback
+In every run, before your final message: run `printenv KISS_FEEDBACK`; when it prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md); else add nothing.
+
 ## Upkeep
 
 - **U1.** Copy the code below `CONFIG` from `$HK/scripts/check_docs.py` over the project's `tools/check_docs.py`, and keep the project's `CONFIG`. Run the gate. Fix each failure at its home.
 - **U2.** Read each living page that the phase touched against what changed. Make it true, and set its `Reviewed` date. A page too long to read in one pass (a contract, a guide): split it by section across parallel reviewers. First list the exact strings the tests read from the page (search the tests for the page's file name; an `index("...")` on its text is a pointer like a path), and give that list to every reviewer and to the editor. Each reviewer checks every claim in its section against the code and returns its findings as text, each with the evidence (file and line) and the replacement. One editor then checks each finding against the code and applies them all in one scripted pass, where each edit must match exactly once. A names pass is not a review: only a review earns today's `Reviewed` date.
 - **U3.** Put each new page where [standard.md](standard.md) "Where a new page goes" says. Add each new record to its index.
 - **U4.** When the map changes, or an outside document (a spec, an audit, a stakeholder's questions) arrives to be checked against the system, run the routing test ([routing.md](routing.md)) on the tree as it is. Fix each wrong answer at its home.
-
-**KISS feedback.** Last, follow [`rules/feedback.md`](../../rules/feedback.md) at the plugin root: with `KISS_FEEDBACK=1`, end your final message with one KISS feedback block; else add nothing.
+- **U5.** KISS feedback, in every run, before your final message: run `printenv KISS_FEEDBACK`; when it prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md); else add nothing.

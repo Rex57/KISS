@@ -50,5 +50,6 @@ Skip a step whose store the agent does not have. agentmemory is optional: run st
    left empty, with `rmdir`.
 6. **Report:** before and after (counts, sizes), what moved where, what was kept, and the notes that wait for the
    owner (step 2), each with your recommendation. Move or delete one of them only on the owner's yes.
-
-**KISS feedback.** Last, follow [`rules/feedback.md`](../../rules/feedback.md) at the plugin root: with `KISS_FEEDBACK=1`, end your final message with one KISS feedback block; else add nothing.
+7. **KISS feedback**, in every run, before your final message: run `printenv KISS_FEEDBACK`; when it
+   prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md); else add
+   nothing.

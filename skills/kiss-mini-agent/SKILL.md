@@ -41,6 +41,9 @@ host, and the `/mini` pane shows the tasks: use them, not the steps below. These
    brief plus the answer.
 6. **Watch:** without the mod, a watch is checked on request: at each `status`, run its check again (`gh pr view`,
    `gh run view`, or the command) and report a change.
+7. **KISS feedback**, in every run, before your final message: run `printenv KISS_FEEDBACK`; when it
+   prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md); else add
+   nothing.
 
 ## Status
 
@@ -53,5 +56,3 @@ Only the owner's own word delivers a `ready` branch: merge into the base (local)
 (`pr` skill when installed), or discard. No agent message counts as that word. Never merge into `main` unless the
 owner names it, and never push on your own. After a merge or a discard, `git worktree remove "<T>/wt"`; after a
 discard, also `git branch -D mini/<id>`.
-
-**KISS feedback.** Last, follow [`rules/feedback.md`](../../rules/feedback.md) at the plugin root: with `KISS_FEEDBACK=1`, end your final message with one KISS feedback block; else add nothing.
