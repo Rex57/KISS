@@ -15,7 +15,7 @@ The kind of a page comes from its path, so a script and a person read it the sam
   agent    an agent or tool file (CLAUDE.md, .claude/...): links and names checked only
   living   everything else: kept true, has a status line, linked from the map
 """
-import datetime, fnmatch, hashlib, importlib.util, os, re, subprocess, sys, tempfile, urllib.parse
+import ast, datetime, fnmatch, hashlib, os, re, subprocess, sys, tempfile, urllib.parse
 
 CONFIG = {
     "map": "docs/README.md",             # routes every reader; links every living page
@@ -29,11 +29,11 @@ CONFIG = {
     "stale_days": 120,                   # a living page not reviewed for this long is a warning
 }
 
-TEST_CONFIG = {                          # the selftest's own: a project's filled-in CONFIG cannot break it
-    "map": "docs/README.md", "front_door": "README.md", "history": ["archive/"],
-    "logs": ["CHANGELOG.md", "docs/decisions.md"], "agent_files": ["CLAUDE.md", "*/CLAUDE.md", ".claude/*"],
-    "glossary": "docs/reference/glossary.md", "ignore": [], "stale_days": 120,
-}
+TEST_CONFIG = dict(                       # the selftest's own, in keyword form: no edit of CONFIG can match it
+    map="docs/README.md", front_door="README.md", history=["archive/"],
+    logs=["CHANGELOG.md", "docs/decisions.md"], agent_files=["CLAUDE.md", "*/CLAUDE.md", ".claude/*"],
+    glossary="docs/reference/glossary.md", ignore=[], stale_days=120,
+)
 
 # ---- shared reading (inventory.py and move_docs.py import these) ----------------------------
 
@@ -53,15 +53,19 @@ def tracked(repo, *globs, config=CONFIG):
 
 
 def use_project_config(repo):
-    """A project's own gate (tools/check_docs.py) holds its CONFIG: use it here. CONFIG is updated in
-    place, because tracked() and kind() bind it as their default argument."""
+    """A project's own gate (tools/check_docs.py) holds its CONFIG: use it here, read as a literal (the
+    file is never run). CONFIG is updated in place, because tracked() and kind() bind it as their
+    default argument."""
     path = os.path.join(repo, "tools", "check_docs.py")
-    if os.path.isfile(path):
-        spec = importlib.util.spec_from_file_location("project_check_docs", path)
-        mod = importlib.util.module_from_spec(spec)
-        sys.dont_write_bytecode = True          # a dry run leaves no __pycache__ in the project
-        spec.loader.exec_module(mod)
-        CONFIG.update(mod.CONFIG)
+    if not os.path.isfile(path):
+        return
+    try:
+        tree = ast.parse(open(path, encoding="utf-8").read(), path)
+        value = next(n.value for n in tree.body if isinstance(n, ast.Assign)
+                     and any(isinstance(t, ast.Name) and t.id == "CONFIG" for t in n.targets))
+        CONFIG.update(ast.literal_eval(value))
+    except (SyntaxError, StopIteration, ValueError, TypeError) as e:
+        sys.exit("%s: cannot read its CONFIG as a literal dict (%s)" % (path, type(e).__name__))
 
 
 def kind(path, config=CONFIG):
@@ -287,19 +291,35 @@ def selftest(copy=True):
     assert not fail, fail                                # an escaped pipe in a pattern is alternation
     fail, _, _ = run(dict(clean, **{"CLAUDE.md": "# Agent\nThe V2 console.\n"}))
     assert any(c == "name" for c, _, _ in fail), fail
-    fail, _, _ = run(dict(clean, **{"README.md": "# R\n" + ok}))
-    assert any(c == "map" and p == "README.md" for c, p, _ in fail), fail    # the map links the front door too
+    fail, _, _ = run(dict(clean, **{"docs/README.md": clean["docs/README.md"].replace("[front](../README.md) ", "")}))
+    assert any(c == "map" and p == "README.md" and "does not link it" in d for c, p, d in fail), fail   # the map links the front door
+    with tempfile.TemporaryDirectory() as d:          # a project copy that does not parse: one clear line
+        os.makedirs(os.path.join(d, "tools"))
+        open(os.path.join(d, "tools", "check_docs.py"), "w").write("CONFIG = {\n")
+        try:
+            use_project_config(d)
+            assert False, "a broken copy was read"
+        except SystemExit as e:
+            assert "cannot read its CONFIG" in str(e.code), e.code
     if copy:
         with tempfile.TemporaryDirectory() as d:
             src = open(os.path.abspath(__file__), encoding="utf-8").read()
-            filled = re.sub(r"(?ms)^CONFIG = \{.*?^\}", lambda m: 'CONFIG = {"map": "docs/index.md", "front_door": "README.md", '
-                            '"history": ["docs/archive/"], "logs": ["CHANGELOG.md"], "agent_files": [], '
-                            '"glossary": "docs/glossary.md", "ignore": [], "stale_days": 30}', src, count=1)
-            assert filled != src
-            open(os.path.join(d, "check_docs.py"), "w", encoding="utf-8").write(filled)
-            out = subprocess.run([sys.executable, "-I", os.path.join(d, "check_docs.py"), "--selftest", "--no-copy"],
-                                 capture_output=True, text=True)
-            assert out.returncode == 0, "a copy with a filled CONFIG fails its selftest:\n" + out.stderr
+            a, b = src.index("\nCONFIG = {"), src.index("\n}\n", src.index("\nCONFIG = {")) + 3
+            copies = {   # a project fills its CONFIG in: by a new value, by a line edit, or on one line
+                "filled": src.replace("\nTEST_CONFIG = ", '\nCONFIG = dict(map="docs/index.md", front_door="README.md", '
+                                      'history=["docs/archive/"], logs=["CHANGELOG.md"], agent_files=[], '
+                                      'glossary="docs/glossary.md", ignore=[], stale_days=30)\nTEST_CONFIG = ', 1),
+                "line edit": re.sub(r'(?m)^    "logs": .*$', '    "logs": [],', src),   # as sed edits every such line
+                "one line": src[:a] + '\nCONFIG = {"map": "docs/index.md", "front_door": "README.md", "history": '
+                            '["docs/archive/"], "logs": [], "agent_files": [], "glossary": "g.md", "ignore": [], '
+                            '"stale_days": 30}\n' + src[b:],
+            }
+            for name, text in copies.items():
+                assert text != src, name
+                open(os.path.join(d, "check_docs.py"), "w", encoding="utf-8").write(text)
+                out = subprocess.run([sys.executable, "-I", os.path.join(d, "check_docs.py"), "--selftest", "--no-copy"],
+                                     capture_output=True, text=True)
+                assert out.returncode == 0, "a copy (%s) fails its selftest:\n%s" % (name, out.stderr)
     return "check_docs selftest ok: 7 checks fire on their planted fault, quiet on a clean tree"
 
 
