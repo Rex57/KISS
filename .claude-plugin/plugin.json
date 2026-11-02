@@ -16,6 +16,10 @@
     "codegraph",
     "skills"
   ],
+  "hooks": [
+    "./mods/kiss-mini-agent/hooks.json"
+  ],
+  "types": "./mods/kiss-mini-agent/types.d.ts",
   "agents": [
     "./claude-agents/kiss-implementer.md",
     "./claude-agents/kiss-reviewer.md",
