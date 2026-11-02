@@ -41,14 +41,12 @@ export function parseReport(answer: string): { state: State; summary: string } {
   return { state: state ?? 'failed', summary: summary.slice(0, SUMMARY_MAX) }
 }
 
-const TITLE_MAX = 300
-// A command that pushes, merges or opens a pull request, anywhere in a Bash line.
-const DELIVERS = /\bgit\b[^;&|]*\s(push|merge)\b|\bgh\s+pr\b/
-const NOT_GIVEN = 'not given: the first check finds it.'
+const BRIEF_MAX = 1500
+// A command that pushes, merges or opens a pull request: git's subcommand (after -C/-c options), or gh pr create|merge|ready.
+const DELIVERS = /\bgit(?:\s+-[Cc]\s+\S+)*\s+(?:push|merge)(?=\s|$|[;&|)])|\bgh\s+pr\s+(?:create|merge|ready)\b/
+const NOT_GIVEN = 'not given: read the files the first line names.'
 
-/** The brief in handoff.md's format, at most 1,500 characters: a long task text is cut, its whole text is in the task folder. */
-function brief(t: Task, rules: string, dir: string) {
-  const title = t.title.length > TITLE_MAX ? `${t.title.slice(0, TITLE_MAX)}... (whole text: ${dir}/task.md)` : t.title
+function briefLines(t: Task, title: string, rules: string, dir: string) {
   const head = [`# Mini task ${t.id}: ${title}`, `Kind: ${t.kind}`]
   const tail = ['Return: owner    Owner order: yes', `Rules: ${rules}`]
   if (t.kind === 'question') {
@@ -75,6 +73,15 @@ function brief(t: Task, rules: string, dir: string) {
     'Out of scope: anything the first line does not ask for.',
     'Suggested skills: tdd, ponytail, CodeGraph; pr for the pull request body',
   ].join('\n')
+}
+
+/** The brief in handoff.md's format, at most 1,500 characters: a task text that does not fit is cut, its whole text is in the task folder. */
+function brief(t: Task, rules: string, dir: string): { text: string; isCut: boolean } {
+  const whole = briefLines(t, t.title, rules, dir)
+  if (whole.length <= BRIEF_MAX) return { text: whole, isCut: false }
+  const more = `... (whole text: ${dir}/task.md)`
+  const room = BRIEF_MAX - briefLines(t, '', rules, dir).length - more.length
+  return { text: briefLines(t, t.title.slice(0, Math.max(0, room)) + more, rules, dir), isCut: true }
 }
 
 /** Copies the ledger into the band's state and toasts each of this session's tasks that reached a state for the owner. */
@@ -104,20 +111,24 @@ async function run($: $, id: string) {
   await save($, { ...t, host: await $.session.id() })
   if (t.kind === 'code') {
     const made = await $.process.run(['git', '-C', t.cwd, 'worktree', 'add', '-b', t.branch!, t.worktree!, t.base!])
-    if (made.exitCode !== 0) return save($, { ...t, state: 'failed', report: made.stderr.trim().slice(0, SUMMARY_MAX) })
+    // No worktree was made: nothing is left to Discard.
+    if (made.exitCode !== 0) {
+      return save($, { ...t, state: 'failed', report: made.stderr.trim().slice(0, SUMMARY_MAX), worktree: undefined, branch: undefined, finished: await $.clock.now() })
+    }
   }
   const rules = `${$.plugin.root}/skills/kiss-mini-agent/references/handoff.md`
   const dir = await folder($, id)
-  if (t.title.length > TITLE_MAX) await $.fs.write(`${dir}/task.md`, t.title)
+  const b = brief(t, rules, dir)
+  if (b.isCut) await $.fs.write(`${dir}/task.md`, t.title)
   const r = await $.agent.spawn({
     subagentType: 'kiss:kiss-worker',
-    prompt: brief(t, rules, dir),
+    prompt: b.text,
     description: `mini ${id}: ${t.title.slice(0, 80)}`,
     cwd: t.worktree ?? t.cwd,
   })
   // The worker's turn.start may have written the task meanwhile: build on the stored entry.
   const now = (await $.store.get(TASK + id)) as Task
-  if (r.deny !== undefined) await save($, { ...now, state: 'failed', report: r.deny })
+  if (r.deny !== undefined) await save($, { ...now, state: 'failed', report: r.deny, finished: await $.clock.now() })
   else if (r.agentId) await save($, { ...now, agentId: r.agentId })
 }
 
@@ -156,30 +167,41 @@ async function deliverOnce($: $, id: string, how: Delivery) {
   const t = (await $.store.get(TASK + id)) as Task | undefined
   if (!t || !offers(t, how) || !t.branch || !t.worktree) return
   await save($, { ...t, busy: how })
-  const git = (...args: string[]) => $.process.run(['git', '-C', t.cwd, ...args])
-  let r = { exitCode: 0, stdout: '', stderr: '' }
-  if (how === 'merge') {
-    const head = (await git('rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim()
-    if (head !== t.base) r = { exitCode: 1, stdout: '', stderr: `check out ${t.base} in ${t.cwd} first` }
-    else if ((r = await git('merge', '--no-edit', t.branch)).exitCode !== 0) await git('merge', '--abort')
-  } else if (how !== 'discard') {
-    r = await git('push', '-u', 'origin', t.branch)
-    if (r.exitCode === 0 && how === 'pr') {
-      r = await $.process.run(['gh', 'pr', 'create', '--draft', '--base', t.base!, '--head', t.branch, '--title', t.title, '--body', t.pr ?? t.report ?? ''], { cwd: t.cwd })
-    }
-  }
-  if (r.exitCode !== 0) {
+  const failed = async (words: string) => {
     await save($, t)
     await refresh($)
-    return $.ui.toast(`mini ${id}: ${how} failed: ${`${r.stdout}\n${r.stderr}`.trim().slice(0, 400)}`)
+    $.ui.toast(`mini ${id}: ${how} failed: ${words.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 400)}`)
   }
-  // The delivered work is the branch (or, for a discard, nothing): the worktree goes, whatever it holds.
-  const gone = await git('worktree', 'remove', '--force', t.worktree)
-  if (how === 'discard') await git('branch', '-D', t.branch)
-  if (gone.exitCode !== 0) $.ui.toast(`mini ${id}: worktree kept at ${t.worktree}: ${gone.stderr.trim().slice(0, 200)}`)
-  const { pr, diff, tests, ...rest } = t
-  await save($, { ...rest, state: 'done', delivered: how, ...(gone.exitCode === 0 ? { worktree: undefined } : {}) })
-  await refresh($)
+  try {
+    const git = (...args: string[]) => $.process.run(['git', '-C', t.cwd, ...args], { timeoutMs: 120_000 })
+    let r = { exitCode: 0, stdout: '', stderr: '' }
+    if (how === 'merge') {
+      const head = (await git('rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim()
+      const merging = (await git('rev-parse', '-q', '--verify', 'MERGE_HEAD')).exitCode === 0
+      const unmerged = (await git('diff', '--name-only', '--diff-filter=U')).stdout.trim()
+      if (head !== t.base) r = { exitCode: 1, stdout: '', stderr: `check out ${t.base} in ${t.cwd} first` }
+      else if (merging || unmerged) r = { exitCode: 1, stdout: '', stderr: `${t.cwd} has a merge of its own under way: finish or abort it first` }
+      // No merge was under way before this one, so a MERGE_HEAD now is this press's own.
+      else if ((r = await git('merge', '--no-edit', t.branch)).exitCode !== 0 && (await git('rev-parse', '-q', '--verify', 'MERGE_HEAD')).exitCode === 0) {
+        await git('merge', '--abort')
+      }
+    } else if (how !== 'discard') {
+      r = await git('push', '-u', 'origin', t.branch)
+      if (r.exitCode === 0 && how === 'pr') {
+        r = await $.process.run(['gh', 'pr', 'create', '--draft', '--base', t.base!, '--head', t.branch, '--title', t.title, '--body', t.pr ?? t.report ?? ''], { cwd: t.cwd, timeoutMs: 120_000 })
+      }
+    }
+    if (r.exitCode !== 0) return failed(`${r.stdout}\n${r.stderr}`)
+    // The delivered work is the branch (or, for a discard, nothing): the worktree goes, whatever it holds.
+    const gone = await git('worktree', 'remove', '--force', t.worktree)
+    if (how === 'discard') await git('branch', '-D', t.branch)
+    if (gone.exitCode !== 0) $.ui.toast(`mini ${id}: worktree kept at ${t.worktree}: ${gone.stderr.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 200)}`)
+    const { pr, diff, tests, ...rest } = t
+    await save($, { ...rest, state: 'done', delivered: how, ...(gone.exitCode === 0 ? { worktree: undefined } : {}) })
+    await refresh($)
+  } catch (err) {
+    await failed(String(err))
+  }
 }
 
 async function newId($: $) {
@@ -292,7 +314,8 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const all = await read($, ledger)
     const ended = all.filter(t => ENDED.includes(t.state)).sort((a, b) => (b.finished ?? 0) - (a.finished ?? 0))
-    const list = [...all.filter(t => !ENDED.includes(t.state)), ...ended.slice(0, SHOW_ENDED)]
+    // An ended task that still holds a worktree stays in view until its Discard.
+    const list = [...all.filter(t => !ENDED.includes(t.state)), ...ended.filter((t, i) => i < SHOW_ENDED || t.worktree)]
     return (
       <Box flexDirection="column">
         {list.length === 0 && <Text dimColor>No mini tasks.</Text>}

@@ -11,11 +11,23 @@ const NOW = Date.UTC(2026, 10, 2, 14, 30, 5)
 const ID = '1102-143005'
 
 /** The engine beneath the mod: one session that is both the sender and the host. */
-type Opts = { delivered?: boolean; branch?: string; fail?: Record<string, { stdout?: string; stderr?: string }>; store?: Record<string, unknown> }
-function world(on: On, { delivered = true, branch = 'main', fail = {}, store }: Opts = {}) {
+type Opts = {
+  delivered?: boolean
+  branch?: string
+  fail?: Record<string, { stdout?: string; stderr?: string }>
+  store?: Record<string, unknown>
+  /** argv[0] values whose run rejects, as a timed-out or missing command does. */
+  hang?: string[]
+  tmp?: string
+  cwd?: string
+}
+function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo' }: Opts = {}) {
   const w = {
     session: 's1',
     branch,
+    /** A merge under way in the checkout (MERGE_HEAD): the owner's own, or a failed merge's. */
+    merging: false,
+    store: {} as Record<string, any>,
     sent: [] as { to: string; text: string }[],
     spawned: [] as { prompt: string; subagentType?: string; cwd?: string }[],
     runs: [] as string[][],
@@ -23,10 +35,16 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store }: 
     files: {} as Record<string, string>,
   }
   mock.clock(on, { now: NOW })
-  mock.store(on, store)
-  mock.env(on, { KISS_MINI_HOST: '1', TMPDIR: '/tmp/' })
+  // The store in memory, readable by the test: the ledger is the contract every session reads.
+  const mem: Record<string, unknown> = JSON.parse(JSON.stringify(store ?? {}))
+  w.store = mem
+  on('store.get', ($, e) => ({ value: mem[e.key] }) as never)
+  on('store.set', ($, e) => ((mem[e.key] = JSON.parse(JSON.stringify(e.value))), { value: undefined }) as never)
+  on('store.delete', ($, e) => (delete mem[e.key], { value: undefined }) as never)
+  on('store.keys', () => ({ value: Object.keys(mem) }) as never)
+  mock.env(on, { KISS_MINI_HOST: '1', TMPDIR: tmp })
   on('session.id', () => ({ value: w.session }))
-  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.cwd', () => ({ value: cwd }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('command.register', ($, e) => ({ value: { command: e.name } }) as never)
   on('session.send', ($, e) => {
@@ -41,8 +59,12 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store }: 
   })
   on('process.run', ($, e) => {
     w.runs.push([...e.argv])
+    if (hang.includes(e.argv[0] ?? '')) throw new Error(`${e.argv[0]}: timed out after 120000 ms`)
+    if (e.argv.includes('MERGE_HEAD')) return { value: { exitCode: w.merging ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv.includes('--abort')) w.merging = false
     // The checkout is on w.branch; the worker's branch differs from the base by one line; `fail` names git verbs that fail.
     const bad = fail[e.argv[3] ?? ''] ?? fail[e.argv[0] ?? '']
+    if (bad && e.argv[3] === 'merge') w.merging = true
     if (bad) return { value: { exitCode: 1, stdout: bad.stdout ?? '', stderr: bad.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
     const out = e.argv.includes('--abbrev-ref') ? `${w.branch}\n` : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -316,13 +338,14 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
     return { result: {}, text: 'ok' } as never
   })
   await ready($, w)
-  for (const command of [`git push -u origin mini/${ID}`, 'git -C /repo merge main', 'gh pr create --draft', 'cd x && git push']) {
+  for (const command of [`git push -u origin mini/${ID}`, 'git -C /repo merge main', 'git -c x=y push', 'gh pr create --draft', 'gh pr merge 12', 'cd x && git push']) {
     const r = await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
     expect(JSON.stringify(r)).toContain('press in the /mini pane')
   }
-  await $.tool.call({ tool: 'Bash', command: 'git commit -m fix', agentId: 'w1' } as never)
+  const allowed = ['git commit -m fix', 'git add merge.py', 'git commit -m "merge the push docs"', 'git merge-base main HEAD', 'git log --grep merge', 'gh pr view 12']
+  for (const command of allowed) await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
   await $.tool.call({ tool: 'Bash', command: 'git push', agentId: 'other' } as never)
-  expect(ran).toEqual(['git commit -m fix', 'git push'])
+  expect(ran).toEqual([...allowed, 'git push'])
 })
 
 test('a delivered task keeps no PR body, diff or tests', async ($, on) => {
@@ -330,9 +353,11 @@ test('a delivered task keeps no PR body, diff or tests', async ($, on) => {
   await ready($, w)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: `push-${ID}` })
-  expect(await ui.find({ type: 'Text', text: /tests:/ })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /1 file changed/ })).toBeUndefined()
   await ui.unmount()
+  // The ledger entry is the contract every session reads.
+  const t = w.store[`kiss-mini/task/${ID}`]
+  expect(t.state).toBe('done')
+  expect([t.pr, t.diff, t.tests]).toEqual([undefined, undefined, undefined])
 })
 
 test('the host forgets a task ended over 7 days ago, keeps a newer one and one that still holds a worktree', async ($, on) => {
@@ -350,4 +375,63 @@ test('the host forgets a task ended over 7 days ago, keeps a newer one and one t
   expect(list).not.toContain('old ')
   expect(list).toContain('new question done')
   expect(list).toContain('wt code failed')
+})
+
+test('Merge is refused while the checkout has a merge of its own under way: no merge, no abort, one toast', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  w.merging = true
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `merge-${ID}` })
+  expect(git(w).some(line => line.includes(' merge --no-edit') || line.includes('--abort'))).toBe(false)
+  expect(w.toasts.at(-1)).toContain('merge of its own')
+  expect(await status($)).toContain(`${ID} code ready`)
+  await ui.unmount()
+})
+
+test('a delivery whose command throws is released: one toast, no claim left, the buttons drawn again', async ($, on) => {
+  const w = world(on, { hang: ['gh'] })
+  await ready($, w)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `pr-${ID}` })
+  expect(w.toasts.at(-1)).toContain(`mini ${ID}: pr failed`)
+  expect(w.store[`kiss-mini/task/${ID}`].busy).toBeUndefined()
+  expect(await ui.find({ key: `pr-${ID}` })).toBeDefined()
+  expect(await ui.find({ key: `discard-${ID}` })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a failed worktree add leaves no worktree to Discard, and the task ends with a time', async ($, on) => {
+  const w = world(on, { fail: { worktree: { stderr: "fatal: invalid reference: nosuch" } } })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'mini', args: 'fix it --base nosuch' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  const t = w.store[`kiss-mini/task/${ID}`]
+  expect([t.state, t.worktree, t.branch, t.finished]).toEqual(['failed', undefined, undefined, NOW])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: `discard-${ID}` })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('an ended task that still holds a worktree stays in the pane past the last 10 ended', async ($, on) => {
+  const base = { kind: 'question', title: 'q', sender: 's0', cwd: '/repo', started: NOW, state: 'done' }
+  const store: Record<string, unknown> = { 'kiss-mini/task/kept': { ...base, id: 'kept', kind: 'code', state: 'failed', worktree: '/tmp/x', branch: 'mini/kept' } }
+  for (let i = 0; i < 12; i++) store[`kiss-mini/task/q${i}`] = { ...base, id: `q${i}`, finished: NOW - i }
+  world(on, { store })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'discard-kept' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /q11 question/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('with real-length paths a long task text still gives a brief of at most 1,500 characters', async ($, on) => {
+  const tmp = '/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/'
+  const cwd = '/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo'
+  const w = world(on, { tmp, cwd })
+  await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'mini', args: `fix ${'the long bug text '.repeat(30)}`.trim() } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(w.spawned[0]?.prompt.length).toBeLessThanOrEqual(1500)
+  expect(w.spawned[0]?.prompt).toContain('task.md')
 })
