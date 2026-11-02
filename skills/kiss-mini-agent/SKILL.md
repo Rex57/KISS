@@ -19,6 +19,8 @@ host, and the `/mini` pane shows the tasks: use them, not the steps below. These
 - `ask <question>`: a question task.
 - `watch <pull request | CI run | test command>`: a watch task.
 - `status`: the task list.
+- `--now` before any of them: the owner orders the task outright, so its brief says `Checks: skip (owner)`; without
+  it, `Checks: run`.
 
 ## A task
 

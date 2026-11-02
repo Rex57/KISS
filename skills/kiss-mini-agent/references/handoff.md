@@ -17,7 +17,7 @@ at the end, `report.md` (the full log), which the receiver of the report writes 
 # Mini task <id>: <title>
 Kind: code | bug | question | watch
 Checkout: <absolute path>    Base: <branch>    Branch: mini/<id>    Worktree: <absolute path>
-Task folder: <T>             Return: harness | owner    Owner order: yes | no
+Task folder: <T>             Return: harness | owner    Checks: run | skip (owner)
 Rules: <the absolute path of this file>
 Summary: <one line: what must happen>
 Current behaviour: <what happens now>
@@ -50,10 +50,11 @@ skill when it is installed: a draft pull request takes it as its body.
 
 ## The worker's rules
 
-1. **Three checks before work**, unless the brief says `Owner order: yes`: verify the claim (for a bug, run a
-   command that shows the failure); search for code that already does it (CodeGraph when the repo has an index,
-   else a word search), and say where you looked; compare with `Out of scope`. When a check fails, stop and report
-   it.
+1. **Three checks before work**, each by its own condition, unless the brief says `Checks: skip (owner)` (the
+   owner's `/mini --now`): verify the claim when the task states a fact about current behaviour (for a bug, run a
+   command that shows the failure); search for code that already does it, always (CodeGraph when the repo has an
+   index, else a word search), and say where you looked; compare with `Out of scope` when the brief has an
+   out-of-scope list (every harness task). When a check fails, stop and report it.
 2. **Skills for the kind**, each when it is installed:
 
    | Kind | Skills |
