@@ -10,7 +10,8 @@ outside document (a spec, an audit, a stakeholder's questions) arrives to be che
 ## 1. Questions
 
 Write 20 to 35 questions from a real reader's need: the claims of an outside spec, a newcomer's
-first week, the questions people ask the owner. Write each one neutral: "How many tables does the
+first week, the questions people ask the owner. Never fewer than 20, however small the repo, and
+always a newcomer's questions on how to install, run and test it. Write each one neutral: "How many tables does the
 store have?", never "Is it 31?". Each one must have an answer in the code or a running service.
 
 ## 2. Truth
