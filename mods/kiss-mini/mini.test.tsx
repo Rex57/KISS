@@ -826,12 +826,19 @@ test('a host that cannot start fails the task with claude\'s words', async ($, o
   expect(w.store[`kiss-mini/task/${ID}`].state).toBe('failed')
 })
 
-test('a command whose claude run throws answers with the failure and keeps at most one task; the skill does not run', async ($, on) => {
+test('a claude run that throws fails the task with its words: one task, the skill does not run, no later host runs it', async ($, on) => {
   const w = world(on, { delivered: false, hang: ['claude'] })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
   const r = await $.command.run({ command: 'kiss:kiss-mini', args: 'ask what does calc.py do?' } as never)
-  expect(r.text).toMatch(/^kiss-mini: failed: ./)
-  expect(Object.keys(w.store).filter(k => k.startsWith('kiss-mini/task/')).length).toBeLessThanOrEqual(1)
+  expect(r.text).toContain('could not start a host: ')
+  expect(Object.keys(w.store).filter(k => k.startsWith('kiss-mini/task/'))).toEqual([`kiss-mini/task/${ID}`])
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('failed')
+  expect(w.store[`kiss-mini/task/${ID}`].report).toMatch(/^could not start a host: ./)
+
+  // A host that starts later finds no task to run.
+  w.session = 'h2'
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(w.spawned.length).toBe(0)
 })
 
 test('a harness task offers only Discard; merged into its base by the harness, it ends done and its worktree goes', async ($, on) => {

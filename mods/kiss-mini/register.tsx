@@ -330,7 +330,7 @@ async function wake($: $, text: string) {
 
 /** A task no host can take ends failed with the reason. */
 async function started($: $, t: Task) {
-  const how = await wake($, `KISS-MINI task ${t.id}`)
+  const how = await wake($, `KISS-MINI task ${t.id}`).catch((err: Error) => `${NO_HOST}: ${err.message}`)
   if (how.startsWith(NO_HOST)) {
     await save($, { ...((await $.store.get(TASK + t.id)) as Task), state: 'failed', report: how, finished: await $.clock.now() })
     await refresh($)
