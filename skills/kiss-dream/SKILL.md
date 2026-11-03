@@ -37,8 +37,9 @@ this skill's folder; `M` the memory folder), and never through `cp`, `mv`, Write
 
 Its answer:
 
-- `LOCK-HELD` (exit 3, from `start`, `write` or `move`): stop. Write no note, tell the owner that another consolidation is running and to run this
-  again when it ends, after the table of the report (step 6), and end the run (`guard.py finish` only when `start`
+- `LOCK-HELD` (exit 3, from `start`, `write` or `move`): stop. Write no note. Give the report of step 6: its first
+  line is still the table header; after the table, say that another consolidation is running and to run this again
+  when it ends, and end the run (`guard.py finish` only when `start`
   made a folder).
 - `CHANGED: <files>` (exit 4): a note changed that this run did not write. Run `guard.py again "$M"` (a new copy
   beside the first, which stays; it becomes `expected/`), read each changed note, fold its new facts into your
