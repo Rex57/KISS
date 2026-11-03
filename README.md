@@ -98,6 +98,13 @@ issue-tracker skills.
         mattpocock-skills/skills/engineering/tdd ~/.gemini/config/skills/
   ```
 
+### User-only skills
+
+A user-only skill has `disable-model-invocation: true` in its frontmatter: only you can start it (its slash command
+or its name), and the model cannot call it. KISS cannot call such a skill for you, so `kiss-doctor` fails a skill
+KISS calls that is user-only: install it again from its source (above), or delete that line from your own copy of
+it. KISS's own skills that you start now and then (such as `kiss-doctor`) are user-only on purpose.
+
 If a skill is missing, a run still works: KISS follows its own copy of the same rules
 ([`references/spec-and-tickets.md`](skills/kiss-harness/references/spec-and-tickets.md) and its prompts), and
 `decisions.md` records which skills the run used.

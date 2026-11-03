@@ -81,8 +81,8 @@ is in your skill list. Write into `R/decisions.md` which of them the run used, w
    At most 3 rounds; then a gate.
 10. **Close:** the project's full check once (the facts file names it). Then `ponytail-debt` on the run's changes
     (`git -C W diff <base>..<head>`): the report lists each new `shortcut:` comment with its limit. Then the docs,
-    by the facts file's `Docs gate:` line: a command → kiss-housekeeping's Upkeep U1 to U3 (U4 too when the run
-    changed the map), and the report gives the gate's result; `none (owner declined)` → nothing; no line → ask the
+    by the facts file's `Docs gate:` line: a command → load the kiss-housekeeping skill and do its Upkeep U1 to U3 (U4 too when
+    the run changed the map; U1's copy and diff of the gate too), and the report gives the gate's result; `none (owner declined)` → nothing; no line → ask the
     owner once whether to do a docs First run (kiss-housekeeping): a no goes into the facts file as
     `Docs gate: none (owner declined)` (when git tracks the facts file, commit that line by explicit path on the
     run's branch before the merge gate; when git ignores it, say so in the report), a yes starts that First run after the merge gate. Then the **merge gate**. A push, a pull request or any write to a remote is its own gate, always asked.

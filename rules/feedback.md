@@ -24,4 +24,9 @@ Every KISS skill ends its run with this check. It is off by default.
    `/`, `~` or a drive letter), code, data, a URL of the project, or a secret. Describe the problem in general words ("a repo with two test folders"), not with the
    project's own.
 
+4. **One block per run.** A KISS skill that runs inside another KISS skill's run (kiss-housekeeping's Upkeep in a
+   harness close) gives no block of its own. The outer skill's one block covers the whole run and names both
+   skills, also when you followed the inner skill's steps without loading it:
+   `Skill: <outer skill> (with <inner skill>), KISS <version>`.
+
 A lesson about the project goes into the project's facts file, never into this block.

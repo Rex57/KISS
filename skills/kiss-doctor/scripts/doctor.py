@@ -4,7 +4,7 @@
   python3 -I doctor.py [AGENT ...]    AGENT: claude, codex, gemini, antigravity (default: each one whose CLI is on PATH)
   python3 -I doctor.py --selftest
 
-Each line: OK, WARN or FAIL, the agent, what was checked, and for a WARN or FAIL the README section with the fix.
+Each line: OK, INFO, WARN or FAIL, the agent, what was checked, and for a WARN or FAIL the README section with the fix.
 Exit 1 when a line is FAIL.
 
 The required skills come from the table in kiss-harness/SKILL.md, the rule's markers from the bold lead-ins of
@@ -130,7 +130,8 @@ def check_rule(agent, text, files, marks):
     return out
 
 
-def check_skills(agent, roots, need, note=""):
+def check_skills(agent, roots, need, note="", here=()):
+    """here: the KISS skills of the folder this script runs from, which the running session loaded."""
     seen = {}
     for label, root in roots:
         for name, path in skills_in(root).items():
@@ -138,14 +139,18 @@ def check_skills(agent, roots, need, note=""):
     out = []
     for name, fix in need.items():
         copies = seen.get(name, {})
+        if not copies and name in here:
+            out.append(("INFO", agent, f"skill {name}: not installed, but this session loaded it from {KISS}"
+                        " (a --plugin-dir session, or a KISS repo newer than the install)", ""))
+            continue
         if not copies:
             out.append(("FAIL", agent, f"skill {name}: not installed{note}", fix))
             continue
         path, label = next(iter(copies.items()))
         if len(set(copies.values())) > 1:
             out.append(("WARN", agent, f"skill {name}: installed {len(copies)} times ({', '.join(sorted(set(copies.values())))}), so the agent lists it twice: keep one", fix))
-        elif frontmatter(path).get("disable-model-invocation") == "true":
-            out.append(("FAIL", agent, f"skill {name} ({label}): user-only (disable-model-invocation: true), so KISS cannot call it", fix))
+        elif frontmatter(path).get("disable-model-invocation") == "true" and fix != "Install KISS":  # KISS's own: user-only on purpose
+            out.append(("FAIL", agent, f"skill {name} ({label}): user-only (disable-model-invocation: true), so KISS cannot call it", "User-only skills"))
         else:
             out.append(("OK", agent, f"skill {name} ({label})", ""))
     return out
@@ -198,7 +203,15 @@ def selftest():
         put("a/skills/.hidden/kiss-doctor/SKILL.md", "---\nname: kiss-doctor\n---\n")
         one = {r[2].split()[1].rstrip(":"): r[0] for r in check_skills("claude", [("a", os.path.join(t, "a"))], need)}
         assert one == {"kiss-doctor": "FAIL", "kiss-harness": "FAIL", "tdd": "OK", "ponytail": "FAIL"}, one
-        two = check_skills("claude", [("a", os.path.join(t, "a")), ("b", os.path.join(t, "b"))], {"tdd": "x"})
+        assert [r[3] for r in check_skills("claude", [("a", os.path.join(t, "a"))], need) if "user-only" in r[2]] == ["User-only skills"]
+        # a KISS skill the session loaded from the script's own folder but not installed: INFO with the reason
+        here = {r[2].split()[1].rstrip(":"): r for r in check_skills("claude", [("a", os.path.join(t, "a"))], need, here={"kiss-harness"})}
+        assert here["kiss-harness"][0] == "INFO" and "--plugin-dir" in here["kiss-harness"][2], here
+        assert here["kiss-doctor"][0] == "FAIL", here
+        # KISS's own skill is user-only on purpose: no FAIL
+        put("c/skills/kiss-doctor/SKILL.md", "---\nname: kiss-doctor\ndisable-model-invocation: true\n---\n")
+        assert check_skills("claude", [("c", os.path.join(t, "c"))], {"kiss-doctor": "Install KISS"})[0][0] == "OK"
+        two =check_skills("claude", [("a", os.path.join(t, "a")), ("b", os.path.join(t, "b"))], {"tdd": "x"})
         assert two[0][0] == "WARN" and "2 times" in two[0][2], two
         assert check_skills("claude", [("a", os.path.join(t, "a")), ("a", os.path.join(t, "a"))], {"tdd": "x"})[0][0] == "OK"
     cfg = '[plugins."kiss@kiss"]\nenabled = true\n\n[plugins."old@m"]\nenabled = false\n[tui]\nenabled = true\n'
@@ -217,11 +230,13 @@ def main(argv):
     rows = check_tools()
     for agent in agents:
         text, files, roots, note = agent_setup(agent)
-        rows += check_rule(agent, text, files, marks) + check_skills(agent, roots, need, note)
+        # the script's own KISS folder is what this Claude Code session loaded (CLAUDECODE=1 in its shell)
+        here = skills_in(os.path.join(KISS, "skills")) if agent == "claude" and os.environ.get("CLAUDECODE") == "1" else {}
+        rows += check_rule(agent, text, files, marks) + check_skills(agent, roots, need, note, here)
     for level, agent, what, fix in rows:
         print(f"{level:<5} {agent:<12} {what}" + (f"  [fix: README \"{fix}\"]" if fix else ""))
-    fails, warns = sum(r[0] == "FAIL" for r in rows), sum(r[0] == "WARN" for r in rows)
-    print(f"\n{fails} FAIL, {warns} WARN, {len(rows) - fails - warns} OK ({', '.join(agents)})")
+    fails, warns, infos = (sum(r[0] == lv for r in rows) for lv in ("FAIL", "WARN", "INFO"))
+    print(f"\n{fails} FAIL, {warns} WARN, {infos} INFO, {len(rows) - fails - warns - infos} OK ({', '.join(agents)})")
     sys.exit(1 if fails else 0)
 
 
