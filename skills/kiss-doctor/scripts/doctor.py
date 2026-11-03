@@ -4,6 +4,7 @@ env.KISS_FEEDBACK in Claude Code's user settings.
 
   python3 -I doctor.py [AGENT ...]    AGENT: claude, codex, gemini, antigravity (default: each one whose CLI is on PATH)
   python3 -I doctor.py feedback on|off   set env.KISS_FEEDBACK in Claude Code's user settings ("1" or "0"), with a backup
+  python3 -I doctor.py setup             the numbered plan of what is missing, from the install table (installs nothing)
   python3 -I doctor.py --selftest
 
 Each line: OK, INFO, WARN or FAIL, the agent, what was checked, and for a WARN or FAIL the README section with the fix.
@@ -12,7 +13,7 @@ Exit 1 when a line is FAIL.
 The required skills come from the table in kiss-harness/SKILL.md, the rule's markers from the bold lead-ins of
 rules/codegraph.md, so neither list is kept here.
 """
-import glob, json, os, re, shutil, subprocess, sys, time
+import glob, json, os, platform, re, shlex, shutil, subprocess, sys, time
 
 KISS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 HOME = os.path.expanduser("~")
@@ -244,6 +245,148 @@ def set_feedback(settings, on):
             "Codex, Gemini CLI, Antigravity: put this line in your shell profile yourself: export KISS_FEEDBACK=%s" % ("1" if on else "0")]
 
 
+# The install table: the one home of every command `setup` shows (D6). A command is one string; {name} fills
+# from the system after the split, so a path with a space stays one word. key: a gap's name; for an agent item,
+# the README section the skill check names as its fix.
+PMS = ["nb", "brew", "apt", "dnf", "pacman", "winget", "scoop"]
+PM_INSTALL = {"nb": "nb install {}", "brew": "brew install {}", "apt": "sudo apt install -y {}", "dnf": "sudo dnf install -y {}",
+              "pacman": "sudo pacman -S --noconfirm {}", "winget": "winget install -e --id {}", "scoop": "scoop install {}"}
+INSTALL = [
+    {"key": "git", "what": "git", "source": "https://git-scm.com/downloads", "changes": "adds git through your package manager",
+     "pm": {"nb": "git", "brew": "git", "apt": "git", "dnf": "git", "pacman": "git", "winget": "Git.Git", "scoop": "git"}},
+    {"key": "python", "what": "Python 3.9 or later", "source": "https://www.python.org/downloads/",
+     "changes": "adds Python 3 through your package manager",
+     "pm": {"nb": "python", "brew": "python", "apt": "python3", "dnf": "python3", "pacman": "python",
+            "winget": "Python.Python.3.12", "scoop": "python"}},
+    {"key": "node", "what": "Node.js and npm", "source": "https://nodejs.org/en/download",
+     "changes": "adds node and npm through your package manager",
+     "pm": {"nb": "node", "brew": "node", "apt": "nodejs npm", "dnf": "nodejs npm", "pacman": "nodejs npm",
+            "winget": "OpenJS.NodeJS.LTS", "scoop": "nodejs-lts"}},
+    {"key": "codegraph", "what": "CodeGraph", "source": "https://github.com/colbymchenry/codegraph",
+     "changes": "adds the codegraph command to npm's global folder (npm prefix -g)",
+     "run": ["npm install -g @colbymchenry/codegraph"]},
+    {"key": "cgcallers", "what": "cgcallers", "source": "https://github.com/Rex57/KISS (skills/kiss-harness/scripts/cgcallers.py)",
+     "changes": "copies cgcallers.py to {bin}/cgcallers (KISS_BIN sets the folder; put it on your PATH yourself)",
+     "run": ["install -m 755 {kiss}/skills/kiss-harness/scripts/cgcallers.py {bin}/cgcallers"]},
+    {"key": "index", "what": "the CodeGraph index of this repo", "source": "https://github.com/colbymchenry/codegraph",
+     "changes": "adds {repo}/.codegraph/", "run": ["codegraph init -y {repo}"]},
+    {"key": "rule", "what": "the CodeGraph rule", "source": "https://github.com/Rex57/KISS (rules/codegraph.md)",
+     "changes": "appends the rule to {file}", "agents": {a: ["cat {kiss}/rules/codegraph.md >> {file}"] for a in CLI}},
+    {"key": "Install KISS", "what": "KISS", "source": "https://github.com/Rex57/KISS", "changes": "adds the KISS plugin to {agent}",
+     "agents": {"claude": ["claude plugin marketplace add Rex57/KISS", "claude plugin install kiss@kiss"],
+                "codex": ["codex plugin marketplace add Rex57/KISS", "codex plugin add kiss@kiss"],
+                "gemini": ["gemini extensions install https://github.com/Rex57/KISS"]},
+     "hand": {"antigravity": "git clone https://github.com/Rex57/KISS.git, then agy plugin install ./KISS"}},
+    {"key": "Install ponytail", "what": "ponytail", "source": "https://github.com/DietrichGebert/ponytail",
+     "changes": "adds the ponytail plugin to {agent}",
+     "agents": {"claude": ["claude plugin marketplace add DietrichGebert/ponytail", "claude plugin install ponytail@ponytail"],
+                "codex": ["codex plugin marketplace add DietrichGebert/ponytail", "codex plugin add ponytail@ponytail"],
+                "gemini": ["gemini extensions install https://github.com/DietrichGebert/ponytail"]},
+     "hand": {"antigravity": "follow https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md"},
+     "after": {"codex": "in Codex, open /hooks, trust ponytail's two hooks, and start a new thread"}},
+    {"key": "Install Matt Pocock's skills", "what": "Matt Pocock's skills", "source": "https://github.com/mattpocock/skills",
+     "changes": "adds Matt Pocock's skills to {agent}",
+     "agents": {"claude": ["claude plugin install mattpocock-skills@claude-plugins-official"],
+                "codex": ["codex plugin marketplace add mattpocock/skills", "codex plugin add mattpocock-skills@mattpocock"],
+                "gemini": ["gemini skills install https://github.com/mattpocock/skills.git --path skills/engineering",
+                           "gemini skills install https://github.com/mattpocock/skills.git --path skills/productivity"]},
+     "hand": {"antigravity": "copy the eight skill folders KISS uses (README \"Install Matt Pocock's skills\") from a clone of"
+                             " https://github.com/mattpocock/skills.git into ~/.gemini/config/skills/"}},
+]
+OPTIONAL = [("agentmemory", "https://github.com/rohitg00/agentmemory"), ("a headless browser", "https://playwright.dev")]
+
+
+def command(argv):
+    return " ".join(w if w == ">>" else shlex.quote(w) for w in argv)
+
+
+def plan(system, gaps):
+    """The plan: one item per gap, in the table's order. system: os, shell, pm, agents, repo, bin, kiss;
+    gaps: {key or (agent, key): {placeholder: value}}. An item the owner must do has a `hand` reason and no number."""
+    out, files, n = [], set(), 0
+    for row in INSTALL:
+        for agent in system["agents"] if "agents" in row else ["device"]:
+            key = row["key"] if agent == "device" else (agent, row["key"])
+            if key not in gaps:
+                continue
+            values = dict(system, agent=agent, **gaps[key])
+            if row["key"] == "rule":
+                if values["file"] in files:                     # Gemini CLI and Antigravity share GEMINI.md
+                    continue
+                files.add(values["file"])
+            hand = ""
+            if "pm" in row:
+                cmds = [PM_INSTALL[system["pm"]].format(row["pm"][system["pm"]])] if system["pm"] else []
+                hand = ("needs sudo: run it yourself" if cmds[0].startswith("sudo ") else "") if cmds else \
+                    "no package manager found: download it from " + row["source"]
+            else:
+                cmds = row.get("run") or row["agents"].get(agent, [])
+                hand = "by hand: " + row["hand"][agent] if agent in row.get("hand", {}) else ""
+            run = [[w.format(**values) for w in shlex.split(c)] for c in cmds]
+            n += bool(run and not hand)
+            out.append({"n": n if run and not hand else None, "what": row["what"], "agent": agent, "run": run, "hand": hand,
+                        "source": row["source"], "changes": row["changes"].format(**values),
+                        "after": row.get("after", {}).get(agent, "")})
+    return out
+
+
+def plan_lines(system, items):
+    agents = ", ".join(system["agents"]) or "none on PATH"
+    out = [f"KISS setup on {system['os']} ({system['shell'] or 'unknown shell'}), package manager: {system['pm'] or 'none'},"
+           f" agents: {agents}" + (f", repo: {system['repo']}" if system["repo"] else "")]
+    detail = lambda i: [f"   source:  {i['source']}", f"   changes: {i['changes']}"]
+    for i in items:
+        if i["n"]:
+            out += [f"{i['n']}. {i['what']} ({i['agent']})"] + [f"   command: {command(c)}" for c in i["run"]] + detail(i)
+    if not any(i["n"] for i in items):
+        out.append("Nothing to install.")
+    hand = [i for i in items if not i["n"]]
+    if hand:
+        out.append("For you to do (setup never runs these):")
+        for i in hand:
+            out += [f"- {i['what']} ({i['agent']}): {i['hand']}"] + [f"   command: {command(c)}" for c in i["run"]] + detail(i)
+    after = [i["after"] for i in items if i["after"]] + (["start a new session of each agent you installed into"]
+                                                         if any(i["n"] and i["agent"] != "device" for i in items) else [])
+    if after:
+        out += ["After the installs, by hand:"] + [f"- {a}" for a in after]
+    out += ["Optional, links only:"] + [f"- {what}: {url}" for what, url in OPTIONAL]
+    if any(i["n"] for i in items):
+        out.append("Answer all, none, or the numbers to install (for example 1,3).")
+    return out
+
+
+def loaded_here(agent):
+    """The script's own KISS folder is what this Claude Code session loaded (CLAUDECODE=1 in its shell)."""
+    return skills_in(os.path.join(KISS, "skills")) if agent == "claude" and os.environ.get("CLAUDECODE") == "1" else {}
+
+
+def detect():
+    shell = os.environ.get("SHELL") or os.environ.get("COMSPEC") or ""
+    repo = run(["git", "rev-parse", "--show-toplevel"]).strip() if shutil.which("git") else ""
+    return {"os": {"Darwin": "macos", "Windows": "windows"}.get(platform.system(), "linux"),
+            "shell": os.path.basename(shell), "pm": next((p for p in PMS if shutil.which(p)), None),
+            "agents": [a for a, cli in CLI.items() if shutil.which(cli)], "repo": repo or None,
+            "bin": os.environ.get("KISS_BIN") or os.path.join(HOME, ".local", "bin"), "kiss": KISS}
+
+
+def gaps(system):
+    """What the checks find missing on this machine, in plan()'s form."""
+    out = {k: {} for k, missing in [("git", not shutil.which("git")), ("python", sys.version_info < (3, 9)),
+                                     ("node", not (shutil.which("node") and shutil.which("npm"))),
+                                     ("codegraph", not shutil.which("codegraph")), ("cgcallers", not shutil.which("cgcallers")),
+                                     ("index", system["repo"] and not os.path.isdir(os.path.join(system["repo"], ".codegraph")))]
+           if missing}
+    need, marks = required(), markers()
+    for agent in system["agents"]:
+        text, files, roots, note = agent_setup(agent)
+        if check_rule(agent, text, files, marks)[0][0] == "FAIL":
+            out[(agent, "rule")] = {"file": files[0]}
+        for level, _, _, fix in check_skills(agent, roots, need, note, loaded_here(agent)):
+            if level == "FAIL" and fix.startswith("Install "):
+                out[(agent, fix)] = {}
+    return out
+
+
 def selftest():
     import tempfile
     with tempfile.TemporaryDirectory() as t:
@@ -349,6 +492,57 @@ def selftest():
         assert feedback_mode(os.path.join(t, "none.json"), home, env={"KISS_FEEDBACK": "0"}, project=os.path.join(t, "proj")) == (False, "the project's .claude/settings.local.json env")
     cfg = '[plugins."kiss@kiss"]\nenabled = true\n\n[plugins."old@m"]\nenabled = false\n[tui]\nenabled = true\n'
     assert codex_enabled(cfg) == ["kiss@kiss"], codex_enabled(cfg)
+    # setup: the plan on fake systems; each expected command is the README's or the upstream's own
+    base = {"os": "macos", "shell": "zsh", "pm": "nb", "agents": ["claude", "codex"], "repo": "/r/my app", "bin": "/b",
+            "kiss": "/k"}
+    sysfor = lambda **kw: dict(base, **kw)
+    show = lambda items: [(i["what"], i["agent"], [" ".join(c) for c in i["run"]], i["hand"]) for i in items]
+    tools = {"git": {}, "python": {}, "node": {}}
+    assert show(plan(sysfor(), tools)) == [("git", "device", ["nb install git"], ""),
+                                           ("Python 3.9 or later", "device", ["nb install python"], ""),
+                                           ("Node.js and npm", "device", ["nb install node"], "")], show(plan(sysfor(), tools))
+    assert [c for i in plan(sysfor(pm="brew"), tools) for c in i["run"]] == [["brew", "install", p] for p in ("git", "python", "node")]
+    assert [c for i in plan(sysfor(os="windows", pm="winget"), tools) for c in i["run"]] == [
+        ["winget", "install", "-e", "--id", p] for p in ("Git.Git", "Python.Python.3.12", "OpenJS.NodeJS.LTS")]
+    apt = plan(sysfor(os="linux", pm="apt"), {"git": {}, "node": {}})       # sudo: shown for the owner, never numbered
+    assert [i["run"] for i in apt] == [["sudo apt install -y git".split()], ["sudo apt install -y nodejs npm".split()]], apt
+    assert all("sudo" in i["hand"] and i["n"] is None for i in apt), apt
+    none = plan(sysfor(os="linux", pm=None), {"git": {}})                    # no package manager: the download link only
+    assert none[0]["run"] == [] and none[0]["n"] is None and "https://git-scm.com/downloads" in none[0]["hand"], none
+    gaps = {"codegraph": {}, "cgcallers": {}, "index": {}, ("claude", "Install ponytail"): {},
+            ("codex", "Install ponytail"): {}, ("codex", "Install Matt Pocock's skills"): {},
+            ("claude", "rule"): {"file": "/h/.claude/CLAUDE.md"}, ("gemini", "Install ponytail"): {}}
+    got = show(plan(sysfor(), gaps))
+    assert got == [
+        ("CodeGraph", "device", ["npm install -g @colbymchenry/codegraph"], ""),
+        ("cgcallers", "device", ["install -m 755 /k/skills/kiss-harness/scripts/cgcallers.py /b/cgcallers"], ""),
+        ("the CodeGraph index of this repo", "device", ["codegraph init -y /r/my app"], ""),
+        ("the CodeGraph rule", "claude", ["cat /k/rules/codegraph.md >> /h/.claude/CLAUDE.md"], ""),
+        ("ponytail", "claude", ["claude plugin marketplace add DietrichGebert/ponytail", "claude plugin install ponytail@ponytail"], ""),
+        ("ponytail", "codex", ["codex plugin marketplace add DietrichGebert/ponytail", "codex plugin add ponytail@ponytail"], ""),
+        ("Matt Pocock's skills", "codex", ["codex plugin marketplace add mattpocock/skills", "codex plugin add mattpocock-skills@mattpocock"], ""),
+    ], got                                                                    # gemini is not on PATH: not planned
+    items = plan(sysfor(), gaps)
+    assert [i["n"] for i in items] == [1, 2, 3, 4, 5, 6, 7] and all(i["source"] and i["changes"] for i in items), items
+    assert "/hooks" in items[5]["after"] and items[4]["after"] == "", items
+    assert items[2]["run"] == [["codegraph", "init", "-y", "/r/my app"]]     # a path with a space stays one word
+    assert command(items[2]["run"][0]) == "codegraph init -y '/r/my app'"
+    shared = plan(sysfor(agents=["gemini", "antigravity"]), {("gemini", "rule"): {"file": "/h/.gemini/GEMINI.md"},
+                                                             ("antigravity", "rule"): {"file": "/h/.gemini/GEMINI.md"},
+                                                             ("gemini", "Install ponytail"): {}, ("antigravity", "Install ponytail"): {},
+                                                             ("antigravity", "Install KISS"): {}})
+    assert show(shared) == [
+        ("the CodeGraph rule", "gemini", ["cat /k/rules/codegraph.md >> /h/.gemini/GEMINI.md"], ""),   # one file, appended once
+        ("KISS", "antigravity", [], "by hand: git clone https://github.com/Rex57/KISS.git, then agy plugin install ./KISS"),
+        ("ponytail", "gemini", ["gemini extensions install https://github.com/DietrichGebert/ponytail"], ""),
+        ("ponytail", "antigravity", [], "by hand: follow https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md"),
+    ], show(shared)
+    text = "\n".join(plan_lines(sysfor(os="linux", pm="apt"), plan(sysfor(os="linux", pm="apt"), dict(gaps, git={}))))
+    for want in ("1. CodeGraph (device)", "   command: npm install -g @colbymchenry/codegraph",
+                 "   source:  https://github.com/colbymchenry/codegraph", "sudo apt install -y git", "needs sudo",
+                 "agentmemory: https://github.com/rohitg00/agentmemory", "all, none, or the numbers"):
+        assert want in text, (want, text)
+    assert "Nothing to install" in "\n".join(plan_lines(sysfor(), []))
     print("doctor selftest ok")
 
 
@@ -360,6 +554,10 @@ def main(argv):
             sys.exit("usage: doctor.py feedback on|off")
         print("\n".join(set_feedback(settings_path(), argv[2] == "on")))
         return
+    if argv[1:] == ["setup"]:
+        system = detect()
+        print("\n".join(plan_lines(system, plan(system, gaps(system)))))
+        return
     agents = argv[1:] or [a for a, cli in CLI.items() if shutil.which(cli)]
     unknown = [a for a in agents if a not in CLI]
     if unknown or not agents:
@@ -368,9 +566,7 @@ def main(argv):
     rows = check_tools() + check_feedback(settings_path())
     for agent in agents:
         text, files, roots, note = agent_setup(agent)
-        # the script's own KISS folder is what this Claude Code session loaded (CLAUDECODE=1 in its shell)
-        here = skills_in(os.path.join(KISS, "skills")) if agent == "claude" and os.environ.get("CLAUDECODE") == "1" else {}
-        rows += check_rule(agent, text, files, marks) + check_skills(agent, roots, need, note, here)
+        rows += check_rule(agent, text, files, marks) + check_skills(agent, roots, need, note, loaded_here(agent))
     for level, agent, what, fix in rows:
         print(f"{level:<5} {agent:<12} {what}" + (f"  [fix: README \"{fix}\"]" if fix else ""))
     fails, warns, infos = (sum(r[0] == lv for r in rows) for lv in ("FAIL", "WARN", "INFO"))

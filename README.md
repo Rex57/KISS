@@ -56,7 +56,7 @@ What KISS adds:
 | Skill | What it does |
 |---|---|
 | `kiss-harness` | The questions (decisions recorded in `decisions.md`), the spec, the tickets, then one implementer, one review that uses the product, at most 3 fix rounds, and the owner's merge. Its scripts check the tickets, fill the prompts, seed each ticket with CodeGraph and keep the time budget (10 minutes per ticket, plus 2 hours for reviews and fixes). |
-| `kiss-doctor` | Checks a device for a run: the CodeGraph rule in each agent's global instructions file, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix and installs nothing. |
+| `kiss-doctor` | Checks a device for a run: the CodeGraph rule in each agent's global instructions file, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix. `kiss-doctor setup` shows a numbered plan of what is missing, and KISS installs only on your request, from the official sources, after you see each command. |
 | `kiss-mini` | A small side task in a background worker: a code change on its own `mini/<id>` branch, a read-only question, or a watch on a pull request, a CI run or a test command. kiss-harness hands off work outside its tickets to it. On Claude Code a mod answers `/kiss-mini` (`/kiss-mini <task>`, `/kiss-mini --now <task>` to skip the worker's checks, `/kiss-mini ask <question>`, `/kiss-mini watch pr <n>` / `run <id>` / `<test command>`, `/kiss-mini stop <id>`, `/kiss-mini status`, `/kiss-mini` alone opens the pane), a band with the counts, and the delivery buttons (Merge into the base, Push, Draft PR, Discard); only your press delivers. |
 | `kiss-housekeeping` | "Clean up the docs": a First run, on your ask, gives each fact one home, sorts pages by kind (living, log, record, history), builds a map, retires stale pages, fixes old names, moves files without breaking code or tests, installs a docs gate in your tests (`tools/check_docs.py`, your own copy) and proves the result with a routing test. After that, each harness close runs its Upkeep when your facts file names the gate. |
 | `kiss-system-design` | First version. From a new product idea to a plan of harness runs: a product brief, a decision map (decisions so far, open decisions typed research / prototype / grilling / task, not yet clear, out of scope), one decision at a time with you (research in the background), then a system design document and an ordered run plan in your docs. Its working files stay in the git-ignored `.kiss/design/<name>/`; continue a design by its name. An idea that fits one run goes to `kiss-harness`. |
@@ -77,69 +77,39 @@ On every agent you can also just say it: "build <feature> with the KISS harness"
 
 ## Tools you need
 
-The plugin installs none of these. Install them yourself, once per device, then run `kiss-doctor`: it checks
-each one.
+KISS installs only on your request, from the official sources, after you see each command. Run
+`kiss-doctor setup` (`/kiss:kiss-doctor setup` in Claude Code): it finds your OS, shell, package manager and the
+agents on your PATH, and shows a numbered plan of what is missing, each item with its command, its source and what
+it changes. You answer all, none or the numbers. It never runs `sudo` and never edits your shell profile: it shows
+those lines for you to run. Or install each tool yourself from its link, once per device, then run `kiss-doctor`:
+it checks each one.
 
 | Tool | Why | Install |
 |---|---|---|
 | One of the agents | Runs the skills and the subagents | [Claude Code](https://code.claude.com/docs), [Codex](https://github.com/openai/codex), [Gemini CLI](https://geminicli.com), [Antigravity](https://antigravity.google) |
-| git | Worktrees, one commit per ticket | your OS package manager |
-| Python 3.9 or later | The scripts (standard library only) | [python.org](https://www.python.org) or [uv](https://docs.astral.sh/uv/) |
-| Node.js and npm | CodeGraph runs on Node | [nodejs.org](https://nodejs.org) |
-| [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `npm install -g @colbymchenry/codegraph`, then `codegraph init -y <repo>` in each project |
-| [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close; `ponytail-audit` and `ponytail-debt`: `kiss-code-clean`'s audit report and debt ledger (`kiss-doctor` does not check `ponytail-audit`) | see "Install ponytail" below |
-| [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate; `research`: `kiss-system-design`'s research decisions (`kiss-doctor` does not check `research`) | see "Install Matt Pocock's skills" below |
-| `cgcallers` (in this repo) | CodeGraph's callers plus a word grep, before a delete or rename | `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (`~/.local/bin` on your `PATH`) |
+| git | Worktrees, one commit per ticket | `kiss-doctor setup` (your package manager), or [git-scm.com](https://git-scm.com/downloads) |
+| Python 3.9 or later | The scripts (standard library only) | `kiss-doctor setup` (your package manager), or [python.org](https://www.python.org) or [uv](https://docs.astral.sh/uv/) |
+| Node.js and npm | CodeGraph runs on Node | `kiss-doctor setup` (your package manager), or [nodejs.org](https://nodejs.org) |
+| [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `kiss-doctor setup`, or `npm install -g @colbymchenry/codegraph`, then `codegraph init -y <repo>` in each project |
+| [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close; `ponytail-audit` and `ponytail-debt`: `kiss-code-clean`'s audit report and debt ledger (`kiss-doctor` does not check `ponytail-audit`) | `kiss-doctor setup`, or see "Install ponytail" below |
+| [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate; `research`: `kiss-system-design`'s research decisions (`kiss-doctor` does not check `research`) | `kiss-doctor setup`, or see "Install Matt Pocock's skills" below |
+| `cgcallers` (in this repo) | CodeGraph's callers plus a word grep, before a delete or rename | `kiss-doctor setup` (into `~/.local/bin`, or the folder `KISS_BIN` names), or `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (that folder on your `PATH`) |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
 | [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-dream` | its README |
 
 ### Install ponytail
 
-- Claude Code: `/plugin marketplace add DietrichGebert/ponytail`, then `/plugin install ponytail@ponytail`.
-- Codex: `codex plugin marketplace add DietrichGebert/ponytail`, then `codex plugin add ponytail@ponytail`. Open
-  `/hooks`, trust its two hooks, and start a new thread.
-- Gemini CLI, Antigravity and others: follow ponytail's
-  [INSTALL.md](https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md).
+`kiss-doctor setup` installs it for each agent on your PATH (Codex: then open `/hooks`, trust its two hooks and
+start a new thread; Antigravity: by hand). Upstream steps: [INSTALL.md](https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md).
 
 ### Install Matt Pocock's skills
 
 KISS uses eight of them: `grilling`, `domain-modeling`, `tdd`, `codebase-design`, `prototype`, `diagnosing-bugs`,
-`pr` and `research`. Install them once per agent, in one way only:
-two installs give you every skill twice. KISS needs no `/setup-matt-pocock-skills`, because it does not use his
-issue-tracker skills.
+`pr` and `research`. Install them once per agent, in one way only: two installs give you every skill twice. KISS
+needs no `/setup-matt-pocock-skills`, because it does not use his issue-tracker skills.
 
-- Claude Code (updates itself):
-
-  ```bash
-  claude plugin install mattpocock-skills@claude-plugins-official
-  ```
-
-- Codex (updates itself at startup):
-
-  ```bash
-  codex plugin marketplace add mattpocock/skills
-  codex plugin add mattpocock-skills@mattpocock
-  ```
-
-- Gemini CLI (run both again to update):
-
-  ```bash
-  gemini skills install https://github.com/mattpocock/skills.git --path skills/engineering
-  gemini skills install https://github.com/mattpocock/skills.git --path skills/productivity
-  ```
-
-- Antigravity: his README has no steps for it. Copy the skill folders into Antigravity's global skills folder,
-  `~/.gemini/config/skills/` (App and IDE) or `~/.gemini/antigravity-cli/skills/` (CLI), and copy them again to
-  update:
-
-  ```bash
-  git clone https://github.com/mattpocock/skills.git mattpocock-skills
-  mkdir -p ~/.gemini/config/skills
-  cp -R mattpocock-skills/skills/productivity/grilling mattpocock-skills/skills/engineering/domain-modeling \
-        mattpocock-skills/skills/engineering/tdd mattpocock-skills/skills/engineering/codebase-design \
-        mattpocock-skills/skills/engineering/prototype mattpocock-skills/skills/engineering/diagnosing-bugs \
-        mattpocock-skills/skills/engineering/pr mattpocock-skills/skills/engineering/research ~/.gemini/config/skills/
-  ```
+`kiss-doctor setup` installs them for each agent on your PATH (Antigravity: copy the eight skill folders from a
+clone into `~/.gemini/config/skills/`, by hand). Upstream steps: [mattpocock/skills](https://github.com/mattpocock/skills).
 
 ### User-only skills
 
@@ -226,7 +196,7 @@ of each agent you use:
 | Codex | `~/.codex/AGENTS.md` | `cat rules/codegraph.md >> ~/.codex/AGENTS.md` |
 | Gemini CLI and Antigravity | `~/.gemini/GEMINI.md` (both read it) | `cat rules/codegraph.md >> ~/.gemini/GEMINI.md` |
 
-Read the file first: append it once, not again on each update. If `codegraph install` added a
+`kiss-doctor setup` appends it for you, on your answer. Read the file first: append it once, not again on each update. If `codegraph install` added a
 `CODEGRAPH_START`/`CODEGRAPH_END` block to the same file, delete that block.
 
 ## Use it in a project
