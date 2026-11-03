@@ -86,6 +86,9 @@ Skip a step whose store the agent does not have. agentmemory is optional: run st
 6. **Report:** its first line is the header of a table with one row per step (1 to 5): `| Step | Met | Reason |`
    (a skipped step is not met, with why); no sentence comes before it, also in a run that stopped early; the summary comes after the table. Then before
    and after (counts, sizes), what moved where, what was kept, and the notes that wait for the
-   owner (step 2), each with your recommendation. Move or delete one of them only on the owner's yes. Done when
-   every step has its row and the report names the scratch folder.
+   owner (step 2), each with your recommendation. Move or delete one of them only on the owner's yes. At the end, `guard.py finish "$M" <Trash folder>`
+   moves this run's scratch folder (it holds copies of the old notes, secrets too) into the run's dated Trash folder
+   beside the old notes; name it there. Done when every step has its row, the report names the scratch folder in
+   the Trash, and `~/.cache/kiss-dream/` holds no folder of this run (also in a run that
+   stopped on the lock).
 7. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call: the call's whole text is `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.

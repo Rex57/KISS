@@ -6,6 +6,7 @@
   python3 -I guard.py write MEMDIR FILE...    copy drafts/FILE into MEMDIR
   python3 -I guard.py move MEMDIR TRASH FILE...  move MEMDIR/FILE into the TRASH folder
   python3 -I guard.py again MEMDIR            after CHANGED: copy MEMDIR to second/ (third/...), make it the expected copy
+  python3 -I guard.py finish MEMDIR TRASH     at the end: move this run's scratch folder into the TRASH folder
   python3 -I guard.py --selftest
 
 Before a write or move: LOCK-HELD (exit 3) when MEMDIR/.consolidate-lock is under one hour old and its PID lives;
@@ -52,7 +53,7 @@ def lock_held(memdir, now=None):
     path = os.path.join(memdir, LOCK)
     try:
         age = (now or time.time()) - os.path.getmtime(path)
-        pid = int(open(path).read().strip())
+        pid = int(open(path).read().split()[0])     # Claude Code may add a second line (a time)
     except (OSError, ValueError):
         return False
     if age >= 3600:
@@ -120,6 +121,13 @@ def again(memdir, c):
     return 0, ["new copy %s; changed since the last copy: %s" % (os.path.join(c, name), " ".join(diff) or "nothing")]
 
 
+def finish(memdir, c, trash):
+    os.makedirs(trash, exist_ok=True)
+    dst = os.path.join(trash, os.path.basename(c))
+    shutil.move(c, dst)
+    return 0, ["scratch folder moved to %s" % dst]
+
+
 def selftest():
     import subprocess, tempfile
     with tempfile.TemporaryDirectory() as t:
@@ -147,6 +155,14 @@ def selftest():
         finally:
             sleeper.kill()
             sleeper.wait()
+        # Claude Code's two-line lock (the PID, then a time) holds too
+        sleeper = subprocess.Popen(["sleep", "30"])
+        try:
+            open(os.path.join(mem, LOCK), "w").write("%d\n1793681077000" % sleeper.pid)
+            assert lock_held(mem) and write(mem, c, ["a.md"])[0] == 3
+        finally:
+            sleeper.kill()
+            sleeper.wait()
         # a dead PID does not hold, also when the lock is new
         os.utime(os.path.join(mem, LOCK), None)
         assert not lock_held(mem)
@@ -170,13 +186,16 @@ def selftest():
         open(os.path.join(c, "drafts", "MEMORY.md"), "w").write("- [a](a.md) new\n")
         assert write(mem, c, ["MEMORY.md"])[0] == 0
         assert write(mem, c, ["nope.md"])[0] == 2 and move(mem, c, t, [LOCK])[0] == 2
+        # the end: the scratch folder goes into the trash, and no copy stays in the cache
+        code, out = finish(mem, c, os.path.join(t, "trash"))
+        assert code == 0 and not os.path.exists(c) and os.path.isdir(os.path.join(t, "trash", os.path.basename(c), "first")), out
     print("guard selftest ok")
 
 
 def main(argv):
     if argv[1:] == ["--selftest"]:
         return selftest()
-    if len(argv) < 3 or argv[1] not in ("start", "where", "write", "move", "again"):
+    if len(argv) < 3 or argv[1] not in ("start", "where", "write", "move", "again", "finish"):
         sys.exit(__doc__)
     cmd, memdir = argv[1], argv[2]
     if not os.path.isdir(memdir):
@@ -188,12 +207,14 @@ def main(argv):
         print(where(memdir))
         return
     c = where(memdir)
-    if cmd in ("write", "move") and len(argv) < (4 if cmd == "write" else 5):
+    if cmd in ("write", "move", "finish") and len(argv) < (5 if cmd == "move" else 4):
         sys.exit("name the files to %s" % cmd)
     if cmd == "write":
         code, out = write(memdir, c, argv[3:])
     elif cmd == "move":
         code, out = move(memdir, c, argv[3], argv[4:])
+    elif cmd == "finish":
+        code, out = finish(memdir, c, argv[3])
     else:
         code, out = again(memdir, c)
     print("\n".join(out))
