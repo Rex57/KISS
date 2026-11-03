@@ -48,7 +48,7 @@ each one.
 | Node.js and npm | CodeGraph runs on Node | [nodejs.org](https://nodejs.org) |
 | [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `npm install -g @colbymchenry/codegraph`, then `codegraph init -y <repo>` in each project |
 | [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close | see "Install ponytail" below |
-| [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try | see "Install Matt Pocock's skills" below |
+| [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate | see "Install Matt Pocock's skills" below |
 | `cgcallers` (in this repo) | CodeGraph's callers plus a word grep, before a delete or rename | `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (`~/.local/bin` on your `PATH`) |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
 | [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-tidy-up-memory` | its README |
@@ -63,7 +63,8 @@ each one.
 
 ### Install Matt Pocock's skills
 
-KISS uses five of them: `grilling`, `domain-modeling`, `tdd`, `codebase-design` and `prototype`. Install them once per agent, in one way only:
+KISS uses seven of them: `grilling`, `domain-modeling`, `tdd`, `codebase-design`, `prototype`, `diagnosing-bugs` and
+`pr`. Install them once per agent, in one way only:
 two installs give you every skill twice. KISS needs no `/setup-matt-pocock-skills`, because it does not use his
 issue-tracker skills.
 
@@ -96,7 +97,8 @@ issue-tracker skills.
   mkdir -p ~/.gemini/config/skills
   cp -R mattpocock-skills/skills/productivity/grilling mattpocock-skills/skills/engineering/domain-modeling \
         mattpocock-skills/skills/engineering/tdd mattpocock-skills/skills/engineering/codebase-design \
-        mattpocock-skills/skills/engineering/prototype ~/.gemini/config/skills/
+        mattpocock-skills/skills/engineering/prototype mattpocock-skills/skills/engineering/diagnosing-bugs \
+        mattpocock-skills/skills/engineering/pr ~/.gemini/config/skills/
   ```
 
 ### User-only skills
@@ -124,7 +126,7 @@ If a skill is missing, a run still works: KISS follows its own copy of the same 
 4. **Review:** one reviewer uses the running product, with rubric A to G (`ponytail-review` for risk, load and
    speed). A severity pass sorts the findings; the same implementer fixes them and the same reviewer checks again,
    at most 3 rounds.
-5. **Close:** the project's full check, the list of new `shortcut:` comments (`ponytail-debt`), the docs Upkeep
+5. **Close:** the project's full check, a look back at the run (each mistake becomes a proposed check or a rule, on your yes), the list of new `shortcut:` comments (`ponytail-debt`), the docs Upkeep
    (`kiss-housekeeping`) when `.kiss/project.md` names a docs gate (with no `Docs gate:` line it asks you once
    whether to do a docs First run, and records a no), and the merge gate: one yes, or none when `.kiss/project.md` says `Merge: after a green close`. A push always asks.
 

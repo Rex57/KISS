@@ -23,6 +23,8 @@ once, before step 4.
 | `codebase-design` | Matt Pocock's skills | step 1, when the run adds or changes a module's interface or a seam: its words (module, interface, seam, depth) and its deepening check | the spec in plain words, with no deepening check |
 | `prototype` | Matt Pocock's skills | step 1, a decision that needs an answer the owner can try (a state model, a UI): a throwaway prototype, never merged into the main branch | the question in words only |
 | `tdd` | Matt Pocock's skills | the implementer, every ticket | the implementer prompt's own test rules |
+| `diagnosing-bugs` | Matt Pocock's skills | the implementer, a failure it cannot explain | the implementer's own debugging |
+| `pr` | Matt Pocock's skills | step 10, the push gate: the body of a pull request the owner asks for | a body with the run's summary, tickets and tests |
 | `ponytail` | ponytail | the ticket cut (full level), the implementer, the reviewer | the same rules, as the prompts state them |
 | `ponytail-review` | ponytail | the reviewer: rubric G and its finding rules | rubric G as the reviewer prompt states it |
 | `ponytail-debt` | ponytail | step 10, the list of new `shortcut:` comments | a search of the diff for `shortcut:` |
@@ -90,7 +92,11 @@ is in your skill list; a skill that is not there is skipped, and the step does w
     the run changed the map; U1's copy and diff of the gate too), and the report gives the gate's result; `none (owner declined)` → nothing; no line → ask the
     owner once whether to do a docs First run (kiss-housekeeping): a no goes into the facts file as
     `Docs gate: none (owner declined)` (when git tracks the facts file, commit that line by explicit path on the
-    run's branch before the merge gate; when git ignores it, say so in the report), a yes starts that First run after the merge gate. Then the **merge gate**. A push, a pull request or any write to a remote is its own gate, always asked.
+    run's branch before the merge gate; when git ignores it, say so in the report), a yes starts that First run after the merge gate. Then
+    **look back** at the run by [references/retro.md](references/retro.md): list the candidates for the owner, most
+    severe first (a mechanical mistake → a proposed check, a judgement call → a facts-file rule); change no product
+    file. Then the **merge gate**. A push, a pull request or any write to a remote is its own gate, always asked;
+    when the owner asks for a pull request, `pr` writes its body.
 11. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` alone (never inside another command). When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). Else, or when the command is refused or fails, add nothing, and do not mention this check, the variable or the mode.
 
 **The clock:** no agent gives a subagent a time budget, so put "Time: elapsed Ns of a Ms budget." in each message
