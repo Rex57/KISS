@@ -51,10 +51,12 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    brief of a kiss-system-design run plan: read the brief and the design document first, and ask only what they
    leave open; when the run finds a design decision wrong, tell the owner, who sends it back to the design's map
    (`kiss-system-design <name>`, its loop back). Settle every open
-   decision (see "Asking the owner") with the owner: `grilling` when installed, else the rounds in
+   decision (see "Asking the owner") with the owner: call the Skill tool with `mattpocock-skills:grilling` when installed, also when the owner's
+   answers are given (it checks that no decision is left open), else the rounds in
    [references/spec-and-tickets.md](references/spec-and-tickets.md). Write each settled answer into `R/decisions.md`
    at once. With domain docs on, also use `domain-modeling`. When the run adds or changes a module's interface or a seam,
-   load `codebase-design` before the spec, and use its words and its deepening check. When a decision needs an answer
+   call the Skill tool with `mattpocock-skills:codebase-design` before you write the spec, also when the owner's
+   answers are given, and use its words and its deepening check. When a decision needs an answer
    the owner can try (a state model, a UI), build a throwaway with `prototype` (in the scratch folder or on a branch
    that is never merged) and ask the decision with it. Then write `R/spec.md` from `templates/spec.md` by the
    spec rules in that file, and confirm the test seams with the owner.
