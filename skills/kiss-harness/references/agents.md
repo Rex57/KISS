@@ -16,7 +16,7 @@ new message, plus: "Read `R/progress.md` first: it is the record of the work so 
 findings file. `progress.md` and the commits hold everything the next agent needs; that is why the implementer
 writes them after each ticket.
 
-**A kiss-mini-agent worker** starts the same way, in the background, and is never continued (a redo is a new
+**A kiss-mini worker** starts the same way, in the background, and is never continued (a redo is a new
 worker with a new brief). Claude Code: `subagent_type: "kiss:kiss-worker"` (it carries its model). Another agent:
 the start tool above, its prompt the brief.
 

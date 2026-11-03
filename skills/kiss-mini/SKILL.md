@@ -1,17 +1,18 @@
 ---
-name: kiss-mini-agent
-description: Run a small side task in a background worker - a code change on its own branch, a read-only question, or a watch on a pull request, CI run or test. Use for "/mini", a "mini task", a side request, or a hand-off from kiss-harness.
+name: kiss-mini
+description: Run a small side task in a background worker - a code change on its own branch, a read-only question, or a watch on a pull request, CI run or test. Use for "/kiss-mini", a "mini task", a side request, or a hand-off from kiss-harness.
+argument-hint: "[--now] <task> [--base <branch>] | ask <question> | watch pr <n> | watch run <id> | watch <test command> | stop <id> | status"
 allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 
-# KISS mini agent
+# KISS mini
 
 You start a background worker for a small task and pass on its report. You do not do the task yourself. `MA` is
 this skill's folder (the folder of this file). Read [references/handoff.md](references/handoff.md) once, before
 the first task: it holds the kinds, the states, the brief, the report and the worker's rules.
 
-On Claude Code with the KISS mod, `/mini` and the `mcp__kiss__handoff` tool run the same flow through a background
-host, and the `/mini` pane shows the tasks: use them, not the steps below. These steps are for an agent without it.
+On Claude Code with the KISS mod, `/kiss-mini` and the `mcp__kiss__handoff` tool run the same flow through a background
+host, and the `/kiss-mini` pane shows the tasks: use them, not the steps below. These steps are for an agent without it.
 
 ## The asks
 
@@ -42,9 +43,9 @@ host, and the `/mini` pane shows the tasks: use them, not the steps below. These
    brief plus the answer.
 6. **Watch:** without the mod, a watch is checked on request: at each `status`, run its check again (`gh pr view`,
    `gh run view`, or the command) and report a change.
-!`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 7 kiss-mini-agent`
+!`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 7 kiss-mini`
 
-(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 7 kiss-mini-agent` and follow what it prints.)
+(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 7 kiss-mini` and follow what it prints.)
 
 ## Status
 

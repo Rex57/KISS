@@ -9,7 +9,7 @@ skills and keep a short attribution that points here:
 | `skills/kiss-harness/references/retro.md` | `retro` |
 | `skills/kiss-code-clean/references/architecture.md` | `improve-codebase-architecture` |
 | `skills/kiss-system-design/references/map.md` | `wayfinder` |
-| `skills/kiss-mini-agent/references/handoff.md` | `handoff`, `claude-handoff`, `triage` |
+| `skills/kiss-mini/references/handoff.md` | `handoff`, `claude-handoff`, `triage` |
 
 His license, in full:
 

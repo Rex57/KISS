@@ -8,7 +8,7 @@ allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 # KISS code clean
 
 You find what to clean up in a code base and rank it; the owner picks, and each pick is built later by kiss-harness
-or kiss-mini-agent. `CC` is this skill's folder (the folder of this file). The scope is the repo, or the folder the
+or kiss-mini. `CC` is this skill's folder (the folder of this file). The scope is the repo, or the folder the
 owner names.
 
 You read the code, the git history and the tools' output, and you show a bug from the code: its file, its line and
@@ -55,15 +55,15 @@ no tracked file; your one write is the list in the git-ignored `.kiss/clean/` (s
    is out of that order. Every row gets `Strong`, `Worth exploring` or `Speculative`, a `shortcut:` with a named
    trigger too. Each row: number, kind, `file:line`, the evidence (the check that found
    it and its result), the strength, and the build it needs (a harness run for a change across modules or an
-   interface, a `/mini` task for a small local one). Start the list with one line per skipped part: each skill or tool that step 1 found missing ("ponytail not
+   interface, a `/kiss-mini` task for a small local one). Start the list with one line per skipped part: each skill or tool that step 1 found missing ("ponytail not
    installed: no audit report, no debt ledger"), and each installed skill of steps 3 to 5 that the run did not call. Save
    it as `<repo>/.kiss/clean/<YYYY-MM-DD>.md`; when that file exists, add `-2`, `-3` and so on to the name. That
    folder must be git-ignored: when `git -C "<repo>" check-ignore -q .kiss/clean/x` fails, add the line
    `.kiss/clean/` to the file that `git -C "<repo>" rev-parse --git-path info/exclude` names (never to a tracked
    file), and say so. Show the saved list as it is, with every column. Done when `git -C "<repo>" status --short`
    equals the status step 1 recorded (less a `?? .kiss/` line that the new exclude line hides).
-8. **The owner picks.** Each pick becomes a harness run (kiss-harness, the candidate as its request) or a `/mini`
-   task (kiss-mini-agent); start it only on the owner's word. Done when each pick has its route.
+8. **The owner picks.** Each pick becomes a harness run (kiss-harness, the candidate as its request) or a `/kiss-mini`
+   task (kiss-mini); start it only on the owner's word. Done when each pick has its route.
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 9 kiss-code-clean`
 
 (Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 9 kiss-code-clean` and follow what it prints.)

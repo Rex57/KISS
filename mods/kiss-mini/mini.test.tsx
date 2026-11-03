@@ -46,6 +46,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     runs: [] as string[][],
     toasts: [] as string[],
     files: {} as Record<string, string>,
+    commands: [] as string[],
   }
   w.clock = mock.clock(on, { now: NOW })
   // The store in memory, readable by the test: the ledger is the contract every session reads.
@@ -59,7 +60,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
   on('session.id', () => ({ value: w.session }))
   on('session.cwd', () => ({ value: cwd }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('command.register', ($, e) => ({ value: { command: e.name } }) as never)
+  on('command.register', ($, e) => (w.commands.push(e.name), { value: { command: e.name } }) as never)
   on('session.send', ($, e) => {
     w.sent.push({ to: e.to, text: e.text })
     return delivered ? { isDelivered: true } : { isDelivered: false, reason: 'no live session' }
@@ -119,24 +120,24 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
   return w
 }
 
-const status = async ($: any) => (await $.command.run({ command: 'mini', args: 'status' })).text as string
+const status = async ($: any) => (await $.command.run({ command: 'kiss:kiss-mini', args: 'status' })).text as string
 
-test('/mini ask records a working task and the band reads 1 working; the report makes it done with one toast', async ($, on) => {
+test('/kiss-mini ask records a working task and the band reads 1 working; the report makes it done with one toast', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: 'ask what does tickets.py check?' } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'ask what does tickets.py check?' } as never)
   expect(await status($)).toContain(`${ID} question working: what does tickets.py check?`)
 
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   // Until the host takes it, the task waits for a slot.
-  expect((await ui.find({ type: 'Text', text: /mini:/ }))?.text).toBe('mini: 1 waiting for a slot')
+  expect((await ui.find({ type: 'Text', text: /kiss-mini:/ }))?.text).toBe('kiss-mini: 1 waiting for a slot')
 
   // The host takes the task in code: the message is consumed, a kiss-worker starts in the sender's folder.
   expect(w.sent.length).toBe(1)
   expect(w.sent[0]?.text).toContain(`KISS-MINI task ${ID}`)
   const got = await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   expect(got.consumed).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /mini:/ }))?.text).toBe('mini: 1 working')
+  expect((await ui.find({ type: 'Text', text: /kiss-mini:/ }))?.text).toBe('kiss-mini: 1 working')
   expect(w.spawned.length).toBe(1)
   expect(w.spawned[0]?.subagentType).toBe('kiss:kiss-worker')
   // A question reads the owner's own working tree.
@@ -161,13 +162,20 @@ test('/mini ask records a working task and the band reads 1 working; the report 
   await ui.unmount()
 })
 
+test('/kiss-mini is the skill command (kiss:kiss-mini), answered by the mod; mini is not a registered command', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  expect(w.commands).toEqual([])
+  expect(await status($)).toBe('kiss-mini: no tasks.')
+})
+
 test('when the send to the host is refused, the mod starts a new host and the task still goes in', async ($, on) => {
   const w = world(on, { delivered: false })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: 'ask why?' } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
   expect(w.spawned.length).toBe(0)
   const start = w.runs.find(argv => argv.includes('--bg'))
-  expect(start?.slice(0, 4)).toEqual(['claude', '--bg', '--name', 'kiss-mini-agent'])
+  expect(start?.slice(0, 4)).toEqual(['claude', '--bg', '--name', 'kiss-mini'])
   expect(start).toContain(JSON.stringify({ env: { KISS_MINI_HOST: '1' } }))
 
   // The new host session starts: it takes the task that waits in the ledger.
@@ -182,7 +190,7 @@ test('with no open task the band draws nothing', async ($, on) => {
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })
     expect(await ui.find({ type: 'Text', text: /prompt only/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /mini:/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /kiss-mini:/ })).toBeUndefined()
     await ui.unmount()
   }
 })
@@ -191,7 +199,7 @@ const PANE = {
   plugin: 'kiss',
   component: 'Pane',
   requestId: 'kiss-mini',
-  props: { title: 'mini', isFocused: true, bodyColumns: 100, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
+  props: { title: 'kiss-mini', isFocused: true, bodyColumns: 100, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
 } as const
 const WT = `/tmp/kiss-mini/${ID}/wt`
 const READY = [
@@ -208,7 +216,7 @@ const READY = [
 /** A code task from the owner, through the host, to ready. */
 async function ready($: any, w: ReturnType<typeof world>) {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  await $.command.run({ command: 'mini', args: 'fix add so it returns the sum --base main' })
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' })
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' })
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
   await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1000, isAborted: false, turnId: 't1' })
@@ -269,7 +277,7 @@ test('a message from another session or an agent that asks to push, merge or ope
 test('without --base the code task branches from the checkout\'s current branch', async ($, on) => {
   const w = world(on, { branch: 'dev' })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: 'status bar is red, fix it' } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'status bar is red, fix it' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   expect(git(w)).toContain(`git -C /repo worktree add -b mini/${ID} ${WT} dev`)
   expect(await status($)).toContain(`${ID} code working: status bar is red, fix it`)
@@ -278,10 +286,10 @@ test('without --base the code task branches from the checkout\'s current branch'
 test('from a detached HEAD, with no --base, the code task is refused and says why', async ($, on) => {
   const w = world(on, { branch: 'HEAD' })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  const r = await $.command.run({ command: 'mini', args: 'fix it' } as never)
+  const r = await $.command.run({ command: 'kiss:kiss-mini', args: 'fix it' } as never)
   expect(r.text).toContain('--base')
   expect(w.sent).toEqual([])
-  expect(await status($)).toBe('mini: no tasks.')
+  expect(await status($)).toBe('kiss-mini: no tasks.')
 })
 
 test('Merge into the base is refused while the checkout is on another branch: no merge, one toast, still ready', async ($, on) => {
@@ -360,7 +368,7 @@ test('a long task text is cut in the brief, which stays at most 1,500 characters
   const w = world(on)
   const text = `fix ${'the long description of the bug '.repeat(60)}`.trim()
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: text } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: text } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   expect(w.spawned[0]?.prompt.length).toBeLessThanOrEqual(1500)
   expect(w.spawned[0]?.prompt).toContain(`/tmp/kiss-mini/${ID}/task.md`)
@@ -380,7 +388,7 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
     'bash -c "git push origin x"', "sh -c 'cd x && git push'", 'eval "git push"', 'git subtree push --prefix d origin b',
     'git -c alias.p=push p origin x', 'bash -lc "git push origin x"', 'gh api -X PUT repos/o/r/pulls/12/merge']) {
     const r = await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
-    expect(JSON.stringify(r)).toContain('press in the /mini pane')
+    expect(JSON.stringify(r)).toContain('press in the /kiss-mini pane')
   }
   const allowed = ['git commit -m "docs: how to git push a branch"', 'git commit -m fix', 'git add merge.py', './build.sh && git commit -m "docs: how to git push a branch"', 'git add run.sh && git commit -m "explain git merge in the readme"', 'git commit -m "bash: git merge notes"', 'git commit -m "merge the push docs"', 'git merge-base main HEAD', 'git log --grep merge', 'gh pr view 12']
   for (const command of allowed) await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
@@ -434,7 +442,7 @@ test('a delivery whose command throws is released: one toast, no claim left, the
   await ready($, w)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: `pr-${ID}` })
-  expect(w.toasts.at(-1)).toContain(`mini ${ID}: pr failed`)
+  expect(w.toasts.at(-1)).toContain(`kiss-mini ${ID}: pr failed`)
   expect(w.store[`kiss-mini/task/${ID}`].busy).toBeUndefined()
   expect(await ui.find({ key: `pr-${ID}` })).toBeDefined()
   expect(await ui.find({ key: `discard-${ID}` })).toBeDefined()
@@ -444,7 +452,7 @@ test('a delivery whose command throws is released: one toast, no claim left, the
 test('a failed worktree add leaves no worktree to Discard, and the task ends with a time', async ($, on) => {
   const w = world(on, { fail: { worktree: { stderr: "fatal: invalid reference: nosuch" } } })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: 'fix it --base nosuch' } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'fix it --base nosuch' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   const t = w.store[`kiss-mini/task/${ID}`]
   expect([t.state, t.worktree, t.branch, t.finished]).toEqual(['failed', undefined, undefined, NOW])
@@ -471,7 +479,7 @@ test('with real-length paths a long task text still gives a brief of at most 1,5
   const cwd = '/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo'
   const w = world(on, { tmp, cwd })
   await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: `fix ${'the long bug text '.repeat(30)}`.trim() } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: `fix ${'the long bug text '.repeat(30)}`.trim() } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   expect(w.spawned[0]?.prompt.length).toBeLessThanOrEqual(1500)
   expect(w.spawned[0]?.prompt).toContain('task.md')
@@ -536,7 +544,7 @@ test('a hand-off with return off sends nothing back', async ($, on) => {
 
 async function watch($: any, w: ReturnType<typeof world>, target: string) {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  await $.command.run({ command: 'mini', args: `watch ${target}` })
+  await $.command.run({ command: 'kiss:kiss-mini', args: `watch ${target}` })
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' })
 }
 
@@ -587,7 +595,7 @@ function tools(on: On) {
 }
 async function working($: any, w: ReturnType<typeof world>) {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  await $.command.run({ command: 'mini', args: 'fix add so it returns the sum --base main' })
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' })
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' })
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
 }
@@ -658,7 +666,7 @@ test('a fourth harness code task waits while three run, and an owner task still 
   expect(w.spawned).toEqual([])
   expect(await status($)).toContain(`${ID} code working: fourth`)
   await w.clock.advance(1_000)
-  await $.command.run({ command: 'mini', args: 'owner fix --base main' } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'owner fix --base main' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
   expect(w.spawned.length).toBe(1)
   expect(w.spawned[0]?.prompt).toContain('owner fix')
@@ -706,12 +714,12 @@ test('a worker the engine lists as waiting shows as waiting for you, with a way 
   expect(await status($)).toContain(`${ID} code working`)
 })
 
-test('/mini stop on a working task stops its worker and marks it failed as stopped', async ($, on) => {
+test('/kiss-mini stop on a working task stops its worker and marks it failed as stopped', async ($, on) => {
   const w = world(on)
   const ran: string[] = []
   on('tool.call', ($, e) => (ran.push(String(e.tool)), { result: {}, text: 'ok' }) as never)
   await working($, w)
-  const r = await $.command.run({ command: 'mini', args: `stop ${ID}` } as never)
+  const r = await $.command.run({ command: 'kiss:kiss-mini', args: `stop ${ID}` } as never)
   expect(r.text).toContain(ID)
   expect(w.spawned.length).toBe(1)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
@@ -741,7 +749,7 @@ test('RACE: a stop that arrives while a worker tool call runs stays a stop', asy
   await working($, w)
   const call = $.tool.call({ tool: 'Bash', command: 'python3 long.py', agentId: 'w1' } as never)
   await w.clock.settle()
-  await $.command.run({ command: 'mini', args: `stop ${ID}` } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: `stop ${ID}` } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
   expect(w.store[`kiss-mini/task/${ID}`].state).toBe('failed')
   release()
@@ -799,7 +807,7 @@ test('ANSWER: a model-written peer message (no plugin) is not taken as the owner
 test('a question leaves no worktree; the pane names the full text; no State line on a question is done', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: 'ask why?' } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
   await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: 'Because add subtracts.', durationMs: 1, isAborted: false, turnId: 't1' } as never)
@@ -813,7 +821,7 @@ test('a question leaves no worktree; the pane names the full text; no State line
 test('a host that cannot start fails the task with claude\'s words', async ($, on) => {
   const w = world(on, { delivered: false, fail: { claude: { stderr: 'Workspace not trusted.' } } })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  const r = await $.command.run({ command: 'mini', args: 'ask why?' } as never)
+  const r = await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
   expect(r.text).toContain('could not start a host: Workspace not trusted.')
   expect(w.store[`kiss-mini/task/${ID}`].state).toBe('failed')
 })
@@ -866,7 +874,7 @@ test('a question may not write a file, and its commands leave no Python or pytes
   const ran: string[] = []
   on('tool.call', ($, e) => (ran.push(String((e as { command?: string }).command ?? e.tool)), { result: {}, text: 'ok' }) as never)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: 'ask does pytest pass?' } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'ask does pytest pass?' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
   const r = await $.tool.call({ tool: 'Write', file_path: '/repo/x.py', content: 'x', agentId: 'w1' } as never)
@@ -917,20 +925,20 @@ test('an aborted turn with no answer is no report: the task waits for the orphan
 test('a host whose beat is over 3 minutes old is not sent to: a new host starts', async ($, on) => {
   const w = world(on, { store: { 'kiss-mini/host': { sessionId: 'old', beat: NOW - 4 * 60_000 } } })
   w.session = 's9'
-  const r = await $.command.run({ command: 'mini', args: 'ask why?' } as never)
+  const r = await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
   expect(w.sent).toEqual([])
   expect(r.text).toContain('started a new host')
 })
 
-test('/mini --now skips the three checks; a plain /mini runs them', async ($, on) => {
+test('/kiss-mini --now skips the three checks; a plain /kiss-mini runs them', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: '--now fix it --base main' } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: '--now fix it --base main' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
   expect(w.spawned[0]?.prompt).toContain('Checks: skip (owner)')
   expect(w.spawned[0]?.prompt).toContain('# Mini task 1102-143005: fix it')
   await w.clock.advance(1_000)
-  await $.command.run({ command: 'mini', args: 'ask why?' } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
   expect(w.spawned[1]?.prompt).toContain('Checks: run')
 })
@@ -941,7 +949,7 @@ test('with real-length paths a 400-character task keeps its first 200 characters
   const w = world(on, { tmp, cwd })
   const text = `fix ${'the parser drops the last field '.repeat(12)}`.trim().slice(0, 400)
   await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: `${text} --base main` } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: `${text} --base main` } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   const prompt = w.spawned[0]?.prompt ?? ''
   expect(prompt.length).toBeLessThanOrEqual(1500)
@@ -953,7 +961,7 @@ test('when the paths leave under 200 characters for the task text, its first 200
   const w = world(on, { tmp: `/tmp${deep}/`, cwd: `/home/someone${deep}/repo` })
   const text = `fix ${'the parser drops the last field '.repeat(12)}`.trim().slice(0, 400)
   await $.session.start({ cwd: `/home/someone${deep}/repo`, surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'mini', args: `${text} --base main` } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: `${text} --base main` } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   expect(w.spawned[0]?.prompt).toContain(text.slice(0, 200))
   expect(w.spawned[0]?.prompt).not.toContain(text.slice(0, 201))

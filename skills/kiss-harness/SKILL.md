@@ -109,14 +109,14 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 **The clock:** no agent gives a subagent a time budget, so put "Time: elapsed Ns of a Ms budget." in each message
 (`prompt.py` does it when you pass `ELAPSED`). Past the budget, a gate comes before the next round.
 
-## Side tasks (kiss-mini-agent)
+## Side tasks (kiss-mini)
 
 Work outside the tickets (a side request from the owner, a bug outside the current ticket, a watch on a pull
-request, CI or a test) goes to kiss-mini-agent, so neither your context nor the implementer's takes it. Write a
-brief in the format of `../kiss-mini-agent/references/handoff.md` (at most 1,500 characters).
+request, CI or a test) goes to kiss-mini, so neither your context nor the implementer's takes it. Write a
+brief in the format of `../kiss-mini/references/handoff.md` (at most 1,500 characters).
 
 - **Hand it off:** with the Claude Code mod, call the `mcp__kiss__handoff` tool: `kind`, `title`, `brief`, `base` =
-  the harness branch, `return: true`. Without it, start the worker yourself by that skill's flow (`kiss-mini-agent`,
+  the harness branch, `return: true`. Without it, start the worker yourself by that skill's flow (`kiss-mini`,
   step "A task"), on a `mini/<id>` branch from the harness branch. Either way one report comes back in the report
   format: state, a summary of at most 600 characters, the branch and commits, the tests, the full log. Save it
   whole as `T/report.md` and work from its lines as they came; do not redo or recheck the worker's task.

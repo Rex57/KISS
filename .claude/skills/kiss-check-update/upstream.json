@@ -85,21 +85,21 @@
           "path": "skills/productivity/handoff/SKILL.md",
           "fingerprint": "a224edc643a20ddb989f9bca1547440169159810",
           "kiss_files": [
-            "skills/kiss-mini-agent/references/handoff.md"
+            "skills/kiss-mini/references/handoff.md"
           ]
         },
         {
           "path": "skills/in-progress/claude-handoff/SKILL.md",
           "fingerprint": "77f82fc59c89c3a83ed5a92521dc2869f0533724",
           "kiss_files": [
-            "skills/kiss-mini-agent/references/handoff.md"
+            "skills/kiss-mini/references/handoff.md"
           ]
         },
         {
           "path": "skills/engineering/triage/SKILL.md",
           "fingerprint": "3fd5617e906cf9b71a6b17424791adb905fc248b",
           "kiss_files": [
-            "skills/kiss-mini-agent/references/handoff.md"
+            "skills/kiss-mini/references/handoff.md"
           ]
         }
       ]

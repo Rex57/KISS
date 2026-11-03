@@ -34,7 +34,7 @@ when no decision is open.
    every open decision has its file and its type.
 4. **Work the map, one decision at a time** (research may run side by side). Take the first open decision that
    nothing open blocks, unless the owner names one. Settle it by its type:
-   - `research`: in the background, through kiss-mini-agent (`/mini ask <question>` or its hand-off) when it is
+   - `research`: in the background, through kiss-mini (`/kiss-mini ask <question>` or its hand-off) when it is
      installed, else a subagent that calls the Skill tool with `mattpocock-skills:research`. Its findings go into
      the decision file; the owner confirms what they decide.
    - `prototype`: call `mattpocock-skills:prototype` for a cheap, throwaway thing the owner can try (a state

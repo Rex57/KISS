@@ -1,4 +1,4 @@
-// kiss-mini-agent: /mini in every session, one background host session that runs the workers in code.
+// kiss-mini: /kiss-mini in every session, one background host session that runs the workers in code.
 // The ledger is `$.store` (shared by every session on the machine): one key per task, one for the host.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
@@ -9,7 +9,7 @@ type $ = EngineInterface
 
 const TASK = 'kiss-mini/task/'
 const HOST = 'kiss-mini/host'
-const HOST_NAME = 'kiss-mini-agent'
+const HOST_NAME = 'kiss-mini'
 const TOAST: State[] = ['done', 'ready', 'waiting for you', 'failed']
 const ENDED: State[] = ['done', 'failed']
 const SUMMARY_MAX = 600
@@ -20,7 +20,7 @@ const WATCH_IDLE = 600_000
 const WATCH_MAX = 24 * 3600_000
 const CODE_MAX = 30 * 60_000
 const STATUS_EVERY = 30_000
-// Code workers at once: 3 from the harness (a hand-off), 1 for the owner's own /mini.
+// Code workers at once: 3 from the harness (a hand-off), 1 for the owner's own /kiss-mini.
 const SLOTS = { harness: 3, owner: 1 }
 // The open states, in the order the pane and the band show them.
 const ORDER: State[] = ['waiting for you', 'working', 'ready', 'watching']
@@ -130,7 +130,7 @@ function brief(t: Task, rules: string, dir: string): { text: string; whole: stri
 function reportMessage(t: Task, answer: string) {
   const line = (name: string, none: string) => new RegExp(`^${name}:.*$`, 'm').exec(answer)?.[0] ?? `${name}: ${none}`
   return [
-    `kiss-mini-agent task ${t.id} (${t.kind}): ${t.title.slice(0, 120)}`,
+    `kiss-mini task ${t.id} (${t.kind}): ${t.title.slice(0, 120)}`,
     `State: ${t.state}`,
     `Summary: ${t.report ?? ''}`,
     line('Branch', 'none'),
@@ -148,11 +148,11 @@ async function refresh($: $) {
     if (t.sender !== me) continue
     if ((t.changes ?? 0) > (t.seen ?? 0)) {
       await save($, { ...((await $.store.get(TASK + t.id)) as Task), seen: t.changes })
-      $.ui.toast(`mini ${t.id} watch: ${t.title} is ${t.status}`)
+      $.ui.toast(`kiss-mini ${t.id} watch: ${t.title} is ${t.status}`)
     }
     if (t.notified || !TOAST.includes(t.state)) continue
     await save($, { ...(await $.store.get(TASK + t.id) as Task), notified: true })
-    $.ui.toast(`mini ${t.id} ${t.state}: ${t.title}${t.kind === 'watch' && t.report ? ` - ${t.report}` : ''}`)
+    $.ui.toast(`kiss-mini ${t.id} ${t.state}: ${t.title}${t.kind === 'watch' && t.report ? ` - ${t.report}` : ''}`)
   }
 }
 
@@ -221,7 +221,7 @@ async function tick($: $) {
       (await $.process.run(['git', '-C', t.cwd, 'merge-base', '--is-ancestor', t.branch, t.base!])).exitCode === 0) {
       // A worktree with changes nobody committed is never forced away.
       const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.trim()
-      if (dirty) $.ui.toast(`mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
+      if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
       else await $.process.run(['git', '-C', t.cwd, 'worktree', 'remove', '--force', t.worktree])
       await save($, { ...t, state: 'done', delivered: 'merge', ...(dirty ? {} : { worktree: undefined }) })
       continue
@@ -298,14 +298,14 @@ async function run($: $, id: string) {
       return save($, { ...t, state: 'failed', report: made.stderr.trim().slice(0, SUMMARY_MAX), worktree: undefined, branch: undefined, finished: await $.clock.now() })
     }
   }
-  const rules = `${$.plugin.root}/skills/kiss-mini-agent/references/handoff.md`
+  const rules = `${$.plugin.root}/skills/kiss-mini/references/handoff.md`
   const dir = await folder($, id)
   const b = brief(t, rules, dir)
   if (b.isCut) await $.fs.write(`${dir}/task.md`, b.whole)
   const r = await $.agent.spawn({
     subagentType: 'kiss:kiss-worker',
     prompt: b.text,
-    description: `mini ${id}: ${t.title.slice(0, 80)}`,
+    description: `kiss-mini ${id}: ${t.title.slice(0, 80)}`,
     cwd: t.worktree ?? t.cwd,
   })
   // The worker's turn.start may have written the task meanwhile: build on the stored entry.
@@ -366,7 +366,7 @@ async function deliverOnce($: $, id: string, how: Delivery) {
   const failed = async (words: string) => {
     await save($, t)
     await refresh($)
-    $.ui.toast(`mini ${id}: ${how} failed: ${words.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 400)}`)
+    $.ui.toast(`kiss-mini ${id}: ${how} failed: ${words.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 400)}`)
   }
   try {
     const git = (...args: string[]) => $.process.run(['git', '-C', t.cwd, ...args], { timeoutMs: 120_000 })
@@ -395,7 +395,7 @@ async function deliverOnce($: $, id: string, how: Delivery) {
     if (how === 'discard') await git('branch', '-D', t.branch)
     // A worktree git no longer lists (its folder deleted, then pruned) is gone too.
     const gone = removed.exitCode === 0 || !(await git('worktree', 'list', '--porcelain')).stdout.split('\n').includes(`worktree ${t.worktree}`)
-    if (!gone) $.ui.toast(`mini ${id}: worktree kept at ${t.worktree}: ${removed.stderr.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 200)}`)
+    if (!gone) $.ui.toast(`kiss-mini ${id}: worktree kept at ${t.worktree}: ${removed.stderr.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 200)}`)
     const { pr, diff, tests, ...rest } = t
     await save($, { ...rest, state: 'done', delivered: how, ...(gone ? { worktree: undefined } : {}) })
     await refresh($)
@@ -414,16 +414,11 @@ async function newId($: $) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'mini',
-      description: 'kiss-mini-agent: /mini <task> a code change, /mini ask <question>, /mini status (alone) the list; --now skips the worker\'s checks; no argument opens the pane',
-      argumentHint: '[--now] <task> [--base <branch>] | ask <question> | watch pr <n> | watch run <id> | watch <test command> | stop <id> | status',
-    })
     await $.tool.register({
       name: 'handoff',
       description:
-        'kiss-mini-agent: hand a side task (outside the current tickets) to a background worker. kind: code, bug, question, or watch (with target); ' +
-        'brief: in the format of skills/kiss-mini-agent/references/handoff.md, at most 1,500 characters; base: the branch a code ' +
+        'kiss-mini: hand a side task (outside the current tickets) to a background worker. kind: code, bug, question, or watch (with target); ' +
+        'brief: in the format of skills/kiss-mini/references/handoff.md, at most 1,500 characters; base: the branch a code ' +
         'or bug task starts from (the harness branch); return: true sends the report back to this session as one message.',
       inputSchema: {
         type: 'object',
@@ -442,7 +437,7 @@ export const register: Register = on => {
     if (await isHost($)) {
       await $.tool.register({
         name: 'progress',
-        description: 'kiss-mini-agent workers: report your plan\'s step as you start it: step (1-based) of total steps.',
+        description: 'kiss-mini workers: report your plan\'s step as you start it: step (1-based) of total steps.',
         inputSchema: { type: 'object', properties: { step: { type: 'number' }, total: { type: 'number' } }, required: ['step', 'total'] },
         isDeferred: false,
       })
@@ -464,14 +459,15 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'mini' }, async ($, e) => {
+  // /kiss-mini is the skill's own command (kiss:kiss-mini): Claude Code refuses to register the name again, so the mod answers it.
+  on('command.run', { command: 'kiss:kiss-mini' }, async ($, e) => {
     // --now: the owner orders the task outright, and the worker skips the three checks.
     const all = e.args.trim().split(/\s+/).filter(Boolean)
     const now = all.includes('--now')
     const [verb = '', ...rest] = all.filter(word => word !== '--now')
     if (verb === '') {
-      await $.ui.open({ id: PANE, title: 'mini' })
-      return { text: 'mini: pane opened.' }
+      await $.ui.open({ id: PANE, title: 'kiss-mini' })
+      return { text: 'kiss-mini: pane opened.' }
     }
     if (e.args.trim() !== 'status') {
       const id = await newId($)
@@ -479,54 +475,54 @@ export const register: Register = on => {
       const t: Task = { id, kind: 'question', title: rest.join(' '), sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now(), key: crypto.randomUUID(), ...(now ? { now } : {}) }
       if (verb === 'stop') {
         const known = (await $.store.get(TASK + (rest[0] ?? ''))) as Task | undefined
-        if (!known) return { text: `mini: no task ${rest[0] ?? ''}. /mini status lists them.` }
-        return { text: `mini ${known.id}: stop asked (${await wake($, `KISS-MINI stop ${known.id} ${known.key}`)}).` }
+        if (!known) return { text: `kiss-mini: no task ${rest[0] ?? ''}. /kiss-mini status lists them.` }
+        return { text: `kiss-mini ${known.id}: stop asked (${await wake($, `KISS-MINI stop ${known.id} ${known.key}`)}).` }
       }
       if (verb === 'watch') {
         Object.assign(t, { kind: 'watch', state: 'watching', ...watchOf(rest) })
-        if (!t.target) return { text: 'mini: watch pr <number|url>, watch run <id|url>, or watch <test command>.' }
+        if (!t.target) return { text: 'kiss-mini: watch pr <number|url>, watch run <id|url>, or watch <test command>.' }
       } else if (verb !== 'ask') {
         const words = [verb, ...rest]
         const at = words.indexOf('--base')
         const base = at >= 0 ? words.splice(at, 2)[1] : undefined
         const head = base ?? (await $.process.run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
-        if (!head || head === 'HEAD') return { text: `mini: ${cwd} is on no branch (or in no repository): name one with --base <branch>.` }
+        if (!head || head === 'HEAD') return { text: `kiss-mini: ${cwd} is on no branch (or in no repository): name one with --base <branch>.` }
         Object.assign(t, { kind: 'code', title: words.join(' '), base: head, branch: `mini/${id}`, worktree: `${await folder($, id)}/wt` })
       }
-      if (!t.title) return { text: 'mini: say what to do: /mini <task>, /mini ask <question>.' }
+      if (!t.title) return { text: 'kiss-mini: say what to do: /kiss-mini <task>, /kiss-mini ask <question>.' }
       await save($, t)
       await refresh($)
-      return { text: `mini ${id}: ${t.kind} started (${await started($, t)}).` }
+      return { text: `kiss-mini ${id}: ${t.kind} started (${await started($, t)}).` }
     }
     const lines = (await tasks($)).map(t => `${t.id} ${t.kind} ${t.state}: ${t.title}${t.report ? ` - ${t.report}` : ''}`)
-    return { text: lines.join('\n') || 'mini: no tasks.' }
+    return { text: lines.join('\n') || 'kiss-mini: no tasks.' }
   })
 
-  // Any session: the hand-off tool records a task and wakes the host, as /mini does.
+  // Any session: the hand-off tool records a task and wakes the host, as /kiss-mini does.
   on('tool.call', { tool: 'mcp__kiss__handoff' }, async ($, e) => {
     const a = e as unknown as { kind: Task['kind']; title: string; brief: string; base?: string; return?: boolean; target?: string }
     if (a.kind === 'watch') {
       const w = watchOf((a.target ?? '').trim().split(/\s+/).filter(Boolean))
-      if (!w.target) return { result: 'kiss-mini-agent: a watch needs a target: pr <n>, run <id>, or a test command.' }
+      if (!w.target) return { result: 'kiss-mini: a watch needs a target: pr <n>, run <id>, or a test command.' }
       const id = await newId($)
       const t: Task = { id, kind: 'watch', title: a.title || w.target, ...w, return: a.return === true, sender: await $.session.id(), cwd: await $.session.cwd(), state: 'watching', started: await $.clock.now(), key: crypto.randomUUID() }
       await save($, t)
       await refresh($)
-      return { result: `kiss-mini-agent task ${id} (watch) started (${await started($, t)}).${t.return ? ' Its end comes back to this session as one message.' : ''}` }
+      return { result: `kiss-mini task ${id} (watch) started (${await started($, t)}).${t.return ? ' Its end comes back to this session as one message.' : ''}` }
     }
-    if (!['code', 'bug', 'question'].includes(a.kind) || !a.title || !a.brief) return { result: 'kiss-mini-agent: kind (code, bug, question or watch), title and brief are needed.' }
-    if (a.brief.length > BRIEF_MAX) return { result: `kiss-mini-agent: the brief has ${a.brief.length} characters; at most ${BRIEF_MAX}.` }
+    if (!['code', 'bug', 'question'].includes(a.kind) || !a.title || !a.brief) return { result: 'kiss-mini: kind (code, bug, question or watch), title and brief are needed.' }
+    if (a.brief.length > BRIEF_MAX) return { result: `kiss-mini: the brief has ${a.brief.length} characters; at most ${BRIEF_MAX}.` }
     const id = await newId($)
     const cwd = await $.session.cwd()
     const t: Task = { id, kind: a.kind, title: a.title, brief: a.brief, return: a.return === true, sender: await $.session.id(), cwd, state: 'working', started: await $.clock.now(), key: crypto.randomUUID() }
     if (isCode(t)) {
       const base = a.base || (await $.process.run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
-      if (!base || base === 'HEAD') return { result: `kiss-mini-agent: ${cwd} is on no branch: give a base.` }
+      if (!base || base === 'HEAD') return { result: `kiss-mini: ${cwd} is on no branch: give a base.` }
       Object.assign(t, { base, branch: `mini/${id}`, worktree: `${await folder($, id)}/wt` })
     }
     await save($, t)
     await refresh($)
-    return { result: `kiss-mini-agent task ${id} (${t.kind}) started (${await started($, t)}).${t.return ? ' Its report comes back to this session as one message.' : ''}` }
+    return { result: `kiss-mini task ${id} (${t.kind}) started (${await started($, t)}).${t.return ? ' Its report comes back to this session as one message.' : ''}` }
   })
 
   // Host: a worker's progress tool sets its step n of m.
@@ -534,7 +530,7 @@ export const register: Register = on => {
     const a = e as unknown as { step: number; total: number; agentId?: string }
     const t = (await tasks($)).find(x => a.agentId !== undefined && x.agentId === a.agentId)
     if (t) await save($, { ...t, step: a.step, total: a.total })
-    return { result: t ? `step ${a.step} of ${a.total} noted` : 'kiss-mini-agent: no task runs in this loop.' }
+    return { result: t ? `step ${a.step} of ${a.total} noted` : 'kiss-mini: no task runs in this loop.' }
   })
 
   // Host: each tool call of a worker is its last tool call; after a new one, at most every 30 s, a small model
@@ -542,14 +538,14 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     if (e.agentId === undefined || !(await isHost($))) return next(e)
     const t = (await tasks($)).find(x => x.agentId === e.agentId)
-    if (t?.stopped) return { deny: `kiss-mini-agent: the owner stopped this task (${t.report}). Make no more tool calls; end now.` }
-    if (t && GITHUB_WRITES.test(String(e.tool))) return { deny: 'kiss-mini-agent: only the owner\'s press in the /mini pane writes to GitHub. Commit on your branch and report.' }
+    if (t?.stopped) return { deny: `kiss-mini: the owner stopped this task (${t.report}). Make no more tool calls; end now.` }
+    if (t && GITHUB_WRITES.test(String(e.tool))) return { deny: 'kiss-mini: only the owner\'s press in the /kiss-mini pane writes to GitHub. Commit on your branch and report.' }
     // A question reads the owner's own working tree: it writes no file there, and its commands leave no caches.
     // shortcut: read-only by rule; only Edit, Write and NotebookEdit are denied and the Python and pytest caches are
     // off, so a Bash command (cargo test, pytest --cov, sed -i, git stash) can still write in the checkout; upgrade:
     // deny write verbs in Bash, or run the question in a copy of the working tree.
     if (t?.kind === 'question' && ['Edit', 'Write', 'NotebookEdit'].includes(String(e.tool))) {
-      return { deny: 'kiss-mini-agent: a question changes no file. Answer from what you read.' }
+      return { deny: 'kiss-mini: a question changes no file. Answer from what you read.' }
     }
     const quiet = t?.kind === 'question' && String(e.tool) === 'Bash'
     const r = await next(quiet ? { ...e, command: `export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; ${(e as { command: string }).command}` } as typeof e : e)
@@ -590,7 +586,7 @@ export const register: Register = on => {
       await $.session.send({ to: { agentId: t.agentId }, text: `The owner answers your question: ${text.trim()}` })
       await refresh($)
     }
-    return { consumed: `kiss-mini-agent ${verb} ${id}` }
+    return { consumed: `kiss-mini ${verb} ${id}` }
   })
 
   // Host: a worker's first turn names its task in its brief's first line; from then on its agentId does.
@@ -634,14 +630,14 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     if (e.agentId === undefined || !delivers(e.command) || !(await isHost($))) return next(e)
     if (!(await tasks($)).some(t => t.agentId === e.agentId)) return next(e)
-    return { deny: 'kiss-mini-agent: only the owner\'s press in the /mini pane pushes, merges or opens a pull request. Commit on your branch and report.' }
+    return { deny: 'kiss-mini: only the owner\'s press in the /kiss-mini pane pushes, merges or opens a pull request. Commit on your branch and report.' }
   }).catch(($, e, next) =>
-    next.called || e.agentId === undefined || !delivers(e.command) ? next(e) : { deny: 'kiss-mini-agent: its guard failed; no push, merge or pull request from a subagent.' },
+    next.called || e.agentId === undefined || !delivers(e.command) ? next(e) : { deny: 'kiss-mini: its guard failed; no push, merge or pull request from a subagent.' },
   )
 
   // Host: its model stays idle; a worker's hand-back or any other prompt but the person's own is dropped.
   on('prompt.submit', async ($, e, next) =>
-    (await isHost($)) && e.origin.kind !== 'composer' ? { drop: 'kiss-mini-agent host: handled in code' } : next(e),
+    (await isHost($)) && e.origin.kind !== 'composer' ? { drop: 'kiss-mini host: handled in code' } : next(e),
   )
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -661,7 +657,7 @@ export const register: Register = on => {
     }
     return (
       <Box flexDirection="column">
-        {list.length === 0 && <Text dimColor>No mini tasks.</Text>}
+        {list.length === 0 && <Text dimColor>No kiss-mini tasks.</Text>}
         {list.map(t => (
           <Box flexDirection="column" key={t.id}>
             <Text>{`${t.id} ${t.kind} ${t.state}: ${t.title}${t.step ? ` · step ${t.step} of ${t.total}` : ''} · ${age(t)}`}</Text>
@@ -703,10 +699,10 @@ export const register: Register = on => {
     // Other mods share this slot: theirs is drawn below the counts.
     const below = await next(e).catch(() => undefined)
     const { Box, Button, Text } = $.ui.resolve(e)
-    const open = () => $.ui.open({ id: PANE, title: 'mini' })
+    const open = () => $.ui.open({ id: PANE, title: 'kiss-mini' })
     const mine = (
       <Button key="mini-open" plain onPress={open}>
-        <Text>mini: {counts.map(([s, n]) => `${n} ${s}`).join(' · ')}</Text>
+        <Text>kiss-mini: {counts.map(([s, n]) => `${n} ${s}`).join(' · ')}</Text>
       </Button>
     )
     return below ? <Box flexDirection="column">{mine}{below}</Box> : mine

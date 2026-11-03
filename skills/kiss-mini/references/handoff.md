@@ -1,6 +1,6 @@
 # Hand-off: the brief, the report and the worker's rules
 
-The kiss-mini-agent skill, its mod, the `kiss-worker` agent and kiss-harness all read this file. `T` is a task's
+The kiss-mini skill, its mod, the `kiss-worker` agent and kiss-harness all read this file. `T` is a task's
 folder, `$TMPDIR/kiss-mini/<id>/` (`/tmp` when `TMPDIR` is unset), never in the checkout. It holds `brief.md` and,
 at the end, `report.md` (the full log), which the receiver of the report writes (a subagent may not write it).
 
@@ -51,7 +51,7 @@ skill when it is installed: a draft pull request takes it as its body.
 ## The worker's rules
 
 1. **Three checks before work**, each by its own condition, unless the brief says `Checks: skip (owner)` (the
-   owner's `/mini --now`): verify the claim when the task states a fact about current behaviour (for a bug, run a
+   owner's `/kiss-mini --now`): verify the claim when the task states a fact about current behaviour (for a bug, run a
    command that shows the failure); search for code that already does it, always (CodeGraph when the repo has an
    index, else a word search), and say where you looked; compare with `Out of scope` when the brief has an
    out-of-scope list (every harness task). When a check fails, stop and report it.

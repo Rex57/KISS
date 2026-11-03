@@ -22,7 +22,7 @@ first idea to the upkeep of a running project:
 | Phase | KISS skill | What it brings in |
 |---|---|---|
 | Design | `kiss-system-design`, then step 1 of `kiss-harness` | `grilling`, `domain-modeling`, `codebase-design`, `prototype`, `research` |
-| Build | `kiss-harness`, with `kiss-mini-agent` for side tasks | `tdd`, `diagnosing-bugs`, `ponytail`, CodeGraph, `pr` |
+| Build | `kiss-harness`, with `kiss-mini` for side tasks | `tdd`, `diagnosing-bugs`, `ponytail`, CodeGraph, `pr` |
 | Review | the reviewer of `kiss-harness` | `ponytail-review`, CodeGraph callers |
 | Clean | `kiss-code-clean`, `kiss-housekeeping` | `ponytail-audit`, `ponytail-debt`, CodeGraph |
 | Maintain | `kiss-dream`, `kiss-doctor`, the docs Upkeep | agentmemory (optional) |
@@ -57,20 +57,20 @@ What KISS adds:
 |---|---|
 | `kiss-harness` | The questions (decisions recorded in `decisions.md`), the spec, the tickets, then one implementer, one review that uses the product, at most 3 fix rounds, and the owner's merge. Its scripts check the tickets, fill the prompts, seed each ticket with CodeGraph and keep the time budget (10 minutes per ticket, plus 2 hours for reviews and fixes). |
 | `kiss-doctor` | Checks a device for a run: the CodeGraph rule in each agent's global instructions file, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix and installs nothing. |
-| `kiss-mini-agent` | A small side task in a background worker: a code change on its own `mini/<id>` branch, a read-only question, or a watch on a pull request, a CI run or a test command. kiss-harness hands off work outside its tickets to it. On Claude Code a mod adds `/mini` (`/mini <task>`, `/mini --now <task>` to skip the worker's checks, `/mini ask <question>`, `/mini watch pr <n>` / `run <id>` / `<test command>`, `/mini stop <id>`, `/mini status`, `/mini` alone opens the pane), a band with the counts, and the delivery buttons (Merge into the base, Push, Draft PR, Discard); only your press delivers. |
+| `kiss-mini` | A small side task in a background worker: a code change on its own `mini/<id>` branch, a read-only question, or a watch on a pull request, a CI run or a test command. kiss-harness hands off work outside its tickets to it. On Claude Code a mod answers `/kiss-mini` (`/kiss-mini <task>`, `/kiss-mini --now <task>` to skip the worker's checks, `/kiss-mini ask <question>`, `/kiss-mini watch pr <n>` / `run <id>` / `<test command>`, `/kiss-mini stop <id>`, `/kiss-mini status`, `/kiss-mini` alone opens the pane), a band with the counts, and the delivery buttons (Merge into the base, Push, Draft PR, Discard); only your press delivers. |
 | `kiss-housekeeping` | "Clean up the docs": a First run, on your ask, gives each fact one home, sorts pages by kind (living, log, record, history), builds a map, retires stale pages, fixes old names, moves files without breaking code or tests, installs a docs gate in your tests (`tools/check_docs.py`, your own copy) and proves the result with a routing test. After that, each harness close runs its Upkeep when your facts file names the gate. |
 | `kiss-system-design` | First version. From a new product idea to a plan of harness runs: a product brief, a decision map (decisions so far, open decisions typed research / prototype / grilling / task, not yet clear, out of scope), one decision at a time with you (research in the background), then a system design document and an ordered run plan in your docs. Its working files stay in the git-ignored `.kiss/design/<name>/`; continue a design by its name. An idea that fits one run goes to `kiss-harness`. |
-| `kiss-code-clean` | "Clean up the code": one ranked list of clean-up candidates for a code base (bugs, risky code with no test, slow paths, code to delete, merge or split, `shortcut:` debt, hot spots from the git history), each with its evidence and a strength, saved in `.kiss/clean/<date>.md`. A delete candidate shows that nothing uses it (CodeGraph and a word search). It changes no code: you pick, and each pick becomes a harness run or a `/mini` task. |
+| `kiss-code-clean` | "Clean up the code": one ranked list of clean-up candidates for a code base (bugs, risky code with no test, slow paths, code to delete, merge or split, `shortcut:` debt, hot spots from the git history), each with its evidence and a strength, saved in `.kiss/clean/<date>.md`. A delete candidate shows that nothing uses it (CodeGraph and a word search). It changes no code: you pick, and each pick becomes a harness run or a `/kiss-mini` task. |
 | `kiss-dream` | "Tidy up memory": on your ask (unlike Claude Code's background auto-dream), merge and cut an agent's file memory for one repo, run a loss check with a second agent, revise agentmemory (if you use it) and move old transcripts to the Trash. "Tidy up memory" or its command starts the whole flow; other words get the plan first. When another consolidation holds the memory folder's lock, it stops, writes no note and asks you to run it again; its report starts with one row per step. A memory gate (`scripts/check_memory.py`) checks the notes and the index, and a recall test (fresh readers answer questions from the old notes, scored found, wrong or not found) proves nothing was lost. |
 
 How to call a skill:
 
-| Agent | `kiss-harness` | `kiss-doctor` | `kiss-dream` | `kiss-housekeeping` | `kiss-code-clean` | `kiss-system-design` | `kiss-mini-agent` |
+| Agent | `kiss-harness` | `kiss-doctor` | `kiss-dream` | `kiss-housekeeping` | `kiss-code-clean` | `kiss-system-design` | `kiss-mini` |
 |---|---|---|---|---|---|---|---|
-| Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-dream` | `/kiss:kiss-housekeeping` | `/kiss:kiss-code-clean` | `/kiss:kiss-system-design [<name>]` | `/mini <task>` (the mod), or `/kiss:kiss-mini-agent <task>` |
-| Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-dream` | `$kiss:kiss-housekeeping` | `$kiss:kiss-code-clean` | `$kiss:kiss-system-design [<name>]` | `$kiss:kiss-mini-agent <task>` |
+| Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-dream` | `/kiss:kiss-housekeeping` | `/kiss:kiss-code-clean` | `/kiss:kiss-system-design [<name>]` | `/kiss-mini <task>` (or `/kiss:kiss-mini <task>`; the mod answers it) |
+| Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-dream` | `$kiss:kiss-housekeeping` | `$kiss:kiss-code-clean` | `$kiss:kiss-system-design [<name>]` | `$kiss:kiss-mini <task>` |
 | Gemini CLI | say "build … with the KISS harness" (the model activates it; `/skills list` shows it) | say "kiss doctor" | say "tidy up memory" | say "clean up the docs" | say "kiss code clean" | say "kiss system design" | say "mini task: <task>" |
-| Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-dream` | `/kiss-housekeeping` | `/kiss-code-clean` | `/kiss-system-design [<name>]` | `/kiss-mini-agent <task>` |
+| Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-dream` | `/kiss-housekeeping` | `/kiss-code-clean` | `/kiss-system-design [<name>]` | `/kiss-mini <task>` |
 
 On every agent you can also just say it: "build <feature> with the KISS harness", "clean up the docs", or "tidy up memory".
 `kiss-doctor`, `kiss-code-clean` and `kiss-system-design` start only when you call them.
@@ -289,10 +289,10 @@ skills/kiss-dream/           SKILL.md, scripts/guard.py (the guarded write), scr
 skills/kiss-code-clean/      SKILL.md, references/architecture.md
 skills/kiss-system-design/   SKILL.md, references/map.md (the map and decision file formats)
 skills/kiss-housekeeping/    SKILL.md, standard.md, moves.md, routing.md, scripts/ (the docs gate, inventory, mover)
-skills/kiss-mini-agent/      SKILL.md, references/handoff.md (the brief, the report, the worker's rules)
+skills/kiss-mini/            SKILL.md, references/handoff.md (the brief, the report, the worker's rules)
 .claude/skills/kiss-check-update/  the KISS owner's tool, not part of the plugin: checks each upstream source
                              (Matt Pocock's skills, ponytail, CodeGraph, the mods API) against its record, upstream.json
-mods/kiss-mini-agent/        the Claude Code mod: /mini, the background host, the band and the pane (Claude Code only)
+mods/kiss-mini/              the Claude Code mod: /kiss-mini, the background host, the band and the pane (Claude Code only)
 claude-agents/               kiss-implementer, kiss-reviewer and kiss-worker, the named subagents (Claude Code)
 ```
 
