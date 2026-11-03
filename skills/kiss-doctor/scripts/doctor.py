@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Check this device for a KISS run (kiss-doctor/SKILL.md). Reads only; changes nothing.
+"""Check this device for a KISS run (kiss-doctor/SKILL.md). Reads only, except `feedback on|off`, which sets
+env.KISS_FEEDBACK in Claude Code's user settings.
 
   python3 -I doctor.py [AGENT ...]    AGENT: claude, codex, gemini, antigravity (default: each one whose CLI is on PATH)
   python3 -I doctor.py feedback on|off   set env.KISS_FEEDBACK in Claude Code's user settings ("1" or "0"), with a backup
@@ -141,8 +142,8 @@ def check_skills(agent, roots, need, note="", here=()):
     for name, fix in need.items():
         copies = seen.get(name, {})
         if not copies and name in here:
-            out.append(("INFO", agent, f"skill {name}: not installed, but this session loaded it from {KISS}"
-                        " (a --plugin-dir session, or a KISS repo newer than the install)", ""))
+            out.append(("INFO", agent, f"skill {name}: not installed, but found in the KISS folder this script runs from ({KISS}):"
+                        " a --plugin-dir session, or a KISS repo newer than the install", ""))
             continue
         if not copies:
             out.append(("FAIL", agent, f"skill {name}: not installed{note}", fix))
@@ -180,10 +181,10 @@ def settings_path():
 def feedback_mode(settings, home=HOME, env=None, project=None):
     """(on?, where). The value this session has (its environment) decides; where names the first place that sets
     that value: Claude Code's user settings env, the project's .claude settings, then a shell profile's export."""
-    places = [(settings, "Claude Code's settings env (%s)" % settings.replace(home, "~", 1))]
-    if project:
-        places += [(os.path.join(project, ".claude", n), "the project's .claude/%s env" % n) for n in ("settings.local.json", "settings.json")]
-    found = []
+    places = [(os.path.join(project, ".claude", n), "the project's .claude/%s env" % n)
+              for n in ("settings.local.json", "settings.json")] if project else []     # Claude Code's order: local first
+    places += [(settings, "Claude Code's settings env (%s)" % settings.replace(home, "~", 1))]
+    found, profiles = [], []
     for path, label in places:
         try:
             value = json.load(open(path)).get("env", {}).get("KISS_FEEDBACK")
@@ -195,10 +196,15 @@ def feedback_mode(settings, home=HOME, env=None, project=None):
         path = os.path.join(home, name)
         m = re.findall(r"^\s*export\s+KISS_FEEDBACK=[\"']?([^\"'\s]*)", read(path), re.M) if os.path.isfile(path) else []
         if m:
-            found.append((m[-1], "the shell profile ~/%s" % name))
+            profiles.append((m[-1], "the shell profile ~/%s" % name))
     now = (env or {}).get("KISS_FEEDBACK")
-    if now is None:
-        return (found[0][0] == "1", found[0][1]) if found else (False, "set nowhere")
+    if now is None:                     # not a Claude Code session with the setting: only a shell profile counts
+        if profiles:
+            return profiles[0][0] == "1", profiles[0][1]
+        if found:
+            return False, "set for Claude Code only, in %s" % found[0][1]
+        return False, "set nowhere"
+    found += profiles
     where = next((label for value, label in found if value == now), "this session's environment only: a --settings flag or the shell that started it")
     return now == "1", where
 
@@ -218,7 +224,8 @@ def set_feedback(settings, on):
         except (OSError, ValueError, AssertionError) as e:
             sys.exit("%s: cannot read it as a JSON object (%s); left untouched" % (settings, type(e).__name__))
         backup = settings + ".kiss-backup"
-        shutil.copy2(settings, backup)
+        if not os.path.exists(backup):          # keep the state from before the first switch
+            shutil.copy2(settings, backup)
     else:
         backup = None
         os.makedirs(os.path.dirname(settings), exist_ok=True)
@@ -226,7 +233,7 @@ def set_feedback(settings, on):
         data["env"] = {}
     data["env"]["KISS_FEEDBACK"] = "1" if on else "0"
     with open(settings, "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, ensure_ascii=False)
         f.write("\n")
     return ["feedback mode %s in %s%s" % ("on" if on else "off", settings, " (backup: %s)" % backup if backup else ""),
             "Claude Code: start a new session for it to apply.",
@@ -283,18 +290,33 @@ def selftest():
         os.makedirs(home)
         st = os.path.join(home, "cfg", "settings.json")
         assert feedback_mode(st, home) == (False, "set nowhere")
+        put("fhome/cfg/settings.json", json.dumps({"env": {"KISS_FEEDBACK": "1"}}))
+        assert feedback_mode(st, home) == (False, "set for Claude Code only, in Claude Code's settings env (~/cfg/settings.json)"), feedback_mode(st, home)
+        os.remove(st)
         put("fhome/.zshrc", "export PATH=x\nexport KISS_FEEDBACK=1\n")
         assert feedback_mode(st, home) == (True, "the shell profile ~/.zshrc"), feedback_mode(st, home)
-        original = {"model": "opus", "permissions": {"allow": ["Read"]}, "hooks": {"Stop": []}}
+        original = {"model": "opus", "permissions": {"allow": ["Read"]}, "hooks": {"Stop": []}, "note": "café"}
         put("fhome/cfg/settings.json", json.dumps(original))
         lines = set_feedback(st, False)
         assert os.path.isfile(st + ".kiss-backup") and json.load(open(st + ".kiss-backup")) == original, lines
         got = json.load(open(st))
         assert got == dict(original, env={"KISS_FEEDBACK": "0"}), got
-        assert feedback_mode(st, home) == (False, "Claude Code's settings env (~/cfg/settings.json)"), feedback_mode(st, home)   # off wins over the profile
+        assert feedback_mode(st, home, env={"KISS_FEEDBACK": "0"}) == (False, "Claude Code's settings env (~/cfg/settings.json)")   # off wins over the profile
+        assert "café" in read(st)                                                     # ensure_ascii=False
+        set_feedback(st, True)
+        assert json.load(open(st + ".kiss-backup")) == original                     # the backup keeps the first state
         put("fhome/cfg/settings.json", json.dumps(dict(original, env={"PATH_X": "y"})))
         set_feedback(st, True)
         assert json.load(open(st)) == dict(original, env={"PATH_X": "y", "KISS_FEEDBACK": "1"})
+        # CLAUDE_CONFIG_DIR is honoured: the path and the write land inside it
+        old_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(t, "ccd")
+        try:
+            assert settings_path() == os.path.join(t, "ccd", "settings.json"), settings_path()
+            set_feedback(settings_path(), True)
+            assert json.load(open(os.path.join(t, "ccd", "settings.json"))) == {"env": {"KISS_FEEDBACK": "1"}}
+        finally:
+            os.environ.pop("CLAUDE_CONFIG_DIR") if old_cfg is None else os.environ.__setitem__("CLAUDE_CONFIG_DIR", old_cfg)
         assert "new session" in " ".join(lines) and "export KISS_FEEDBACK=0" in " ".join(lines)
         put("fhome/cfg/settings.json", "{ not json")
         try:
