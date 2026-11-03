@@ -826,6 +826,14 @@ test('a host that cannot start fails the task with claude\'s words', async ($, o
   expect(w.store[`kiss-mini/task/${ID}`].state).toBe('failed')
 })
 
+test('a command whose claude run throws answers with the failure and keeps at most one task; the skill does not run', async ($, on) => {
+  const w = world(on, { delivered: false, hang: ['claude'] })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  const r = await $.command.run({ command: 'kiss:kiss-mini', args: 'ask what does calc.py do?' } as never)
+  expect(r.text).toMatch(/^kiss-mini: failed: ./)
+  expect(Object.keys(w.store).filter(k => k.startsWith('kiss-mini/task/')).length).toBeLessThanOrEqual(1)
+})
+
 test('a harness task offers only Discard; merged into its base by the harness, it ends done and its worktree goes', async ($, on) => {
   const w = world(on)
   await handoff($, w, false)

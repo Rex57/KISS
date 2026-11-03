@@ -496,7 +496,8 @@ export const register: Register = on => {
     }
     const lines = (await tasks($)).map(t => `${t.id} ${t.kind} ${t.state}: ${t.title}${t.report ? ` - ${t.report}` : ''}`)
     return { text: lines.join('\n') || 'kiss-mini: no tasks.' }
-  })
+    // A throw would let the skill run in the mod's place (a second task): answer the failure instead.
+  }).catch(($, e, next) => ({ text: `kiss-mini: failed: ${next.error.message ?? next.error.kind}` }))
 
   // Any session: the hand-off tool records a task and wakes the host, as /kiss-mini does.
   on('tool.call', { tool: 'mcp__kiss__handoff' }, async ($, e) => {
