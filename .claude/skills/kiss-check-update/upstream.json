@@ -1,0 +1,194 @@
+{
+  "sources": [
+    {
+      "name": "mattpocock-skills",
+      "repo": "mattpocock/skills",
+      "tag": "v1.3.2",
+      "called": [
+        {
+          "skill": "grilling",
+          "path": "skills/productivity/grilling/SKILL.md"
+        },
+        {
+          "skill": "domain-modeling",
+          "path": "skills/engineering/domain-modeling/SKILL.md"
+        },
+        {
+          "skill": "tdd",
+          "path": "skills/engineering/tdd/SKILL.md"
+        },
+        {
+          "skill": "codebase-design",
+          "path": "skills/engineering/codebase-design/SKILL.md"
+        },
+        {
+          "skill": "prototype",
+          "path": "skills/engineering/prototype/SKILL.md"
+        },
+        {
+          "skill": "diagnosing-bugs",
+          "path": "skills/engineering/diagnosing-bugs/SKILL.md"
+        },
+        {
+          "skill": "pr",
+          "path": "skills/engineering/pr/SKILL.md"
+        },
+        {
+          "skill": "research",
+          "path": "skills/engineering/research/SKILL.md"
+        }
+      ],
+      "files": [
+        {
+          "path": "skills/productivity/grilling/SKILL.md",
+          "fingerprint": "d2f09a18e6a6c65c55f1271ba08dfeaf06f0bed3",
+          "kiss_files": [
+            "skills/kiss-harness/references/spec-and-tickets.md",
+            "skills/kiss-system-design/SKILL.md"
+          ]
+        },
+        {
+          "path": "skills/engineering/to-spec/SKILL.md",
+          "fingerprint": "3f52599ae2a4347aee5a07432c2707518e691a7f",
+          "kiss_files": [
+            "skills/kiss-harness/references/spec-and-tickets.md"
+          ]
+        },
+        {
+          "path": "skills/engineering/to-tickets/SKILL.md",
+          "fingerprint": "9b77a01db9460c99c22d03c910c349f890f12c0e",
+          "kiss_files": [
+            "skills/kiss-harness/references/spec-and-tickets.md"
+          ]
+        },
+        {
+          "path": "skills/engineering/retro/SKILL.md",
+          "fingerprint": "12149acf2dd23b4514dec57b04a6293eaa1352fa",
+          "kiss_files": [
+            "skills/kiss-harness/references/retro.md"
+          ]
+        },
+        {
+          "path": "skills/engineering/improve-codebase-architecture/SKILL.md",
+          "fingerprint": "f1eabb568464f03ae79a3346fc1918fdde6d8285",
+          "kiss_files": [
+            "skills/kiss-code-clean/references/architecture.md"
+          ]
+        },
+        {
+          "path": "skills/engineering/wayfinder/SKILL.md",
+          "fingerprint": "975d6bf9c0a49d18a651f3335e0b4dcf8650fe31",
+          "kiss_files": [
+            "skills/kiss-system-design/references/map.md"
+          ]
+        },
+        {
+          "path": "skills/productivity/handoff/SKILL.md",
+          "fingerprint": "a224edc643a20ddb989f9bca1547440169159810",
+          "kiss_files": [
+            "skills/kiss-mini-agent/references/handoff.md"
+          ]
+        },
+        {
+          "path": "skills/in-progress/claude-handoff/SKILL.md",
+          "fingerprint": "77f82fc59c89c3a83ed5a92521dc2869f0533724",
+          "kiss_files": [
+            "skills/kiss-mini-agent/references/handoff.md"
+          ]
+        },
+        {
+          "path": "skills/engineering/triage/SKILL.md",
+          "fingerprint": "3fd5617e906cf9b71a6b17424791adb905fc248b",
+          "kiss_files": [
+            "skills/kiss-mini-agent/references/handoff.md"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ponytail",
+      "repo": "DietrichGebert/ponytail",
+      "tag": "v5.3.3",
+      "files": [
+        {
+          "path": "skills/ponytail/SKILL.md",
+          "fingerprint": "d64edd32265ba21cbf5270158f04e97d96925f27",
+          "kiss_files": [
+            "skills/kiss-harness/templates/implementer.md",
+            "skills/kiss-harness/templates/reviewer.md",
+            "skills/kiss-harness/SKILL.md"
+          ]
+        },
+        {
+          "path": "skills/ponytail-review/SKILL.md",
+          "fingerprint": "a50e3ac6ded6fccc9edae34ce37877bbce11e3fa",
+          "kiss_files": [
+            "skills/kiss-harness/templates/reviewer.md"
+          ]
+        },
+        {
+          "path": "skills/ponytail-debt/SKILL.md",
+          "fingerprint": "3124f520a65d2a4fa75a2f5db6225c38ebdb8620",
+          "kiss_files": [
+            "skills/kiss-harness/SKILL.md",
+            "skills/kiss-code-clean/SKILL.md"
+          ]
+        },
+        {
+          "path": "skills/ponytail-audit/SKILL.md",
+          "fingerprint": "ff9a95480700600fe2664d2d0906a4d750b2da0b",
+          "kiss_files": [
+            "skills/kiss-code-clean/SKILL.md"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "codegraph",
+      "package": "@colbymchenry/codegraph",
+      "github": "colbymchenry/codegraph",
+      "tool": "codegraph",
+      "version": "1.6.2",
+      "commands": {
+        "explore": [
+          "-p"
+        ],
+        "node": [
+          "-p"
+        ],
+        "callers": [
+          "-p",
+          "--limit"
+        ],
+        "callees": [
+          "-p"
+        ],
+        "impact": [
+          "-p"
+        ],
+        "affected": [
+          "-p"
+        ],
+        "query": [
+          "-p"
+        ],
+        "files": [
+          "-p",
+          "--format",
+          "--no-metadata"
+        ],
+        "status": [],
+        "sync": [
+          "-q"
+        ],
+        "init": [
+          "-y"
+        ]
+      }
+    },
+    {
+      "name": "claude-code-mods",
+      "build": "2.1.317"
+    }
+  ]
+}

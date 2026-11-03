@@ -242,12 +242,14 @@ skills/kiss-code-clean/      SKILL.md, references/architecture.md
 skills/kiss-system-design/   SKILL.md, references/map.md (the map and decision file formats)
 skills/kiss-housekeeping/    SKILL.md, standard.md, moves.md, routing.md, scripts/ (the docs gate, inventory, mover)
 skills/kiss-mini-agent/      SKILL.md, references/handoff.md (the brief, the report, the worker's rules)
+.claude/skills/kiss-check-update/  the KISS owner's tool, not part of the plugin: checks each upstream source
+                             (Matt Pocock's skills, ponytail, CodeGraph, the mods API) against its record, upstream.json
 mods/kiss-mini-agent/        the Claude Code mod: /mini, the background host, the band and the pane (Claude Code only)
 claude-agents/               kiss-implementer, kiss-reviewer and kiss-worker, the named subagents (Claude Code)
 ```
 
 Selftests: `python3 -I skills/kiss-harness/scripts/tickets.py --selftest`, the same for `prompt.py`,
-`cgcallers.py`, `skills/kiss-doctor/scripts/doctor.py`, `skills/kiss-dream/scripts/guard.py`, `check_memory.py` and the three scripts in `skills/kiss-housekeeping/scripts/`. The mod's tests: `claude plugin test .`.
+`cgcallers.py`, `skills/kiss-doctor/scripts/doctor.py`, `skills/kiss-dream/scripts/guard.py`, `check_memory.py`, `.claude/skills/kiss-check-update/scripts/check_update.py` and the three scripts in `skills/kiss-housekeeping/scripts/`. The mod's tests: `claude plugin test .`.
 
 A new version changes `version` in the four manifests that carry one (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`, `.antigravity-plugin/plugin.json`), and gets a tag `v<version>`.
 
