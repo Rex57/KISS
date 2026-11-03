@@ -23,16 +23,16 @@ that works one ticket at a time, and an evaluator that uses the product.
 | `kiss-housekeeping` | "Clean up the docs": a First run, on your ask, gives each fact one home, sorts pages by kind (living, log, record, history), builds a map, retires stale pages, fixes old names, moves files without breaking code or tests, installs a docs gate in your tests (`tools/check_docs.py`, your own copy) and proves the result with a routing test. After that, each harness close runs its Upkeep when your facts file names the gate. |
 | `kiss-system-design` | First version. From a new product idea to a plan of harness runs: a product brief, a decision map (decisions so far, open decisions typed research / prototype / grilling / task, not yet clear, out of scope), one decision at a time with you (research in the background), then a system design document and an ordered run plan in your docs. Its working files stay in the git-ignored `.kiss/design/<name>/`; continue a design by its name. An idea that fits one run goes to `kiss-harness`. |
 | `kiss-code-clean` | "Clean up the code": one ranked list of clean-up candidates for a code base (bugs, risky code with no test, slow paths, code to delete, merge or split, `shortcut:` debt, hot spots from the git history), each with its evidence and a strength, saved in `.kiss/clean/<date>.md`. A delete candidate shows that nothing uses it (CodeGraph and a word search). It changes no code: you pick, and each pick becomes a harness run or a `/mini` task. |
-| `kiss-tidy-up-memory` | "Tidy up memory": merge and cut an agent's file memory for one repo, run a loss check with a second agent, revise agentmemory (if you use it) and move old transcripts to the Trash. |
+| `kiss-dream` | "Tidy up memory": on your ask (unlike Claude Code's background auto-dream), merge and cut an agent's file memory for one repo, run a loss check with a second agent, revise agentmemory (if you use it) and move old transcripts to the Trash. It waits while another consolidation holds the memory folder's lock, and its report starts with one row per step. |
 
 How to call a skill:
 
-| Agent | `kiss-harness` | `kiss-doctor` | `kiss-tidy-up-memory` | `kiss-housekeeping` | `kiss-code-clean` | `kiss-system-design` | `kiss-mini-agent` |
+| Agent | `kiss-harness` | `kiss-doctor` | `kiss-dream` | `kiss-housekeeping` | `kiss-code-clean` | `kiss-system-design` | `kiss-mini-agent` |
 |---|---|---|---|---|---|---|---|
-| Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-tidy-up-memory` | `/kiss:kiss-housekeeping` | `/kiss:kiss-code-clean` | `/kiss:kiss-system-design [<name>]` | `/mini <task>` (the mod), or `/kiss:kiss-mini-agent <task>` |
-| Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-tidy-up-memory` | `$kiss:kiss-housekeeping` | `$kiss:kiss-code-clean` | `$kiss:kiss-system-design [<name>]` | `$kiss:kiss-mini-agent <task>` |
+| Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-dream` | `/kiss:kiss-housekeeping` | `/kiss:kiss-code-clean` | `/kiss:kiss-system-design [<name>]` | `/mini <task>` (the mod), or `/kiss:kiss-mini-agent <task>` |
+| Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-dream` | `$kiss:kiss-housekeeping` | `$kiss:kiss-code-clean` | `$kiss:kiss-system-design [<name>]` | `$kiss:kiss-mini-agent <task>` |
 | Gemini CLI | say "build … with the KISS harness" (the model activates it; `/skills list` shows it) | say "kiss doctor" | say "tidy up memory" | say "clean up the docs" | say "kiss code clean" | say "kiss system design" | say "mini task: <task>" |
-| Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-tidy-up-memory` | `/kiss-housekeeping` | `/kiss-code-clean` | `/kiss-system-design [<name>]` | `/kiss-mini-agent <task>` |
+| Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-dream` | `/kiss-housekeeping` | `/kiss-code-clean` | `/kiss-system-design [<name>]` | `/kiss-mini-agent <task>` |
 
 On every agent you can also just say it: "build <feature> with the KISS harness", "clean up the docs", or "tidy up memory".
 `kiss-doctor`, `kiss-code-clean` and `kiss-system-design` start only when you call them.
@@ -53,7 +53,7 @@ each one.
 | [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate; `research`: `kiss-system-design`'s research decisions | see "Install Matt Pocock's skills" below |
 | `cgcallers` (in this repo) | CodeGraph's callers plus a word grep, before a delete or rename | `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (`~/.local/bin` on your `PATH`) |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
-| [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-tidy-up-memory` | its README |
+| [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-dream` | its README |
 
 ### Install ponytail
 
@@ -236,7 +236,7 @@ rules/feedback.md            the feedback mode: the block each skill ends with w
 .github/ISSUE_TEMPLATE/      the issue template for a KISS feedback block
 skills/kiss-harness/         SKILL.md, scripts/, templates/, references/
 skills/kiss-doctor/          SKILL.md, scripts/doctor.py
-skills/kiss-tidy-up-memory/  SKILL.md
+skills/kiss-dream/           SKILL.md
 skills/kiss-code-clean/      SKILL.md, references/architecture.md
 skills/kiss-system-design/   SKILL.md, references/map.md (the map and decision file formats)
 skills/kiss-housekeeping/    SKILL.md, standard.md, moves.md, routing.md, scripts/ (the docs gate, inventory, mover)

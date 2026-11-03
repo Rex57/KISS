@@ -57,7 +57,7 @@ The hard cases, with the action each one gets:
 - **A page that tells you to translate its own old names** ("where it says standard 1.2, read v1.2"): fix the names in its text; the banner is the symptom.
 - **A pile of "Updated <date>" banners** at the top of a page: replace it with the status line and one sentence that points at `git log`.
 - **A fact that only an agent instructions file holds** (`CLAUDE.md`, `AGENTS.md`: a test command, a setup step): give it a docs home, and the agent file links it.
-- **Agent memory that holds facts no page holds** (a team's state, an open list): write them into the home page, and leave the memory as a pointer. kiss-tidy-up-memory's step 2 ([SKILL.md](../kiss-tidy-up-memory/SKILL.md)) applies the same rule from the memory side.
+- **Agent memory that holds facts no page holds** (a team's state, an open list): write them into the home page, and leave the memory as a pointer. kiss-dream's step 2 ([SKILL.md](../kiss-dream/SKILL.md)) applies the same rule from the memory side.
 
 ## The status line **(gate)**
 
