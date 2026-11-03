@@ -5,6 +5,8 @@ env.KISS_FEEDBACK in Claude Code's user settings.
   python3 -I doctor.py [AGENT ...]    AGENT: claude, codex, gemini, antigravity (default: each one whose CLI is on PATH)
   python3 -I doctor.py feedback on|off   set env.KISS_FEEDBACK in Claude Code's user settings ("1" or "0"), with a backup
   python3 -I doctor.py setup             the numbered plan of what is missing, from the install table (installs nothing)
+  python3 -I doctor.py setup --apply all|none|1,3   run those plan items, one at a time; stop at the first failure;
+                                         then the checks again and the steps by hand. Never sudo, never a shell profile.
   python3 -I doctor.py --selftest
 
 Each line: OK, INFO, WARN or FAIL, the agent, what was checked, and for a WARN or FAIL the README section with the fix.
@@ -340,19 +342,89 @@ def plan_lines(system, items):
             out += [f"{i['n']}. {i['what']} ({i['agent']})"] + [f"   command: {command(c)}" for c in i["run"]] + detail(i)
     if not any(i["n"] for i in items):
         out.append("Nothing to install.")
-    hand = [i for i in items if not i["n"]]
-    if hand:
-        out.append("For you to do (setup never runs these):")
-        for i in hand:
-            out += [f"- {i['what']} ({i['agent']}): {i['hand']}"] + [f"   command: {command(c)}" for c in i["run"]] + detail(i)
-    after = [i["after"] for i in items if i["after"]] + (["start a new session of each agent you installed into"]
-                                                         if any(i["n"] and i["agent"] != "device" for i in items) else [])
-    if after:
-        out += ["After the installs, by hand:"] + [f"- {a}" for a in after]
-    out += ["Optional, links only:"] + [f"- {what}: {url}" for what, url in OPTIONAL]
+    out += by_hand(items, [i for i in items if i["n"]])
     if any(i["n"] for i in items):
         out.append("Answer all, none, or the numbers to install (for example 1,3).")
     return out
+
+
+def by_hand(items, ran):
+    """The steps only the owner can do: the items setup never runs, the steps after the items in `ran`, the links."""
+    out, hand = [], [i for i in items if not i["n"]]
+    if hand:
+        out.append("For you to do (setup never runs these):")
+        for i in hand:
+            out += [f"- {i['what']} ({i['agent']}): {i['hand']}"] + [f"   command: {command(c)}" for c in i["run"]] + [
+                f"   source:  {i['source']}", f"   changes: {i['changes']}"]
+    after = [i["after"] for i in ran if i["after"]] + (["start a new session of each agent you installed into (log in if it asks)"]
+                                                       if any(i["agent"] != "device" for i in ran) else [])
+    if after:
+        out += ["After the installs, by hand:"] + [f"- {a}" for a in after]
+    return out + ["Optional, links only:"] + [f"- {what}: {url}" for what, url in OPTIONAL]
+
+
+def execute(argv):
+    """Run one table command, without a shell: (exit code, output). The two file commands run in Python, so they
+    work where no POSIX shell is."""
+    try:
+        if argv[0] == "cat" and argv[2:3] == [">>"]:
+            old = read(argv[3]) if os.path.isfile(argv[3]) else ""
+            os.makedirs(os.path.dirname(argv[3]), exist_ok=True)
+            with open(argv[3], "a", encoding="utf-8") as f:
+                f.write(("\n" if old and not old.endswith("\n") else "") + read(argv[1]))
+            return 0, ""
+        if argv[:3] == ["install", "-m", "755"]:
+            os.makedirs(os.path.dirname(argv[4]), exist_ok=True)
+            shutil.copyfile(argv[3], argv[4])
+            os.chmod(argv[4], 0o755)
+            return 0, ""
+        p = subprocess.run([shutil.which(argv[0]) or argv[0]] + argv[1:], capture_output=True, text=True, timeout=900)
+        return p.returncode, (p.stdout + p.stderr).strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 1, str(e)
+
+
+def apply(items, answer, runner=execute):
+    """Run the items the owner's answer names (all, none, or numbers), in the plan's order, one at a time; stop at
+    the first failure. (lines, ok, the items that ran)."""
+    numbered = {i["n"]: i for i in items if i["n"]}
+    words = [w for w in re.split(r"[,\s]+", answer.strip().lower()) if w]
+    if words == ["all"] or words == ["none"]:
+        want = sorted(numbered) if words == ["all"] else []
+    elif words and all(w.isdigit() and int(w) in numbered for w in words):
+        want = sorted({int(w) for w in words})
+    else:
+        return [f"refused: {answer!r} is not all, none, or numbers of the plan ({', '.join(map(str, numbered)) or 'none'});"
+                " nothing ran"], False, []
+    sudo = [n for n in want if any(c[0] == "sudo" for c in numbered[n]["run"])]
+    if sudo:                                    # plan() never numbers one; this guard keeps it so
+        return [f"refused: item {', '.join(map(str, sudo))} needs sudo: run it yourself; nothing ran"], False, []
+    out, ran = [], []
+    for n in want:
+        i = numbered[n]
+        for argv in i["run"]:
+            code, output = runner(argv)
+            if code:
+                rest = [str(m) for m in want if m > n]
+                return out + [f"FAIL {n}. {i['what']} ({i['agent']}): {command(argv)} exited {code}"] + [
+                    "   " + line for line in output.splitlines()[-20:]] + (
+                    [f"not run: {', '.join(rest)}"] if rest else []), False, ran + [i]
+        out.append(f"done {n}. {i['what']} ({i['agent']})")
+        ran.append(i)
+    return out, True, ran
+
+
+def setup(system, answer=None, runner=execute, find=None, checks=None):
+    """`setup` prints the plan; `setup --apply <answer>` runs it, then the checks again and the steps by hand."""
+    items = plan(system, (find or gaps)(system))
+    if answer is None:
+        return plan_lines(system, items), True
+    lines, ok, ran = apply(items, answer, runner)
+    if ran:
+        lines += ["", "The checks again:"] + (checks or (lambda: report(system["agents"])[0]))()
+    if ran or ok:
+        lines += [""] + by_hand(items, ran)
+    return lines, ok
 
 
 def loaded_here(agent):
@@ -543,6 +615,54 @@ def selftest():
                  "agentmemory: https://github.com/rohitg00/agentmemory", "all, none, or the numbers"):
         assert want in text, (want, text)
     assert "Nothing to install" in "\n".join(plan_lines(sysfor(), []))
+    # setup --apply with a fake runner: commands are recorded, not run
+    ran = []
+    def runner(fail=()):
+        def go(argv):
+            ran.append(" ".join(argv))
+            return (1, "npm ERR! 404 not found") if " ".join(argv) in fail else (0, "")
+        return go
+    checks = lambda: ["CHECKS AGAIN"]
+    find = lambda system: gaps                               # numbered: 1 CodeGraph, 2 cgcallers, 3 index, 4 rule, 5-7 plugins
+    lines, ok = setup(sysfor(os="linux", pm="apt"), "1,3", runner(), lambda system: dict(gaps, git={}), checks)
+    assert ok and ran == ["npm install -g @colbymchenry/codegraph", "codegraph init -y /r/my app"], ran
+    text = "\n".join(lines)
+    assert "CHECKS AGAIN" in text and "sudo apt install -y git" in text and "start a new session" not in text, text
+    ran.clear()
+    lines, ok = setup(sysfor(), "6, 5,5", runner(), find, checks)     # the plan's order, each once; the /hooks step after
+    assert ok and ran == ["claude plugin marketplace add DietrichGebert/ponytail", "claude plugin install ponytail@ponytail",
+                          "codex plugin marketplace add DietrichGebert/ponytail", "codex plugin add ponytail@ponytail"], ran
+    assert "/hooks" in "\n".join(lines) and "start a new session" in "\n".join(lines), lines
+    ran.clear()
+    lines, ok = setup(sysfor(), "all", runner(fail={"codegraph init -y /r/my app"}), find, checks)
+    text = "\n".join(lines)
+    assert not ok and ran == ["npm install -g @colbymchenry/codegraph",
+                              "install -m 755 /k/skills/kiss-harness/scripts/cgcallers.py /b/cgcallers",
+                              "codegraph init -y /r/my app"], ran              # stops at the first failure
+    for want in ("done 1. CodeGraph", "done 2. cgcallers", "FAIL 3.", "codegraph init -y '/r/my app'", "npm ERR! 404",
+                 "not run: 4, 5, 6, 7", "CHECKS AGAIN"):
+        assert want in text, (want, text)
+    for answer in ("8", "0", "1,x", "rm -rf /", ""):                  # outside the plan: refused, nothing runs
+        ran.clear()
+        lines, ok = setup(sysfor(), answer, runner(), find, checks)
+        assert not ok and ran == [] and "refused" in lines[0] and "CHECKS AGAIN" not in lines, (answer, lines)
+    ran.clear()
+    assert setup(sysfor(), "none", runner(), find, checks)[1] and ran == []
+    sudo = [{"n": 1, "what": "git", "agent": "device", "run": [["sudo", "apt", "install", "-y", "git"]], "hand": "",
+             "source": "s", "changes": "c", "after": ""}]
+    lines, ok, _ = apply(sudo, "1", runner())                              # a sudo command never runs, even if numbered
+    assert not ok and ran == [] and "sudo" in lines[0], lines
+    # the two file commands run in Python: the rule appended once, cgcallers copied executable
+    with tempfile.TemporaryDirectory() as fx:
+        dst, src = os.path.join(fx, "home", "CLAUDE.md"), os.path.join(fx, "rule.md")
+        os.makedirs(os.path.dirname(dst))
+        for path, text in ((dst, "mine"), (src, "**Which index.** a\n")):
+            with open(path, "w") as f:
+                f.write(text)
+        assert execute(["cat", src, ">>", dst]) == (0, "") and read(dst) == "mine\n**Which index.** a\n", read(dst)
+        exe = os.path.join(fx, "bin", "cgcallers")
+        assert execute(["install", "-m", "755", src, exe]) == (0, "") and os.access(exe, os.X_OK) and read(exe) == read(src)
+    assert execute(["no-such-command-kiss"])[0] != 0
     print("doctor selftest ok")
 
 
@@ -554,24 +674,31 @@ def main(argv):
             sys.exit("usage: doctor.py feedback on|off")
         print("\n".join(set_feedback(settings_path(), argv[2] == "on")))
         return
-    if argv[1:] == ["setup"]:
-        system = detect()
-        print("\n".join(plan_lines(system, plan(system, gaps(system)))))
-        return
+    if argv[1:2] == ["setup"]:
+        if argv[2:] and (argv[2] != "--apply" or len(argv) != 4):
+            sys.exit("usage: doctor.py setup [--apply all|none|<numbers>]")
+        lines, ok = setup(detect(), argv[3] if argv[2:] else None)
+        print("\n".join(lines))
+        sys.exit(0 if ok else 1)
     agents = argv[1:] or [a for a, cli in CLI.items() if shutil.which(cli)]
     unknown = [a for a in agents if a not in CLI]
     if unknown or not agents:
         sys.exit(f"name an agent: {', '.join(CLI)}" + (f" (unknown: {', '.join(unknown)})" if unknown else " (none on PATH)"))
+    lines, fails = report(agents)
+    print("\n".join(lines))
+    sys.exit(1 if fails else 0)
+
+
+def report(agents):
+    """The checks: (the report's lines, the number of FAIL lines)."""
     need, marks = required(), markers()
     rows = check_tools() + check_feedback(settings_path())
     for agent in agents:
         text, files, roots, note = agent_setup(agent)
         rows += check_rule(agent, text, files, marks) + check_skills(agent, roots, need, note, loaded_here(agent))
-    for level, agent, what, fix in rows:
-        print(f"{level:<5} {agent:<12} {what}" + (f"  [fix: README \"{fix}\"]" if fix else ""))
+    out = [f"{level:<5} {agent:<12} {what}" + (f"  [fix: README \"{fix}\"]" if fix else "") for level, agent, what, fix in rows]
     fails, warns, infos = (sum(r[0] == lv for r in rows) for lv in ("FAIL", "WARN", "INFO"))
-    print(f"\n{fails} FAIL, {warns} WARN, {infos} INFO, {len(rows) - fails - warns - infos} OK ({', '.join(agents)})")
-    sys.exit(1 if fails else 0)
+    return out + [f"\n{fails} FAIL, {warns} WARN, {infos} INFO, {len(rows) - fails - warns - infos} OK ({', '.join(agents)})"], fails
 
 
 if __name__ == "__main__":

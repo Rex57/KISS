@@ -80,8 +80,9 @@ On every agent you can also just say it: "build <feature> with the KISS harness"
 KISS installs only on your request, from the official sources, after you see each command. Run
 `kiss-doctor setup` (`/kiss:kiss-doctor setup` in Claude Code): it finds your OS, shell, package manager and the
 agents on your PATH, and shows a numbered plan of what is missing, each item with its command, its source and what
-it changes. You answer all, none or the numbers. It never runs `sudo` and never edits your shell profile: it shows
-those lines for you to run. Or install each tool yourself from its link, once per device, then run `kiss-doctor`:
+it changes. You answer all, none or the numbers: it installs those, one at a time, stops at the first failure,
+runs the checks again and lists the steps only you can do. It never runs `sudo` and never edits your shell profile:
+it shows those lines for you to run. Or install each tool yourself from its link, once per device, then run `kiss-doctor`:
 it checks each one.
 
 | Tool | Why | Install |

@@ -19,8 +19,14 @@ backup, that a new session is needed, the export line for the other agents), and
 the OS, the shell, the package manager and the agents on PATH, runs the checks, and prints a numbered plan of what
 is missing: each item with its command, its source and what it changes, then the steps only the owner can do (a
 `sudo` command, Antigravity's copy steps, Codex's `/hooks` trust, a new session) and the optional links. Show the
-plan as printed, ask "all, none, or the numbers?", and stop. Never type an install command yourself; every command
-comes from the script's install table.
+plan as printed, ask "all, none, or the numbers?", and wait. The owner's answer is the go: run only
+`python3 -I "$KD/scripts/doctor.py" setup --apply <answer>`, with `all`, `none` or the owner's numbers (`1,3`) as
+the one argument; the installs can take minutes, so give the call a 10-minute timeout (Claude Code: the Bash
+tool's `timeout: 600000`) and wait for it. Never type an install command yourself; every command comes from the script's install table. The
+script runs the items one at a time, stops at the first failure, runs the checks again, and prints the steps by
+hand. Report what it printed: each item done, a FAIL with its output and the items not run, the checks again, and
+the manual steps (a `sudo` command, Antigravity's copy steps, Codex's `/hooks` trust, a new session and its login).
+An answer the script refuses: show its line and ask again.
 
 1. **Run the checks:** `python3 -I "$KD/scripts/doctor.py"`. It checks each agent whose CLI is on PATH; name
    agents to check fewer (`claude`, `codex`, `gemini`, `antigravity`). Per agent: the CodeGraph rule in the global
