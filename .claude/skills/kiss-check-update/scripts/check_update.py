@@ -21,32 +21,51 @@ KISS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(HERE))))
 
 
 def sh(*cmd):
-    p = subprocess.run(cmd, capture_output=True, text=True)
-    return p.returncode, p.stdout.strip()
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        return 127, "", "%s: not on PATH" % cmd[0]
+    return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+
+def must(*cmd):
+    """The output of a command that must work (a gh or npm call): exit with its error when it fails or says nothing."""
+    code, out, err = sh(*cmd)
+    if code or not out:
+        sys.exit("%s failed: %s" % (" ".join(cmd[:3]), err or "no output"))
+    return out
+
+
+def file_call(*cmd):
+    """A file at a tag: its output, None when GitHub answers 404 (the file is gone); exit on any other error."""
+    code, out, err = sh(*cmd)
+    if code == 0:
+        return out
+    if "404" in err or "Not Found" in err:
+        return None
+    sys.exit("%s failed: %s" % (" ".join(cmd[:3]), err or "no output"))
 
 
 class Live:
     """The real upstream, read through gh, npm and the local CLIs."""
     def latest(self, repo):
-        return sh("gh", "api", "repos/%s/releases/latest" % repo, "--jq", ".tag_name")[1]
+        return must("gh", "api", "repos/%s/releases/latest" % repo, "--jq", ".tag_name")
 
     def blob(self, repo, path, tag):
-        code, out = sh("gh", "api", "repos/%s/contents/%s?ref=%s" % (repo, path, tag), "--jq", ".sha")
-        return out if code == 0 and out else None
+        return file_call("gh", "api", "repos/%s/contents/%s?ref=%s" % (repo, path, tag), "--jq", ".sha") or None
 
     def text(self, repo, path, tag):
-        code, out = sh("gh", "api", "-H", "Accept: application/vnd.github.raw", "repos/%s/contents/%s?ref=%s" % (repo, path, tag))
-        return out if code == 0 else None
+        return file_call("gh", "api", "-H", "Accept: application/vnd.github.raw", "repos/%s/contents/%s?ref=%s" % (repo, path, tag))
 
     def npm_latest(self, package):
-        return sh("npm", "view", package, "version")[1]
+        return must("npm", "view", package, "version")
 
     def help(self, tool, command):
-        code, out = sh(tool, command, "--help")
+        code, out, _ = sh(tool, command, "--help")
         return out if code == 0 else ""
 
     def build(self):
-        return sh("claude", "--version")[1].split(" ")[0]
+        return must("claude", "--version").split(" ")[0]
 
     def validate(self):
         return sh("claude", "plugin", "validate", KISS)[0] == 0
@@ -67,6 +86,8 @@ def compare(record, up):
         found = []
         if "repo" in s:
             new = up.latest(s["repo"])
+            if not new:
+                sys.exit("%s: no latest release tag (gh failed?): nothing compared" % s["repo"])
             link = "https://github.com/%s/compare/%s...%s" % (s["repo"], s["tag"], new)
             if new != s["tag"]:
                 found.append("new release %s (recorded %s): %s" % (new, s["tag"], link))
@@ -84,6 +105,8 @@ def compare(record, up):
                         found.append("no longer callable: skill %s is user-only at %s" % (c["skill"], new))
         if "package" in s:
             new = up.npm_latest(s["package"])
+            if not new:
+                sys.exit("%s: no latest version (npm failed?): nothing compared" % s["package"])
             if new != s["version"]:
                 found.append("new version %s (recorded %s): https://github.com/%s/compare/v%s...v%s"
                              % (new, s["version"], s["github"], s["version"], new))
@@ -109,13 +132,24 @@ def update(record, up, names):
         if s["name"] not in names:
             continue
         if "repo" in s:
-            s["tag"] = up.latest(s["repo"])
-            for f in s.get("files", []):
-                f["fingerprint"] = up.blob(s["repo"], f["path"], s["tag"])
+            tag = up.latest(s["repo"])
+            prints = [up.blob(s["repo"], f["path"], tag) for f in s.get("files", [])] if tag else []
+            if not tag or None in prints:
+                gone = [f["path"] for f, p in zip(s.get("files", []), prints) if p is None]
+                sys.exit("%s: refused, the record is unchanged: %s" % (s["name"], "no latest tag" if not tag else "gone at %s: %s" % (tag, ", ".join(gone))))
+            s["tag"] = tag
+            for f, p in zip(s.get("files", []), prints):
+                f["fingerprint"] = p
         if "package" in s:
-            s["version"] = up.npm_latest(s["package"])
+            version = up.npm_latest(s["package"])
+            if not version:
+                sys.exit("%s: refused, no latest version" % s["name"])
+            s["version"] = version
         if "build" in s:
-            s["build"] = up.build()
+            build = up.build()
+            if not build:
+                sys.exit("%s: refused, no build" % s["name"])
+            s["build"] = build
     return record
 
 
@@ -160,11 +194,28 @@ def selftest():
     assert "mods: build changed: 2.1.320 (recorded 2.1.317): plugin validate ok, plugin test FAILS" in text, text
     assert len(text.splitlines()) == len(lines) == 7, text            # each finding on its own line
     # --update writes only the named source
+    new.blobs[("o/skills", "a/wayfinder/SKILL.md", "v1.1.0")] = "s2-new"      # an update needs every file present
     up = update(json.loads(json.dumps(record)), new, ["skills"])
     assert up["sources"][0]["tag"] == "v1.1.0" and up["sources"][0]["files"][0]["fingerprint"] == "s1-new"
     assert up["sources"][3]["build"] == "2.1.317" and up["sources"][1] == record["sources"][1]
+    # a failing gh: no tag means exit, never "new release" and "gone"; --update writes nothing
+    broken = Fake(tags={"o/skills": "", "o/ponytail": ""}, blobs={}, texts={}, npm="", claude="", helps={})
+    for call in (lambda: compare(record, broken), lambda: update(json.loads(json.dumps(record)), broken, ["skills"])):
+        try:
+            call()
+            raise AssertionError("a failing gh was not refused")
+        except SystemExit as e:
+            assert "no latest" in str(e), e
+    kept = json.loads(json.dumps(record))
+    gone = Fake(tags={"o/skills": "v1.1.0"}, blobs={("o/skills", "a/retro/SKILL.md", "v1.1.0"): "x"}, texts={}, npm="", claude="", helps={})
+    try:
+        update(kept, gone, ["skills"])
+        raise AssertionError("a None fingerprint was written")
+    except SystemExit as e:
+        assert "a/wayfinder/SKILL.md" in str(e) and kept == record, e
     # the exit code: 1 on any change
     import contextlib, io
+    del new.blobs[("o/skills", "a/wayfinder/SKILL.md", "v1.1.0")]
     with contextlib.redirect_stdout(io.StringIO()):
         assert run(record, new) == 1 and run(record, same) == 0
     print("check_update selftest ok")
