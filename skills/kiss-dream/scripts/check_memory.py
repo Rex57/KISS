@@ -6,8 +6,9 @@
 
 FAIL: a note without frontmatter name, description and type (flat `type:` or nested `metadata:` / `  type:`), a
 name that does not match its file, a note missing from the index or listed twice, an index line pointing to no
-note, an index of 200 lines or more or 25 KB or more, an index line over 150 characters, a secret.
-warn: a [[link]] to a note not yet written, a relative date ("yesterday", "last week", "3 days ago").
+note, an index of 200 lines or more or 25 KB or more, a secret.
+warn: an index line over 150 characters, a [[link]] to a note not yet written, a relative date ("yesterday",
+"last week", "3 days ago").
 Exit 1 on any FAIL.
 """
 import os, re, sys
@@ -71,7 +72,7 @@ def check(memdir):
     seen = {}
     for n, line in enumerate(lines, 1):
         if len(line) > MAX_LINE:
-            fail.append((INDEX, "line %d: %d characters, over %d" % (n, len(line), MAX_LINE)))
+            warn.append((INDEX, "line %d: %d characters, over %d: shorten it" % (n, len(line), MAX_LINE)))
         if SECRET.search(line):
             fail.append((INDEX, "line %d: a secret" % n))
         for target in LINK.findall(line):
@@ -127,7 +128,8 @@ def selftest():
         fires({"MEMORY.md": clean["MEMORY.md"] + "- [Gone](gone.md) — old\n"}, "FAIL", "not a note here")
         fires({"MEMORY.md": clean["MEMORY.md"] + "- x\n" * 200}, "FAIL", "keep it under")
         fires({"MEMORY.md": clean["MEMORY.md"] + "- [Note](build.md) " + "x" * 30000 + "\n"}, "FAIL", "keep it under")
-        fires({"MEMORY.md": clean["MEMORY.md"] + "- " + "y" * 160 + "\n"}, "FAIL", "over 150")
+        fires({"MEMORY.md": clean["MEMORY.md"] + "- [Build](build.md) — " + "y" * 160 + "\n"}, "FAIL", "2 times")
+        fires({"MEMORY.md": "- [Build](build.md) — " + "y" * 160 + "\n- [Owner style](owner-style.md) — answers\n"}, "warn", "over 150")
         fires({"build.md": note % ("build", "d", "Deploy with password: hunter2-real-one")}, "FAIL", "a secret")
         fires({"build.md": note % ("build", "d", "key ghp_" + "a" * 36)}, "FAIL", "a secret")
         fires({"build.md": note % ("build", "d", "See [[deploy-plan]].")}, "warn", "not yet written")
