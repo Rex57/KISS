@@ -13,6 +13,44 @@ The input is a short product spec and `tickets.json`. Each ticket has acceptance
 `passes: false`. The design follows Anthropic's guidance on long-running harnesses: a feature list, one agent
 that works one ticket at a time, and an evaluator that uses the product.
 
+## Why KISS: proven skills, one daily workflow
+
+KISS does not rebuild what other projects already do well. Matt Pocock's skills, ponytail and CodeGraph are
+mature and proven in real work. KISS is the workflow that joins them into one development lifecycle, from the
+first idea to the upkeep of a running project:
+
+| Phase | KISS skill | What it brings in |
+|---|---|---|
+| Design | `kiss-system-design`, then step 1 of `kiss-harness` | `grilling`, `domain-modeling`, `codebase-design`, `prototype`, `research` |
+| Build | `kiss-harness`, with `kiss-mini-agent` for side tasks | `tdd`, `diagnosing-bugs`, `ponytail`, CodeGraph, `pr` |
+| Review | the reviewer of `kiss-harness` | `ponytail-review`, CodeGraph callers |
+| Clean | `kiss-code-clean`, `kiss-housekeeping` | `ponytail-audit`, `ponytail-debt`, CodeGraph |
+| Maintain | `kiss-dream`, `kiss-doctor`, the docs Upkeep | agentmemory (optional) |
+
+How KISS uses them:
+
+- **Call, do not copy.** KISS calls each skill at the step where it fits. From a skill that only you can start,
+  KISS copies the rules alone, with the license notice ([`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)), so a
+  run works the same when that skill is not installed.
+- **The step knows the skill.** Each step names the skill it uses, so you do not have to remember which one comes
+  next.
+- **In step with upstream.** The owner's `kiss-check-update` (in this repo only, not in the plugin) compares every
+  source with its latest release, so each KISS release matches the newest versions.
+
+What KISS adds:
+
+- **Few agents.** One implementer and one reviewer per run, not one agent per ticket: fewer tokens, and each fix
+  goes back to the agent that has the context.
+- **Proof in the running product.** The reviewer uses the product (its UI, API or CLI), not only the diff, and
+  each ticket has acceptance tests that name their seam.
+- **You decide.** Only a choice that is costly to undo becomes a question (`D<n>`, kept in `decisions.md`). A gate
+  (the tickets, the merge, a push) asks for your go with its evidence. Nothing is pushed without you.
+- **Safety in code.** A guard that protects your data is a script with a selftest, not an instruction the model
+  must remember: for example `kiss-dream`'s memory guard and the feedback switch.
+- **Four agents, one plugin:** Claude Code, Codex, Gemini CLI and Antigravity.
+- **Used every day.** The author uses these workflows every day for real development work, and refines them
+  continuously. Turn on the [feedback mode](#feedback-mode) to tell us what to improve.
+
 ## What is inside
 
 | Skill | What it does |
