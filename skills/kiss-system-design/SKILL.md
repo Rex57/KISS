@@ -2,7 +2,7 @@
 name: kiss-system-design
 description: Turn a new product idea into a product brief, a decision map, a system design document and an ordered run plan of kiss-harness runs. First version. Use for a product too big for one harness run; continue a design with its name.
 disable-model-invocation: true
-allowed-tools: Bash(printenv KISS_FEEDBACK)
+allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 
 # KISS system design (first version)
@@ -61,4 +61,6 @@ when no decision is open.
 7. **The loop back.** When a harness run finds that a design decision is wrong, open it again in `map.md` (Open
    decisions, with what the run found), settle it by step 4, update the design document and the run briefs it
    changes, and tell the owner which runs change. Done when the map has no open decision again.
-8. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call: the call's whole text is `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.
+!`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 8 kiss-system-design`
+
+(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 8 kiss-system-design` and follow what it prints.)

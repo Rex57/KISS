@@ -1,7 +1,7 @@
 ---
 name: kiss-dream
 description: Use when the user says "tidy up memory" (that phrase is the go for the whole flow), or asks to tidy, consolidate or clean a repo's file memory and agentmemory (then show the plan and wait for a yes). The full flow is inventory, file-memory merge, loss check, agentmemory revisions over REST, disk clean-up, and a report.
-allowed-tools: Bash(printenv KISS_FEEDBACK)
+allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 
 # KISS dream: tidy up memory
@@ -37,7 +37,7 @@ this skill's folder; `M` the memory folder), and never through `cp`, `mv`, Write
 Its answer:
 
 - `LOCK-HELD` (exit 3): stop. Write no note, tell the owner that another consolidation is running and to run this
-  again when it ends, after the table of the report (step 6), then do step 7.
+  again when it ends, after the table of the report (step 6), and end the run.
 - `CHANGED: <files>` (exit 4): a note changed that this run did not write. Run `guard.py again "$M"` (a new copy
   beside the first, which stays; it becomes `expected/`), read each changed note, fold its new facts into your
   drafts, and run the write again. Step 3 compares with `first/` plus each changed note.
@@ -102,4 +102,6 @@ Skip a step whose store the agent does not have. agentmemory is optional: run st
    beside the old notes; name it there. Done when every step has its row, the report names the scratch folder in
    the Trash, and `~/.cache/kiss-dream/` holds no folder of this run (also in a run that
    stopped on the lock).
-7. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call: the call's whole text is `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.
+!`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 7 kiss-dream`
+
+(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 7 kiss-dream` and follow what it prints.)

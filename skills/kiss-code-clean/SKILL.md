@@ -2,7 +2,7 @@
 name: kiss-code-clean
 description: Give one ranked list of clean-up candidates for a code base - bugs, risky code with no test, slow paths, code to delete, merge or split, shortcut debt and hot spots - each with its evidence and a strength. Reads only; changes no code.
 disable-model-invocation: true
-allowed-tools: Bash(printenv KISS_FEEDBACK)
+allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 
 # KISS code clean
@@ -63,4 +63,6 @@ no tracked file; your one write is the list in the git-ignored `.kiss/clean/` (s
    equals the status step 1 recorded (less a `?? .kiss/` line that the new exclude line hides).
 8. **The owner picks.** Each pick becomes a harness run (kiss-harness, the candidate as its request) or a `/mini`
    task (kiss-mini-agent); start it only on the owner's word. Done when each pick has its route.
-9. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call: the call's whole text is `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.
+!`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 9 kiss-code-clean`
+
+(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 9 kiss-code-clean` and follow what it prints.)

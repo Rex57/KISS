@@ -2,7 +2,7 @@
 name: kiss-doctor
 description: Check this device's KISS setup - the CodeGraph rule in the global instructions file, the skills KISS calls and the tools.
 disable-model-invocation: true
-allowed-tools: Bash(printenv KISS_FEEDBACK)
+allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 
 # KISS doctor
@@ -22,9 +22,11 @@ You check the setup and report it; the owner installs. `KD` is this skill's fold
    the script calls "not installed" (a session loaded from a plugin folder, or a KISS repo newer than the install)
    is INFO with that reason, never FAIL; in Claude Code the script prints it as INFO itself.
 3. **Report** every INFO line with its reason, and every WARN and FAIL line with its fix, taken from the README section in its `[fix: ...]`
-   (`$KD/../../README.md`). End the report (before step 5) with one line: "Ready for a KISS run" when no line is FAIL, else the FAIL lines to
+   (`$KD/../../README.md`). End the report with one line: "Ready for a KISS run" when no line is FAIL, else the FAIL lines to
    fix first. Done when each WARN and FAIL line has its fix.
 4. **Fix on the owner's yes.** The owner installs tools and skills, by the README commands. With a yes you may make
    a file fix: append `$KD/../../rules/codegraph.md` to the global instructions file once (read the file
    first), or delete a `CODEGRAPH_START` block. Then run step 1 again.
-5. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call: the call's whole text is `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.
+!`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 5 kiss-doctor`
+
+(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 5 kiss-doctor` and follow what it prints.)

@@ -1,7 +1,7 @@
 ---
 name: kiss-harness
 description: Build a feature with one implementer subagent and one reviewer subagent that uses the running product, from a product spec and a tickets.json with an acceptance test per ticket. Use when the user asks to build or implement a feature or a list of changes "with the harness", "with KISS", or says "kiss harness" or "harness run".
-allowed-tools: Bash(printenv KISS_FEEDBACK)
+allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 
 # KISS harness
@@ -100,7 +100,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
     severe first (a mechanical mistake → a proposed check, a judgement call → a facts-file rule); change no product
     file. Then the **merge gate**. A push, a pull request or any write to a remote is its own gate, always asked;
     when the owner asks for a pull request, `pr` writes its body.
-11. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call: the call's whole text is `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.
+!`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 11 kiss-harness`
+
+(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 11 kiss-harness` and follow what it prints.)
 
 **The clock:** no agent gives a subagent a time budget, so put "Time: elapsed Ns of a Ms budget." in each message
 (`prompt.py` does it when you pass `ELAPSED`). Past the budget, a gate comes before the next round.

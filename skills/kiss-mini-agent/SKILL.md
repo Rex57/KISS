@@ -1,7 +1,7 @@
 ---
 name: kiss-mini-agent
 description: Run a small side task in a background worker - a code change on its own branch, a read-only question, or a watch on a pull request, CI run or test. Use for "/mini", a "mini task", a side request, or a hand-off from kiss-harness.
-allowed-tools: Bash(printenv KISS_FEEDBACK)
+allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 
 # KISS mini agent
@@ -42,7 +42,9 @@ host, and the `/mini` pane shows the tasks: use them, not the steps below. These
    brief plus the answer.
 6. **Watch:** without the mod, a watch is checked on request: at each `status`, run its check again (`gh pr view`,
    `gh run view`, or the command) and report a change.
-7. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call: the call's whole text is `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.
+!`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 7 kiss-mini-agent`
+
+(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 7 kiss-mini-agent` and follow what it prints.)
 
 ## Status
 

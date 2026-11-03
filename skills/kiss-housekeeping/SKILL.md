@@ -1,7 +1,7 @@
 ---
 name: kiss-housekeeping
 description: Housekeeping of a repo's documentation and knowledge base. It gives each fact one home, sorts pages into living pages, logs, records and history, builds the map that routes readers, retires stale pages, fixes names, moves files without breaking code or tests, keeps each page true to the code, and installs a docs gate in the project's tests. Use it for a docs clean-up, consolidation or reorganisation ("clean up the docs", "housekeeping", "docs gate"), and for the docs Upkeep at a harness close.
-allowed-tools: Bash(printenv KISS_FEEDBACK)
+allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 
 # Housekeeping
@@ -78,15 +78,16 @@ Done when the gate is green on the merged commit, every routing question is rout
 ### 8. Fold back
 Write down what the run taught, where it belongs:
 - A lesson about the project (a trap, a path user, a convention) goes into the project's facts file (`.kiss/project.md`), or the repo's agent instructions file when it has none.
-- A lesson about this skill (a step, rule or script that was wrong, missing or useless) goes into the KISS feedback block, as file, line and new text (below).
+- A lesson about this skill (a step, rule or script that was wrong, missing or useless) goes to the KISS owner as file, line and new text (in the feedback block when the feedback mode is on).
 
 Done when each lesson of the run is in one of the two.
 
 ### The report
 Start the First run's report with one line per step (1 to 8): its Done line, and met or not met, with the reason when not met. The green results (the gate, the suite, the routing totals) come after that table.
 
-### 9. KISS feedback
-In every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call: the call's whole text is `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.
+!`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 9 kiss-housekeeping`
+
+(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 9 kiss-housekeeping` and follow what it prints.)
 
 ## Upkeep
 
@@ -94,4 +95,6 @@ In every run, also one that stops early or fails: after your last work call, run
 - **U2.** Read each living page that the phase touched against what changed. Make it true, and set its `Reviewed` date to today, even when no line changed: each page read in full against the change earns it. A page too long to read in one pass (a contract, a guide): split it by section across parallel reviewers. First list the exact strings the tests read from the page (search the tests for the page's file name; an `index("...")` on its text is a pointer like a path), and give that list to every reviewer and to the editor. Each reviewer checks every claim in its section against the code and returns its findings as text, each with the evidence (file and line) and the replacement. One editor then checks each finding against the code and applies them all in one scripted pass, where each edit must match exactly once. A names pass is not a review: only a review earns today's `Reviewed` date.
 - **U3.** Put each new page where [standard.md](standard.md) "Where a new page goes" says. Add each new record to its index.
 - **U4.** When the map changes, or an outside document (a spec, an audit, a stakeholder's questions) arrives to be checked against the system, run the routing test ([routing.md](routing.md)) on the tree as it is. Fix each wrong answer at its home.
-- **U5.** KISS feedback, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call: the call's whole text is `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.
+!`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" U5 kiss-housekeeping`
+
+(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py U5 kiss-housekeeping` and follow what it prints.)

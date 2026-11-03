@@ -211,17 +211,22 @@ Off by default. When it is on, every KISS skill ends its run with one **KISS fee
 KISS version, what went wrong or was unclear, and each proposed change as a KISS file, a line and the new text. The
 block holds no name, path, code, data or secret of your project. The rule is [`rules/feedback.md`](rules/feedback.md).
 
-Turn it on with the environment variable `KISS_FEEDBACK=1`, in one of two places:
+Turn it on with the environment variable `KISS_FEEDBACK=1`, in one of these places, never in the plugin's own files
+(that would turn it on for every user):
 
-- your shell profile (every agent reads it): `export KISS_FEEDBACK=1`;
-- Claude Code's `~/.claude/settings.json`: `"env": { "KISS_FEEDBACK": "1" }`.
+- Claude Code's `~/.claude/settings.json`, for every Claude Code session: `"env": { "KISS_FEEDBACK": "1" }`;
+- your shell profile, for every agent: `export KISS_FEEDBACK=1`;
+- a project's `.claude/settings.local.json`, for that project only: `"env": { "KISS_FEEDBACK": "1" }`.
 
-Unset it, or set any other value, to turn it off. Post the block as an issue on the KISS repo with the
+Unset it, or set any other value, to turn it off. Each skill's last line runs `rules/feedback.py` when the skill
+loads (a Claude Code inline command): with the mode off it prints nothing, so the skill has no feedback step and the
+run makes no feedback call; with it on it prints the step with the rule and the KISS version, so the run reads no
+file outside your project. The other agents run the same command at the end of the run. A policy that disables
+skill shell execution (`disableSkillShellExecution`) turns the mode off.
+
+Post the block as an issue on the KISS repo with the
 [KISS feedback template](https://github.com/Rex57/KISS/issues/new?template=kiss-feedback.md), or paste it into an
 agent session in a KISS checkout to apply it. Read it before you post: the repo is public.
-
-In Claude Code's default permission mode, the first block asks once to read the KISS rule file and the
-manifest: they sit outside your project.
 
 ## Layout
 
@@ -234,6 +239,7 @@ gemini-extension.json        Gemini CLI manifest
 rules/codegraph.md           the CodeGraph rule for the global instructions file
 LICENSE, NOTICE              Apache-2.0 and the author credit; THIRD_PARTY_NOTICES.md: Matt Pocock's MIT license
 rules/feedback.md            the feedback mode: the block each skill ends with when KISS_FEEDBACK=1
+rules/feedback.py            prints a skill's feedback step, only when KISS_FEEDBACK=1
 .github/ISSUE_TEMPLATE/      the issue template for a KISS feedback block
 skills/kiss-harness/         SKILL.md, scripts/, templates/, references/
 skills/kiss-doctor/          SKILL.md, scripts/doctor.py
@@ -249,7 +255,7 @@ claude-agents/               kiss-implementer, kiss-reviewer and kiss-worker, th
 ```
 
 Selftests: `python3 -I skills/kiss-harness/scripts/tickets.py --selftest`, the same for `prompt.py`,
-`cgcallers.py`, `skills/kiss-doctor/scripts/doctor.py`, `skills/kiss-dream/scripts/guard.py`, `check_memory.py`, `.claude/skills/kiss-check-update/scripts/check_update.py` and the three scripts in `skills/kiss-housekeeping/scripts/`. The mod's tests: `claude plugin test .`.
+`cgcallers.py`, `skills/kiss-doctor/scripts/doctor.py`, `skills/kiss-dream/scripts/guard.py`, `check_memory.py`, `.claude/skills/kiss-check-update/scripts/check_update.py`, `rules/feedback.py` and the three scripts in `skills/kiss-housekeeping/scripts/`. The mod's tests: `claude plugin test .`.
 
 A new version changes `version` in the four manifests that carry one (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`, `.antigravity-plugin/plugin.json`), and gets a tag `v<version>`.
 

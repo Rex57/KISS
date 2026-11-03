@@ -2,7 +2,7 @@
 name: kiss-check-update
 description: The KISS owner's check of every upstream source KISS calls or copies (Matt Pocock's skills, ponytail, CodeGraph, the Claude Code mods API) against what is out now, then the port, the tests and the record update. Only in the KISS repo; not part of the plugin.
 disable-model-invocation: true
-allowed-tools: Bash(printenv KISS_FEEDBACK)
+allowed-tools: Bash(python3 -I "${CLAUDE_SKILL_DIR}/../../../rules/feedback.py" *)
 ---
 
 # KISS check update
@@ -32,4 +32,6 @@ fingerprints only, never a path of this device). Run every command from the KISS
    `same`. Commit the port and the record by explicit path. Done when step 1 shows `same` for them.
 6. **Release on the owner's go:** the version in the four manifests, a tag `v<version>`, a push and a GitHub
    release only when the owner says so. Done when the owner has the release or has said not now.
-7. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call: the call's whole text is `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it prints `1`, read [`rules/feedback.md`](../../../rules/feedback.md) and `version` in `gemini-extension.json` at the repo root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.
+!`python3 -I "${CLAUDE_SKILL_DIR}/../../../rules/feedback.py" 7 kiss-check-update`
+
+(Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS repo>/rules/feedback.py 7 kiss-check-update` and follow what it prints.)
