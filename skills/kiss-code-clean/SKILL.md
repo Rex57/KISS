@@ -52,7 +52,8 @@ no tracked file; your one write is the list in the git-ignored `.kiss/clean/` (s
    security, (2) risky code with no test, (3) load or slow path, (4) delete, merge, split or deepen, (5) `shortcut:`
    debt. Strength sorts only inside one kind: `Strong`, then `Worth exploring`, then `Speculative`; at equal strength
    a hot spot first. Before you save, read the kind and strength columns from top to bottom and move each row that
-   is out of that order. Each row: number, kind, `file:line`, the evidence (the check that found
+   is out of that order. Every row gets `Strong`, `Worth exploring` or `Speculative`, a `shortcut:` with a named
+   trigger too. Each row: number, kind, `file:line`, the evidence (the check that found
    it and its result), the strength, and the build it needs (a harness run for a change across modules or an
    interface, a `/mini` task for a small local one). Start the list with one line per skipped part: each skill or tool that step 1 found missing ("ponytail not
    installed: no audit report, no debt ledger"), and each installed skill of steps 3 to 5 that the run did not call. Save
