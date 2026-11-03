@@ -29,9 +29,9 @@ export type Task = {
   wait?: 'permission'
   /** The changes the sender has toasted. */
   seen?: number
-  /** A hand-off's own brief (handoff.md's format); absent for the owner's /mini, whose brief is built from the title. */
+  /** A hand-off's own brief (handoff.md's format); absent for the owner's /kiss-mini, whose brief is built from the title. */
   brief?: string
-  /** /mini --now: the owner ordered it outright; the worker skips the three checks. */
+  /** /kiss-mini --now: the owner ordered it outright; the worker skips the three checks. */
   now?: boolean
   /** True: the report goes back to the sender session as one message. */
   return?: boolean
