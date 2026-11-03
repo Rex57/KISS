@@ -20,13 +20,15 @@ once, before step 4.
 |---|---|---|---|
 | `grilling` | Matt Pocock's skills | step 1, the questions | the rounds in [references/spec-and-tickets.md](references/spec-and-tickets.md) |
 | `domain-modeling` | Matt Pocock's skills | step 1, only when the facts file sets domain docs on | the project's own way, or nothing |
+| `codebase-design` | Matt Pocock's skills | step 1, when the run adds or changes a module's interface or a seam: its words (module, interface, seam, depth) and its deepening check | the spec in plain words, with no deepening check |
+| `prototype` | Matt Pocock's skills | step 1, a decision that needs an answer the owner can try (a state model, a UI): a throwaway prototype, never merged into the main branch | the question in words only |
 | `tdd` | Matt Pocock's skills | the implementer, every ticket | the implementer prompt's own test rules |
 | `ponytail` | ponytail | the ticket cut (full level), the implementer, the reviewer | the same rules, as the prompts state them |
 | `ponytail-review` | ponytail | the reviewer: rubric G and its finding rules | rubric G as the reviewer prompt states it |
 | `ponytail-debt` | ponytail | step 10, the list of new `shortcut:` comments | a search of the diff for `shortcut:` |
 
 Claude Code and Codex name them `mattpocock-skills:<name>` and `ponytail:<name>`. Before you use one, check that it
-is in your skill list. Write into `R/decisions.md` which of them the run used, with the plugin versions. Matt Pocock's
+is in your skill list; a skill that is not there is skipped, and the step does what the "Without it" column says. Write into `R/decisions.md` which of them the run used, with the plugin versions. Matt Pocock's
 `code-review` is not part of a run: the reviewer and `ponytail-review` cover it.
 
 ## Before the first run in a project
@@ -46,7 +48,10 @@ is in your skill list. Write into `R/decisions.md` which of them the run used, w
 1. **Decisions and spec.** Make the run folder `R = <repo>/.kiss/runs/<YYYY-MM-DD>-<name>/`. Settle every open
    decision (see "Asking the owner") with the owner: `grilling` when installed, else the rounds in
    [references/spec-and-tickets.md](references/spec-and-tickets.md). Write each settled answer into `R/decisions.md`
-   at once. With domain docs on, also use `domain-modeling`. Then write `R/spec.md` from `templates/spec.md` by the
+   at once. With domain docs on, also use `domain-modeling`. When the run adds or changes a module's interface or a seam,
+   load `codebase-design` before the spec, and use its words and its deepening check. When a decision needs an answer
+   the owner can try (a state model, a UI), build a throwaway with `prototype` (in the scratch folder or on a branch
+   that is never merged) and ask the decision with it. Then write `R/spec.md` from `templates/spec.md` by the
    spec rules in that file, and confirm the test seams with the owner.
 2. **Tickets** in `R/tickets.json`: a list of `{id, title, spec, acceptance: [...], passes: false}`, and optional
    `files`, `symbols`, `seeds` (CodeGraph queries), `depends_on`, `risky`. Follow the ticket rules in

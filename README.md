@@ -48,7 +48,7 @@ each one.
 | Node.js and npm | CodeGraph runs on Node | [nodejs.org](https://nodejs.org) |
 | [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `npm install -g @colbymchenry/codegraph`, then `codegraph init -y <repo>` in each project |
 | [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close | see "Install ponytail" below |
-| [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop | see "Install Matt Pocock's skills" below |
+| [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try | see "Install Matt Pocock's skills" below |
 | `cgcallers` (in this repo) | CodeGraph's callers plus a word grep, before a delete or rename | `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (`~/.local/bin` on your `PATH`) |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
 | [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-tidy-up-memory` | its README |
@@ -63,7 +63,7 @@ each one.
 
 ### Install Matt Pocock's skills
 
-KISS uses three of them: `grilling`, `domain-modeling` and `tdd`. Install them once per agent, in one way only:
+KISS uses five of them: `grilling`, `domain-modeling`, `tdd`, `codebase-design` and `prototype`. Install them once per agent, in one way only:
 two installs give you every skill twice. KISS needs no `/setup-matt-pocock-skills`, because it does not use his
 issue-tracker skills.
 
@@ -87,7 +87,7 @@ issue-tracker skills.
   gemini skills install https://github.com/mattpocock/skills.git --path skills/productivity
   ```
 
-- Antigravity: his README has no steps for it. Copy the three skill folders into Antigravity's global skills folder,
+- Antigravity: his README has no steps for it. Copy the skill folders into Antigravity's global skills folder,
   `~/.gemini/config/skills/` (App and IDE) or `~/.gemini/antigravity-cli/skills/` (CLI), and copy them again to
   update:
 
@@ -95,7 +95,8 @@ issue-tracker skills.
   git clone https://github.com/mattpocock/skills.git mattpocock-skills
   mkdir -p ~/.gemini/config/skills
   cp -R mattpocock-skills/skills/productivity/grilling mattpocock-skills/skills/engineering/domain-modeling \
-        mattpocock-skills/skills/engineering/tdd ~/.gemini/config/skills/
+        mattpocock-skills/skills/engineering/tdd mattpocock-skills/skills/engineering/codebase-design \
+        mattpocock-skills/skills/engineering/prototype ~/.gemini/config/skills/
   ```
 
 ### User-only skills

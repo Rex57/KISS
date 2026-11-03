@@ -22,7 +22,13 @@ the decisions the owner made.
 ## Implementation decisions
 
 <The modules to build or change, their interfaces, schema changes, API contracts, the owner's technical rulings.
-No file paths and no code.>
+No file paths and no code. For each one-way door: the options rejected, and why.>
+
+## Security, privacy, observability
+
+- Security: <what the feature exposes or trusts, and its guard; or "no change">
+- Privacy: <the personal data it reads, stores or sends; or "none">
+- Observability: <how the owner sees that it works or fails in use: a log, a metric, an error message>
 
 ## Testing decisions
 

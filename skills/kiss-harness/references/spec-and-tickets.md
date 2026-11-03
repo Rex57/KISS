@@ -34,7 +34,10 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
   part of the feature.
 - **Implementation decisions:** the modules to build or change, their interfaces, schema changes, API contracts and
   the owner's technical rulings. No file paths and no code: they go stale. A prototype's snippet that states a
-  decision better than words (a state machine, a schema, a type) may stay, marked as from a prototype.
+  decision better than words (a state machine, a schema, a type) may stay, marked as from a prototype. For each
+  one-way door, list the options rejected and why. A changed module interface or seam is written in
+  `codebase-design`'s words (module, interface, seam, depth) when that skill is installed.
+- **Security, privacy, observability:** one line each, "no change" or "none" when that is so.
 - **Testing decisions:** a good test checks behaviour through a public interface, never internals. The **seams** are
   the public interfaces the tests go through: prefer an existing seam, the highest one, and as few as possible (one is
   best). Name similar tests in the repo to copy. **Confirm the seams with the owner.**
