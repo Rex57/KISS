@@ -21,19 +21,20 @@ that works one ticket at a time, and an evaluator that uses the product.
 | `kiss-doctor` | Checks a device for a run: the CodeGraph rule in each agent's global instructions file, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix and installs nothing. |
 | `kiss-mini-agent` | A small side task in a background worker: a code change on its own `mini/<id>` branch, a read-only question, or a watch on a pull request, a CI run or a test command. kiss-harness hands off work outside its tickets to it. On Claude Code a mod adds `/mini` (`/mini <task>`, `/mini --now <task>` to skip the worker's checks, `/mini ask <question>`, `/mini watch pr <n>` / `run <id>` / `<test command>`, `/mini stop <id>`, `/mini status`, `/mini` alone opens the pane), a band with the counts, and the delivery buttons (Merge into the base, Push, Draft PR, Discard); only your press delivers. |
 | `kiss-housekeeping` | "Clean up the docs": a First run, on your ask, gives each fact one home, sorts pages by kind (living, log, record, history), builds a map, retires stale pages, fixes old names, moves files without breaking code or tests, installs a docs gate in your tests (`tools/check_docs.py`, your own copy) and proves the result with a routing test. After that, each harness close runs its Upkeep when your facts file names the gate. |
+| `kiss-code-clean` | "Clean up the code": one ranked list of clean-up candidates for a code base (bugs, risky code with no test, slow paths, code to delete, merge or split, `shortcut:` debt, hot spots from the git history), each with its evidence and a strength, saved in `.kiss/clean/<date>.md`. A delete candidate shows that nothing uses it (CodeGraph and a word search). It changes no code: you pick, and each pick becomes a harness run or a `/mini` task. |
 | `kiss-tidy-up-memory` | "Tidy up memory": merge and cut an agent's file memory for one repo, run a loss check with a second agent, revise agentmemory (if you use it) and move old transcripts to the Trash. |
 
 How to call a skill:
 
-| Agent | `kiss-harness` | `kiss-doctor` | `kiss-tidy-up-memory` | `kiss-housekeeping` | `kiss-mini-agent` |
-|---|---|---|---|---|---|
-| Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-tidy-up-memory` | `/kiss:kiss-housekeeping` | `/mini <task>` (the mod), or `/kiss:kiss-mini-agent <task>` |
-| Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-tidy-up-memory` | `$kiss:kiss-housekeeping` | `$kiss:kiss-mini-agent <task>` |
-| Gemini CLI | say "build … with the KISS harness" (the model activates it; `/skills list` shows it) | say "kiss doctor" | say "tidy up memory" | say "clean up the docs" | say "mini task: <task>" |
-| Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-tidy-up-memory` | `/kiss-housekeeping` | `/kiss-mini-agent <task>` |
+| Agent | `kiss-harness` | `kiss-doctor` | `kiss-tidy-up-memory` | `kiss-housekeeping` | `kiss-code-clean` | `kiss-mini-agent` |
+|---|---|---|---|---|---|---|
+| Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-tidy-up-memory` | `/kiss:kiss-housekeeping` | `/kiss:kiss-code-clean` | `/mini <task>` (the mod), or `/kiss:kiss-mini-agent <task>` |
+| Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-tidy-up-memory` | `$kiss:kiss-housekeeping` | `$kiss:kiss-code-clean` | `$kiss:kiss-mini-agent <task>` |
+| Gemini CLI | say "build … with the KISS harness" (the model activates it; `/skills list` shows it) | say "kiss doctor" | say "tidy up memory" | say "clean up the docs" | `/skills` (it starts only when you call it) | say "mini task: <task>" |
+| Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-tidy-up-memory` | `/kiss-housekeeping` | `/kiss-code-clean` | `/kiss-mini-agent <task>` |
 
 On every agent you can also just say it: "build <feature> with the KISS harness", "clean up the docs", or "tidy up memory".
-`kiss-doctor` starts only when you call it.
+`kiss-doctor` and `kiss-code-clean` start only when you call them.
 
 ## Tools you need
 
@@ -106,7 +107,7 @@ issue-tracker skills.
 A user-only skill has `disable-model-invocation: true` in its frontmatter: only you can start it (its slash command
 or its name), and the model cannot call it. KISS cannot call such a skill for you, so `kiss-doctor` fails a skill
 KISS calls that is user-only: install it again from its source (above), or delete that line from your own copy of
-it. KISS's own skills that you start now and then (such as `kiss-doctor`) are user-only on purpose.
+it. KISS's own skills that you start now and then (such as `kiss-doctor` and `kiss-code-clean`) are user-only on purpose.
 
 If a skill is missing, a run still works: KISS follows its own copy of the same rules
 ([`references/spec-and-tickets.md`](skills/kiss-harness/references/spec-and-tickets.md) and its prompts), and
@@ -235,6 +236,7 @@ rules/feedback.md            the feedback mode: the block each skill ends with w
 skills/kiss-harness/         SKILL.md, scripts/, templates/, references/
 skills/kiss-doctor/          SKILL.md, scripts/doctor.py
 skills/kiss-tidy-up-memory/  SKILL.md
+skills/kiss-code-clean/      SKILL.md, references/architecture.md
 skills/kiss-housekeeping/    SKILL.md, standard.md, moves.md, routing.md, scripts/ (the docs gate, inventory, mover)
 skills/kiss-mini-agent/      SKILL.md, references/handoff.md (the brief, the report, the worker's rules)
 mods/kiss-mini-agent/        the Claude Code mod: /mini, the background host, the band and the pane (Claude Code only)
