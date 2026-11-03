@@ -236,7 +236,7 @@ rules/feedback.md            the feedback mode: the block each skill ends with w
 .github/ISSUE_TEMPLATE/      the issue template for a KISS feedback block
 skills/kiss-harness/         SKILL.md, scripts/, templates/, references/
 skills/kiss-doctor/          SKILL.md, scripts/doctor.py
-skills/kiss-dream/           SKILL.md
+skills/kiss-dream/           SKILL.md, scripts/guard.py (the guarded write)
 skills/kiss-code-clean/      SKILL.md, references/architecture.md
 skills/kiss-system-design/   SKILL.md, references/map.md (the map and decision file formats)
 skills/kiss-housekeeping/    SKILL.md, standard.md, moves.md, routing.md, scripts/ (the docs gate, inventory, mover)
@@ -246,7 +246,7 @@ claude-agents/               kiss-implementer, kiss-reviewer and kiss-worker, th
 ```
 
 Selftests: `python3 -I skills/kiss-harness/scripts/tickets.py --selftest`, the same for `prompt.py`,
-`cgcallers.py`, `skills/kiss-doctor/scripts/doctor.py` and the three scripts in `skills/kiss-housekeeping/scripts/`. The mod's tests: `claude plugin test .`.
+`cgcallers.py`, `skills/kiss-doctor/scripts/doctor.py`, `skills/kiss-dream/scripts/guard.py` and the three scripts in `skills/kiss-housekeeping/scripts/`. The mod's tests: `claude plugin test .`.
 
 A new version changes `version` in the four manifests that carry one (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`, `.antigravity-plugin/plugin.json`), and gets a tag `v<version>`.
 
