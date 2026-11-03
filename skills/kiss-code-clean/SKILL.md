@@ -8,15 +8,22 @@ allowed-tools: Bash(printenv KISS_FEEDBACK)
 # KISS code clean
 
 You find what to clean up in a code base and rank it; the owner picks, and each pick is built later by kiss-harness
-or kiss-mini-agent. You change no tracked file of the repo: no code, no docs, no `.gitignore`; your one write is the list in the
-git-ignored `.kiss/clean/`. `CC` is this skill's folder
-(the folder of this file). The scope is the repo, or the folder the owner names.
+or kiss-mini-agent. `CC` is this skill's folder (the folder of this file). The scope is the repo, or the folder the
+owner names.
 
-1. **Check the tools.** In your skill list: `ponytail-audit` and `ponytail-debt` (ponytail), `codebase-design`
-   (Matt Pocock's skills); Claude Code and Codex name them `ponytail:<name>` and `mattpocock-skills:<name>`. Each one
-   in the list is loaded in its step: reading the code yourself instead is no substitute. On the shell: `codegraph status "<repo>"` prints `Project: <repo>` (the repo is indexed),
-   and `$CC/../kiss-harness/scripts/cgcallers.py`. Note each one that is missing; step 7 names the part it skipped.
-   Done when each tool is found or noted.
+You read the code, the git history and the tools' output, and you show a bug from the code: its file, its line and
+the input that breaks it. You never run the repo's code, its tests, its scripts or its build (no `pytest`, no
+`python app.py`, no `npm test`, no import of its modules): a run can change its data. You delete no file and change
+no tracked file; your one write is the list in the git-ignored `.kiss/clean/` (step 7).
+
+1. **Check the tools.** Record `git -C "<repo>" status --short` as it is now: step 7 compares with it. In your skill
+   list: `ponytail-audit` and `ponytail-debt` (ponytail), `codebase-design` (Matt Pocock's skills); Claude Code and
+   Codex name them `ponytail:ponytail-audit`, `ponytail:ponytail-debt` and `mattpocock-skills:codebase-design`. Each
+   one your list shows is called with the Skill tool, by that full name, in its step (3, 4, 5): a missing CodeGraph
+   or a small repo skips none of them, and reading the code yourself is no substitute. On the shell:
+   `codegraph status "<repo>"` prints `Project: <repo>` and no `Not initialized` line (the repo is indexed), and
+   `$CC/../kiss-harness/scripts/cgcallers.py` exists. Note each skill or tool that is missing; step 7 names the part
+   it skipped. Done when each one is found or noted.
 2. **Hot spots.** `git -C "<repo>" log --since="6 months ago" --name-only --format=` and count the changes per file:
    the top ten are the hot spots. A candidate in a hot spot ranks higher (a clean-up there pays off soonest). No
    history: say so. Done when the list is written down.
@@ -41,14 +48,16 @@ git-ignored `.kiss/clean/`. `CC` is this skill's folder
    only when that holds). Without CodeGraph: list no delete candidate, and say so. Done when each delete candidate
    shows its callers, impact, cgcallers and word-search results, all empty but its own definition.
 7. **One ranked list.** Join every candidate into one list, ranked: bugs and security first, then risky code with
-   no test, load and slow paths, delete / merge / split, then `shortcut:` debt; inside a rank, `Strong` before
-   `Speculative` and a hot spot first. Each row: number, kind, `file:line`, the evidence (the check that found it
-   and its result), the strength, and the build it needs (a harness run for a change across modules or an
-   interface, a `/mini` task for a small local one). Start the list with one line per skipped part ("ponytail not
-   installed: no audit report, no debt ledger"). Save it as `<repo>/.kiss/clean/<YYYY-MM-DD>.md`; that folder must
-   be git-ignored: when `git -C "<repo>" check-ignore -q .kiss/clean/x` fails, add `.kiss/` to
-   `<repo>/.git/info/exclude` (never to a tracked file) and say so. Show the list. Done when `git -C "<repo>"
-   status --short` shows no change to a tracked file.
+   no test, load and slow paths, delete / merge / split / deepen, then `shortcut:` debt; inside a rank, `Strong`
+   before `Speculative` and a hot spot first. Each row: number, kind, `file:line`, the evidence (the check that found
+   it and its result), the strength, and the build it needs (a harness run for a change across modules or an
+   interface, a `/mini` task for a small local one). Start the list with one line per skipped part, and name in it
+   only a skill or tool that step 1 found missing ("ponytail not installed: no audit report, no debt ledger"). Save
+   it as `<repo>/.kiss/clean/<YYYY-MM-DD>.md`; when that file exists, add `-2`, `-3` and so on to the name. That
+   folder must be git-ignored: when `git -C "<repo>" check-ignore -q .kiss/clean/x` fails, add the line
+   `.kiss/clean/` to the file that `git -C "<repo>" rev-parse --git-path info/exclude` names (never to a tracked
+   file), and say so. Show the saved list as it is, with every column. Done when `git -C "<repo>" status --short`
+   equals the status step 1 recorded (less a `?? .kiss/` line that the new exclude line hides).
 8. **The owner picks.** Each pick becomes a harness run (kiss-harness, the candidate as its request) or a `/mini`
    task (kiss-mini-agent); start it only on the owner's word. Done when each pick has its route.
 9. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` as its own tool call, with nothing before or after it in that call. When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). When it prints anything else, or the call is refused or fails, end your final message with your report alone, with no line about this step.
