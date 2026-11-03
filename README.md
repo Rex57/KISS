@@ -30,7 +30,7 @@ How to call a skill:
 |---|---|---|---|---|---|---|
 | Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-tidy-up-memory` | `/kiss:kiss-housekeeping` | `/kiss:kiss-code-clean` | `/mini <task>` (the mod), or `/kiss:kiss-mini-agent <task>` |
 | Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-tidy-up-memory` | `$kiss:kiss-housekeeping` | `$kiss:kiss-code-clean` | `$kiss:kiss-mini-agent <task>` |
-| Gemini CLI | say "build … with the KISS harness" (the model activates it; `/skills list` shows it) | say "kiss doctor" | say "tidy up memory" | say "clean up the docs" | `/skills` (it starts only when you call it) | say "mini task: <task>" |
+| Gemini CLI | say "build … with the KISS harness" (the model activates it; `/skills list` shows it) | say "kiss doctor" | say "tidy up memory" | say "clean up the docs" | say "kiss code clean" | say "mini task: <task>" |
 | Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-tidy-up-memory` | `/kiss-housekeeping` | `/kiss-code-clean` | `/kiss-mini-agent <task>` |
 
 On every agent you can also just say it: "build <feature> with the KISS harness", "clean up the docs", or "tidy up memory".
@@ -48,7 +48,7 @@ each one.
 | Python 3.9 or later | The scripts (standard library only) | [python.org](https://www.python.org) or [uv](https://docs.astral.sh/uv/) |
 | Node.js and npm | CodeGraph runs on Node | [nodejs.org](https://nodejs.org) |
 | [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `npm install -g @colbymchenry/codegraph`, then `codegraph init -y <repo>` in each project |
-| [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close | see "Install ponytail" below |
+| [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close; `ponytail-audit` and `ponytail-debt`: `kiss-code-clean`'s audit report and debt ledger | see "Install ponytail" below |
 | [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate | see "Install Matt Pocock's skills" below |
 | `cgcallers` (in this repo) | CodeGraph's callers plus a word grep, before a delete or rename | `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (`~/.local/bin` on your `PATH`) |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
