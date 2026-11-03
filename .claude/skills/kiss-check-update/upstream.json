@@ -43,8 +43,7 @@
           "path": "skills/productivity/grilling/SKILL.md",
           "fingerprint": "d2f09a18e6a6c65c55f1271ba08dfeaf06f0bed3",
           "kiss_files": [
-            "skills/kiss-harness/references/spec-and-tickets.md",
-            "skills/kiss-system-design/SKILL.md"
+            "skills/kiss-harness/references/spec-and-tickets.md"
           ]
         },
         {
