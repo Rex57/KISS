@@ -2,8 +2,8 @@
 
 Every KISS skill ends its run with this check. It is off by default.
 
-1. **Read the switch:** `printenv KISS_FEEDBACK`, as its own tool call, with nothing before or after it in that
-   call. When it does not print `1` (or the call is refused or fails), stop here: end your final message with your
+1. **Read the switch:** `printenv KISS_FEEDBACK`, as its own tool call: the call's whole text is
+   `printenv KISS_FEEDBACK`, never after `git status` or another command, never in the call that writes a file. When it does not print `1` (or the call is refused or fails), stop here: end your final message with your
    report alone, with no line about this rule.
 2. **When it prints `1`,** end your final message with one block, the last thing in the message, in this form:
 
