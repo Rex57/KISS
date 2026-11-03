@@ -15,7 +15,7 @@ Copyright (c) 2026 Matt Pocock). KISS keeps its rules and gives a ranked list in
 - **The deletion test:** for a module you suspect is shallow, ask whether deleting it would concentrate the
   complexity in one place or only move it. "Concentrates" is the signal.
 - **Words:** module, interface, depth, seam, adapter, leverage, locality (`codebase-design`), never "component",
-  "service" or "boundary". One adapter is a guessed seam; two make it real.
+  "service", "API" or "boundary". One adapter is a guessed seam; two make it real.
 - **Each candidate:** the files, the problem, the change in plain words, the gain in locality and leverage and in
   the tests, and a strength: `Strong`, `Worth exploring` or `Speculative`. Do not design the new interface here:
   that is the harness run's step 1.
