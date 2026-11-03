@@ -33,7 +33,8 @@ no tracked file; your one write is the list in the git-ignored `.kiss/clean/` (s
    file and line.
 4. **Debt.** Load `ponytail-debt` on the scope: each `shortcut:` comment is a candidate with its limit. Without it,
    `git -C "<repo>" grep -n "shortcut:"`. Done when every `shortcut:` line is listed.
-5. **Architecture.** Look for deepening by the rules in [references/architecture.md](references/architecture.md),
+5. **Architecture.** Call the Skill tool with `mattpocock-skills:codebase-design` first, also when you expect no
+   candidate. Then look for deepening by the rules in [references/architecture.md](references/architecture.md),
    hot spots first, in `codebase-design`'s words (module, interface, depth, seam, adapter, leverage, locality). Give
    each candidate a strength: `Strong`, `Worth exploring` or `Speculative`. Done when each has its strength.
 6. **The delete check.** A delete candidate is code that nothing uses. Before you list one, prove it for each
@@ -47,12 +48,14 @@ no tracked file; your one write is the list in the git-ignored `.kiss/clean/` (s
    Any caller, route, test, string or doc use: it is not a delete candidate (list it as a merge or rename candidate
    only when that holds). Without CodeGraph: list no delete candidate, and say so. Done when each delete candidate
    shows its callers, impact, cgcallers and word-search results, all empty but its own definition.
-7. **One ranked list.** Join every candidate into one list, ranked: bugs and security first, then risky code with
-   no test, load and slow paths, delete / merge / split / deepen, then `shortcut:` debt; inside a rank, `Strong`
-   before `Speculative` and a hot spot first. Each row: number, kind, `file:line`, the evidence (the check that found
+7. **One ranked list.** Join every candidate into one list, sorted by kind first, in this order: (1) bug or
+   security, (2) risky code with no test, (3) load or slow path, (4) delete, merge, split or deepen, (5) `shortcut:`
+   debt. Strength sorts only inside one kind: `Strong`, then `Worth exploring`, then `Speculative`; at equal strength
+   a hot spot first. Before you save, read the kind and strength columns from top to bottom and move each row that
+   is out of that order. Each row: number, kind, `file:line`, the evidence (the check that found
    it and its result), the strength, and the build it needs (a harness run for a change across modules or an
-   interface, a `/mini` task for a small local one). Start the list with one line per skipped part, and name in it
-   only a skill or tool that step 1 found missing ("ponytail not installed: no audit report, no debt ledger"). Save
+   interface, a `/mini` task for a small local one). Start the list with one line per skipped part: each skill or tool that step 1 found missing ("ponytail not
+   installed: no audit report, no debt ledger"), and each installed skill of steps 3 to 5 that the run did not call. Save
    it as `<repo>/.kiss/clean/<YYYY-MM-DD>.md`; when that file exists, add `-2`, `-3` and so on to the name. That
    folder must be git-ignored: when `git -C "<repo>" check-ignore -q .kiss/clean/x` fails, add the line
    `.kiss/clean/` to the file that `git -C "<repo>" rev-parse --git-path info/exclude` names (never to a tracked
