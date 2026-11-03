@@ -18,9 +18,9 @@ You check the setup and report it; the owner installs. `KD` is this skill's fold
    A skill on disk but not in your list needs a reload: `/reload-plugins` in Claude Code, a new session elsewhere.
    The script cannot see Antigravity's plugin folders, so there your list decides.
 3. **Report** every WARN and FAIL line with its fix, taken from the README section in its `[fix: ...]`
-   (`$KD/../../README.md`). End with one line: "Ready for a KISS run" when no line is FAIL, else the FAIL lines to
+   (`$KD/../../README.md`). End the report (before step 5) with one line: "Ready for a KISS run" when no line is FAIL, else the FAIL lines to
    fix first. Done when each WARN and FAIL line has its fix.
 4. **Fix on the owner's yes.** The owner installs tools and skills, by the README commands. With a yes you may make
    a file fix: append `$KD/../../rules/codegraph.md` to the global instructions file once (read the file
    first), or delete a `CODEGRAPH_START` block. Then run step 1 again.
-5. **KISS feedback**, in every run, also one that stops early or fails: as your last tool call, right before your final message, run `printenv KISS_FEEDBACK` alone (never inside another command). When it prints `1`, end that message with the block of [`rules/feedback.md`](../../rules/feedback.md) (its version is `version` in `gemini-extension.json` at the plugin root; no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). Else, or when the command is refused or fails, add nothing, and do not mention this check, the variable or the mode.
+5. **KISS feedback**, in every run, also one that stops early or fails: after your last work call, run `printenv KISS_FEEDBACK` alone (never inside another command). When it prints `1`, read [`rules/feedback.md`](../../rules/feedback.md) and `version` in `gemini-extension.json` at the plugin root, then end your final message with the block (no path outside the KISS repo, none that starts with `/`, `~` or a drive letter). Else, or when the command is refused or fails, add nothing, and do not mention this check, the variable or the mode.

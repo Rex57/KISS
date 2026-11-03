@@ -208,6 +208,9 @@ Unset it, or set any other value, to turn it off. Post the block as an issue on 
 [KISS feedback template](https://github.com/Rex57/KISS/issues/new?template=kiss-feedback.md), or paste it into an
 agent session in a KISS checkout to apply it. Read it before you post: the repo is public.
 
+In Claude Code's default permission mode, the first block asks once to read the KISS rule file and the
+manifest: they sit outside your project.
+
 ## Layout
 
 ```
