@@ -23,7 +23,7 @@ that works one ticket at a time, and an evaluator that uses the product.
 | `kiss-housekeeping` | "Clean up the docs": a First run, on your ask, gives each fact one home, sorts pages by kind (living, log, record, history), builds a map, retires stale pages, fixes old names, moves files without breaking code or tests, installs a docs gate in your tests (`tools/check_docs.py`, your own copy) and proves the result with a routing test. After that, each harness close runs its Upkeep when your facts file names the gate. |
 | `kiss-system-design` | First version. From a new product idea to a plan of harness runs: a product brief, a decision map (decisions so far, open decisions typed research / prototype / grilling / task, not yet clear, out of scope), one decision at a time with you (research in the background), then a system design document and an ordered run plan in your docs. Its working files stay in the git-ignored `.kiss/design/<name>/`; continue a design by its name. An idea that fits one run goes to `kiss-harness`. |
 | `kiss-code-clean` | "Clean up the code": one ranked list of clean-up candidates for a code base (bugs, risky code with no test, slow paths, code to delete, merge or split, `shortcut:` debt, hot spots from the git history), each with its evidence and a strength, saved in `.kiss/clean/<date>.md`. A delete candidate shows that nothing uses it (CodeGraph and a word search). It changes no code: you pick, and each pick becomes a harness run or a `/mini` task. |
-| `kiss-dream` | "Tidy up memory": on your ask (unlike Claude Code's background auto-dream), merge and cut an agent's file memory for one repo, run a loss check with a second agent, revise agentmemory (if you use it) and move old transcripts to the Trash. "Tidy up memory" or its command starts the whole flow; other words get the plan first. When another consolidation holds the memory folder's lock, it stops, writes no note and asks you to run it again; its report starts with one row per step. |
+| `kiss-dream` | "Tidy up memory": on your ask (unlike Claude Code's background auto-dream), merge and cut an agent's file memory for one repo, run a loss check with a second agent, revise agentmemory (if you use it) and move old transcripts to the Trash. "Tidy up memory" or its command starts the whole flow; other words get the plan first. When another consolidation holds the memory folder's lock, it stops, writes no note and asks you to run it again; its report starts with one row per step. A memory gate (`scripts/check_memory.py`) checks the notes and the index, and a recall test (fresh readers answer questions from the old notes, scored found, wrong or not found) proves nothing was lost. |
 
 How to call a skill:
 
@@ -236,7 +236,7 @@ rules/feedback.md            the feedback mode: the block each skill ends with w
 .github/ISSUE_TEMPLATE/      the issue template for a KISS feedback block
 skills/kiss-harness/         SKILL.md, scripts/, templates/, references/
 skills/kiss-doctor/          SKILL.md, scripts/doctor.py
-skills/kiss-dream/           SKILL.md, scripts/guard.py (the guarded write)
+skills/kiss-dream/           SKILL.md, scripts/guard.py (the guarded write), scripts/check_memory.py (the memory gate)
 skills/kiss-code-clean/      SKILL.md, references/architecture.md
 skills/kiss-system-design/   SKILL.md, references/map.md (the map and decision file formats)
 skills/kiss-housekeeping/    SKILL.md, standard.md, moves.md, routing.md, scripts/ (the docs gate, inventory, mover)
@@ -246,7 +246,7 @@ claude-agents/               kiss-implementer, kiss-reviewer and kiss-worker, th
 ```
 
 Selftests: `python3 -I skills/kiss-harness/scripts/tickets.py --selftest`, the same for `prompt.py`,
-`cgcallers.py`, `skills/kiss-doctor/scripts/doctor.py`, `skills/kiss-dream/scripts/guard.py` and the three scripts in `skills/kiss-housekeeping/scripts/`. The mod's tests: `claude plugin test .`.
+`cgcallers.py`, `skills/kiss-doctor/scripts/doctor.py`, `skills/kiss-dream/scripts/guard.py`, `check_memory.py` and the three scripts in `skills/kiss-housekeeping/scripts/`. The mod's tests: `claude plugin test .`.
 
 A new version changes `version` in the four manifests that carry one (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`, `.antigravity-plugin/plugin.json`), and gets a tag `v<version>`.
 
