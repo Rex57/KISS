@@ -21,20 +21,21 @@ that works one ticket at a time, and an evaluator that uses the product.
 | `kiss-doctor` | Checks a device for a run: the CodeGraph rule in each agent's global instructions file, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix and installs nothing. |
 | `kiss-mini-agent` | A small side task in a background worker: a code change on its own `mini/<id>` branch, a read-only question, or a watch on a pull request, a CI run or a test command. kiss-harness hands off work outside its tickets to it. On Claude Code a mod adds `/mini` (`/mini <task>`, `/mini --now <task>` to skip the worker's checks, `/mini ask <question>`, `/mini watch pr <n>` / `run <id>` / `<test command>`, `/mini stop <id>`, `/mini status`, `/mini` alone opens the pane), a band with the counts, and the delivery buttons (Merge into the base, Push, Draft PR, Discard); only your press delivers. |
 | `kiss-housekeeping` | "Clean up the docs": a First run, on your ask, gives each fact one home, sorts pages by kind (living, log, record, history), builds a map, retires stale pages, fixes old names, moves files without breaking code or tests, installs a docs gate in your tests (`tools/check_docs.py`, your own copy) and proves the result with a routing test. After that, each harness close runs its Upkeep when your facts file names the gate. |
+| `kiss-system-design` | First version. From a new product idea to a plan of harness runs: a product brief, a decision map (decisions so far, open decisions typed research / prototype / grilling / task, not yet clear, out of scope), one decision at a time with you (research in the background), then a system design document and an ordered run plan in your docs. Its working files stay in the git-ignored `.kiss/design/<name>/`; continue a design by its name. An idea that fits one run goes to `kiss-harness`. |
 | `kiss-code-clean` | "Clean up the code": one ranked list of clean-up candidates for a code base (bugs, risky code with no test, slow paths, code to delete, merge or split, `shortcut:` debt, hot spots from the git history), each with its evidence and a strength, saved in `.kiss/clean/<date>.md`. A delete candidate shows that nothing uses it (CodeGraph and a word search). It changes no code: you pick, and each pick becomes a harness run or a `/mini` task. |
 | `kiss-tidy-up-memory` | "Tidy up memory": merge and cut an agent's file memory for one repo, run a loss check with a second agent, revise agentmemory (if you use it) and move old transcripts to the Trash. |
 
 How to call a skill:
 
-| Agent | `kiss-harness` | `kiss-doctor` | `kiss-tidy-up-memory` | `kiss-housekeeping` | `kiss-code-clean` | `kiss-mini-agent` |
-|---|---|---|---|---|---|---|
-| Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-tidy-up-memory` | `/kiss:kiss-housekeeping` | `/kiss:kiss-code-clean` | `/mini <task>` (the mod), or `/kiss:kiss-mini-agent <task>` |
-| Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-tidy-up-memory` | `$kiss:kiss-housekeeping` | `$kiss:kiss-code-clean` | `$kiss:kiss-mini-agent <task>` |
-| Gemini CLI | say "build … with the KISS harness" (the model activates it; `/skills list` shows it) | say "kiss doctor" | say "tidy up memory" | say "clean up the docs" | say "kiss code clean" | say "mini task: <task>" |
-| Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-tidy-up-memory` | `/kiss-housekeeping` | `/kiss-code-clean` | `/kiss-mini-agent <task>` |
+| Agent | `kiss-harness` | `kiss-doctor` | `kiss-tidy-up-memory` | `kiss-housekeeping` | `kiss-code-clean` | `kiss-system-design` | `kiss-mini-agent` |
+|---|---|---|---|---|---|---|---|
+| Claude Code | `/kiss:kiss-harness` | `/kiss:kiss-doctor` | `/kiss:kiss-tidy-up-memory` | `/kiss:kiss-housekeeping` | `/kiss:kiss-code-clean` | `/kiss:kiss-system-design [<name>]` | `/mini <task>` (the mod), or `/kiss:kiss-mini-agent <task>` |
+| Codex | `$kiss:kiss-harness`, or pick it in `/skills` | `$kiss:kiss-doctor` | `$kiss:kiss-tidy-up-memory` | `$kiss:kiss-housekeeping` | `$kiss:kiss-code-clean` | `$kiss:kiss-system-design [<name>]` | `$kiss:kiss-mini-agent <task>` |
+| Gemini CLI | say "build … with the KISS harness" (the model activates it; `/skills list` shows it) | say "kiss doctor" | say "tidy up memory" | say "clean up the docs" | say "kiss code clean" | say "kiss system design" | say "mini task: <task>" |
+| Antigravity | `/kiss-harness` | `/kiss-doctor` | `/kiss-tidy-up-memory` | `/kiss-housekeeping` | `/kiss-code-clean` | `/kiss-system-design [<name>]` | `/kiss-mini-agent <task>` |
 
 On every agent you can also just say it: "build <feature> with the KISS harness", "clean up the docs", or "tidy up memory".
-`kiss-doctor` and `kiss-code-clean` start only when you call them.
+`kiss-doctor`, `kiss-code-clean` and `kiss-system-design` start only when you call them.
 
 ## Tools you need
 
@@ -49,7 +50,7 @@ each one.
 | Node.js and npm | CodeGraph runs on Node | [nodejs.org](https://nodejs.org) |
 | [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `npm install -g @colbymchenry/codegraph`, then `codegraph init -y <repo>` in each project |
 | [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close; `ponytail-audit` and `ponytail-debt`: `kiss-code-clean`'s audit report and debt ledger (`kiss-doctor` does not check `ponytail-audit`) | see "Install ponytail" below |
-| [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate | see "Install Matt Pocock's skills" below |
+| [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate; `research`: `kiss-system-design`'s research decisions | see "Install Matt Pocock's skills" below |
 | `cgcallers` (in this repo) | CodeGraph's callers plus a word grep, before a delete or rename | `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (`~/.local/bin` on your `PATH`) |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
 | [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-tidy-up-memory` | its README |
@@ -64,8 +65,8 @@ each one.
 
 ### Install Matt Pocock's skills
 
-KISS uses seven of them: `grilling`, `domain-modeling`, `tdd`, `codebase-design`, `prototype`, `diagnosing-bugs` and
-`pr`. Install them once per agent, in one way only:
+KISS uses eight of them: `grilling`, `domain-modeling`, `tdd`, `codebase-design`, `prototype`, `diagnosing-bugs`,
+`pr` and `research`. Install them once per agent, in one way only:
 two installs give you every skill twice. KISS needs no `/setup-matt-pocock-skills`, because it does not use his
 issue-tracker skills.
 
@@ -99,7 +100,7 @@ issue-tracker skills.
   cp -R mattpocock-skills/skills/productivity/grilling mattpocock-skills/skills/engineering/domain-modeling \
         mattpocock-skills/skills/engineering/tdd mattpocock-skills/skills/engineering/codebase-design \
         mattpocock-skills/skills/engineering/prototype mattpocock-skills/skills/engineering/diagnosing-bugs \
-        mattpocock-skills/skills/engineering/pr ~/.gemini/config/skills/
+        mattpocock-skills/skills/engineering/pr mattpocock-skills/skills/engineering/research ~/.gemini/config/skills/
   ```
 
 ### User-only skills
@@ -107,7 +108,7 @@ issue-tracker skills.
 A user-only skill has `disable-model-invocation: true` in its frontmatter: only you can start it (its slash command
 or its name), and the model cannot call it. KISS cannot call such a skill for you, so `kiss-doctor` fails a skill
 KISS calls that is user-only: install it again from its source (above), or delete that line from your own copy of
-it. KISS's own skills that you start now and then (such as `kiss-doctor` and `kiss-code-clean`) are user-only on purpose.
+it. KISS's own skills that you start now and then (such as `kiss-doctor`, `kiss-code-clean` and `kiss-system-design`) are user-only on purpose.
 
 If a skill is missing, a run still works: KISS follows its own copy of the same rules
 ([`references/spec-and-tickets.md`](skills/kiss-harness/references/spec-and-tickets.md) and its prompts), and
@@ -237,6 +238,7 @@ skills/kiss-harness/         SKILL.md, scripts/, templates/, references/
 skills/kiss-doctor/          SKILL.md, scripts/doctor.py
 skills/kiss-tidy-up-memory/  SKILL.md
 skills/kiss-code-clean/      SKILL.md, references/architecture.md
+skills/kiss-system-design/   SKILL.md, references/map.md (the map and decision file formats)
 skills/kiss-housekeeping/    SKILL.md, standard.md, moves.md, routing.md, scripts/ (the docs gate, inventory, mover)
 skills/kiss-mini-agent/      SKILL.md, references/handoff.md (the brief, the report, the worker's rules)
 mods/kiss-mini-agent/        the Claude Code mod: /mini, the background host, the band and the pane (Claude Code only)

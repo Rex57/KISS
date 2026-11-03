@@ -47,7 +47,10 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 
 ## A run
 
-1. **Decisions and spec.** Make the run folder `R = <repo>/.kiss/runs/<YYYY-MM-DD>-<name>/`. Settle every open
+1. **Decisions and spec.** Make the run folder `R = <repo>/.kiss/runs/<YYYY-MM-DD>-<name>/`. A request that is a run
+   brief of a kiss-system-design run plan: read the brief and the design document first, and ask only what they
+   leave open; when the run finds a design decision wrong, tell the owner, who sends it back to the design's map
+   (`kiss-system-design <name>`, its loop back). Settle every open
    decision (see "Asking the owner") with the owner: `grilling` when installed, else the rounds in
    [references/spec-and-tickets.md](references/spec-and-tickets.md). Write each settled answer into `R/decisions.md`
    at once. With domain docs on, also use `domain-modeling`. When the run adds or changes a module's interface or a seam,
