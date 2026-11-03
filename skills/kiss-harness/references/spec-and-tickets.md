@@ -2,7 +2,7 @@
 
 The controller's rules for steps 1 and 2. The interview, spec and ticket rules are adapted from Matt Pocock's skills
 `grilling`, `to-spec` and `to-tickets` (https://github.com/mattpocock/skills; MIT License, Copyright (c) 2026 Matt
-Pocock), so that a run without his skills follows the same rules.
+Pocock), so that a run without his skills follows the same rules. Its full license: THIRD_PARTY_NOTICES.md at the KISS repo root.
 
 ## The questions (step 1)
 

@@ -1,7 +1,7 @@
 # Architecture candidates (step 5)
 
 Adapted from Matt Pocock's `improve-codebase-architecture` skill (https://github.com/mattpocock/skills; MIT License,
-Copyright (c) 2026 Matt Pocock). KISS keeps its rules and gives a ranked list instead of its HTML report.
+Copyright (c) 2026 Matt Pocock). KISS keeps its rules and gives a ranked list instead of its HTML report. Its full license: THIRD_PARTY_NOTICES.md at the KISS repo root.
 
 - **Scope first.** A deepening pays off by making future changes easier, so look first where the code changes:
   the hot spots from the git history (step 2). With no clear hot spot, widen the net. An area the owner names

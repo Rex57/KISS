@@ -78,4 +78,4 @@ skill when it is installed: a draft pull request takes it as its body.
 ## Credit
 
 The brief format, the three checks and the suggested-skills line copy rules from Matt Pocock's skills `handoff`,
-`claude-handoff` and `triage` (https://github.com/mattpocock/skills), MIT License, Copyright (c) 2026 Matt Pocock.
+`claude-handoff` and `triage` (https://github.com/mattpocock/skills), MIT License, Copyright (c) 2026 Matt Pocock. Its full license: THIRD_PARTY_NOTICES.md at the KISS repo root.

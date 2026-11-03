@@ -3,12 +3,12 @@
   "version": "1.0.1",
   "description": "Keep It Simple Stupid Workflow harness: one implementer, one reviewer that uses the running product, and tickets with acceptance tests. Also kiss-system-design (from a product idea to a run plan), kiss-code-clean (a ranked clean-up list of a code base), kiss-housekeeping (docs clean-up and a docs gate), kiss-mini-agent, kiss-doctor and kiss-dream (\"tidy up memory\").",
   "author": {
-    "name": "Rex57",
+    "name": "Nanami (Rex57)",
     "url": "https://github.com/Rex57"
   },
   "homepage": "https://github.com/Rex57/KISS",
   "repository": "https://github.com/Rex57/KISS",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": [
     "harness",
     "workflow",

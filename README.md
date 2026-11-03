@@ -232,6 +232,7 @@ manifest: they sit outside your project.
 .antigravity-plugin/         Antigravity manifest
 gemini-extension.json        Gemini CLI manifest
 rules/codegraph.md           the CodeGraph rule for the global instructions file
+LICENSE, NOTICE              Apache-2.0 and the author credit; THIRD_PARTY_NOTICES.md: Matt Pocock's MIT license
 rules/feedback.md            the feedback mode: the block each skill ends with when KISS_FEEDBACK=1
 .github/ISSUE_TEMPLATE/      the issue template for a KISS feedback block
 skills/kiss-harness/         SKILL.md, scripts/, templates/, references/
@@ -252,4 +253,7 @@ A new version changes `version` in the four manifests that carry one (`.claude-p
 
 ## License
 
-MIT
+Apache License 2.0 ([`LICENSE`](LICENSE)), from the release after v1.0.1; releases up to v1.0.1 stay under the MIT
+License. The author is Nanami (Rex57): every copy and derivative must keep [`NOTICE`](NOTICE) with that credit.
+When KISS helped you build something, a mention is welcome (not required). The rules adapted from Matt Pocock's
+skills keep his MIT license: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

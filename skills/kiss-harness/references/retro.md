@@ -1,7 +1,7 @@
 # The look back at the close (step 10)
 
 Adapted from Matt Pocock's `retro` skill (https://github.com/mattpocock/skills; MIT License, Copyright (c) 2026 Matt
-Pocock). It improves the project's environment for the next run, never the product code of this run.
+Pocock). It improves the project's environment for the next run, never the product code of this run. Its full license: THIRD_PARTY_NOTICES.md at the KISS repo root.
 
 Read the run's own record: `R/progress.md`, `R/decisions.md`, the findings and fix rounds, the side tasks, and the
 messages you sent. Look for these candidates:

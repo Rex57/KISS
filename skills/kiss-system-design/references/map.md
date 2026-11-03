@@ -1,7 +1,7 @@
 # The map and its decisions
 
 Adapted from Matt Pocock's `wayfinder` skill (https://github.com/mattpocock/skills; MIT License, Copyright (c) 2026
-Matt Pocock). KISS keeps its rules and keeps the map in files instead of an issue tracker.
+Matt Pocock). KISS keeps its rules and keeps the map in files instead of an issue tracker. Its full license: THIRD_PARTY_NOTICES.md at the KISS repo root.
 
 ## Rules
 
