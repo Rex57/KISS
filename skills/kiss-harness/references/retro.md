@@ -16,7 +16,8 @@ messages you sent. Look for these candidates:
 - **Navigation, information, tool cost:** a fact an agent searched long for gets a pointer in the facts file; a
   fact it could not reach gets a way to reach it; an expensive call gets a cheaper one.
 - **A steering line that changes nothing:** propose to delete it.
-- **A lesson about KISS** itself goes into the KISS feedback block (step 11), never into the project.
+- **A lesson about KISS** itself goes to the KISS owner as file, line and new text (in the feedback block when the
+  feedback mode is on), never into the project.
 
 List the candidates for the owner, most severe first, each with its evidence (the progress line or finding). This
 joins kiss-housekeeping's fold-back and replaces nothing there. On the owner's yes, write a facts-file rule
