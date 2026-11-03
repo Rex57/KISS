@@ -15,7 +15,8 @@ fingerprints only, never a path of this device). Run every command from the KISS
 1. **Run the check:** `python3 -I "$CU/scripts/check_update.py"`. One line per source: `same`, or one line per
    finding: a new release with its compare link, a copied file `changed` (with the KISS files that copy it and the
    compare link) or `gone`, a called skill `no longer callable` (now user-only) or gone, a CodeGraph `flag gone`, a
-   new Claude Code build with the result of `claude plugin validate` and `claude plugin test`. Exit 1 on any change.
+   new Claude Code build with the result of `claude plugin validate` and `claude plugin test`. Exit 1 on any change;
+   exit 2 when `gh`, `npm` or `claude` fails (nothing was compared: fix the login or the network and run it again).
    Done when every source has its line. All `same`: stop here and say so.
 2. **Read each diff.** Open each compare link (`gh api repos/<repo>/compare/<old>...<new>`) and read what changed
    in the files the record names. For each finding, write one line: what changed, which KISS file it touches, and
@@ -27,7 +28,8 @@ fingerprints only, never a path of this device). Run every command from the KISS
    the owner.
 4. **Run the tests:** every `--selftest` under `skills/` and this skill's own, `claude plugin validate .`,
    `claude plugin test .`, and the leak scan of `.kiss/project.md`. Done when all pass.
-5. **Update the record** for the sources you ported, only those:
+5. **Update the record** for the sources you ported, only those. `--update` refuses when a recorded file is gone at
+   the new tag: for a moved or removed file, first change its `path` (or delete its entry) in `$CU/upstream.json`. Then
    `python3 -I "$CU/scripts/check_update.py" --update <source name>...`, then run step 1 again: those sources say
    `same`. Commit the port and the record by explicit path. Done when step 1 shows `same` for them.
 6. **Release on the owner's go:** the version in the four manifests, a tag `v<version>`, a push and a GitHub

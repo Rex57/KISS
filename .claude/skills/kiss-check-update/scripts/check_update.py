@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """kiss-check-update: compare the record of every upstream source KISS uses (upstream.json) with what is out now.
 
-  python3 -I check_update.py                  one line per finding, or "same" per source; exit 1 on any change
+  python3 -I check_update.py                  one line per finding, or "same" per source; exit 1 on any change,
+                                              exit 2 when gh, npm or claude fails (nothing compared)
   python3 -I check_update.py --update NAME... after the port: write the current upstream into the record, for the
                                               named sources only
   python3 -I check_update.py --record FILE ... the same, with another record (a test)
@@ -13,7 +14,7 @@ file gives its compare link. CodeGraph: the latest npm version, and `codegraph <
 uses. The mods API: the local Claude Code build; a new build runs `claude plugin validate` and `claude plugin test`
 on the KISS repo. Needs the network (gh, npm). The record names upstream repos and paths, never a local path.
 """
-import json, os, re, subprocess, sys
+import contextlib, io, json, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RECORD = os.path.join(os.path.dirname(HERE), "upstream.json")
@@ -28,11 +29,17 @@ def sh(*cmd):
     return p.returncode, p.stdout.strip(), p.stderr.strip()
 
 
+def broken(cmd, err):
+    """A gh or npm call failed: exit 2, so a failure never reads as a change (exit 1)."""
+    sys.stderr.write("%s failed: %s\n" % (" ".join(cmd[:3]), err or "no output"))
+    sys.exit(2)
+
+
 def must(*cmd):
     """The output of a command that must work (a gh or npm call): exit with its error when it fails or says nothing."""
     code, out, err = sh(*cmd)
     if code or not out:
-        sys.exit("%s failed: %s" % (" ".join(cmd[:3]), err or "no output"))
+        broken(cmd, err)
     return out
 
 
@@ -43,7 +50,7 @@ def file_call(*cmd):
         return out
     if "404" in err or "Not Found" in err:
         return None
-    sys.exit("%s failed: %s" % (" ".join(cmd[:3]), err or "no output"))
+    broken(cmd, err)
 
 
 class Live:
@@ -213,8 +220,16 @@ def selftest():
         raise AssertionError("a None fingerprint was written")
     except SystemExit as e:
         assert "a/wayfinder/SKILL.md" in str(e) and kept == record, e
+    # a failing command exits 2, never 1 (a change)
+    for call in (lambda: must("false"), lambda: must("true"), lambda: file_call("sh", "-c", "echo boom >&2; exit 1")):
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                call()
+            raise AssertionError("a failing command did not exit")
+        except SystemExit as e:
+            assert e.code == 2, e.code
+    assert file_call("sh", "-c", "echo 'HTTP 404: Not Found' >&2; exit 1") is None      # a 404 is a gone file, not a failure
     # the exit code: 1 on any change
-    import contextlib, io
     del new.blobs[("o/skills", "a/wayfinder/SKILL.md", "v1.1.0")]
     with contextlib.redirect_stdout(io.StringIO()):
         assert run(record, new) == 1 and run(record, same) == 0
