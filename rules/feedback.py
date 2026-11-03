@@ -11,24 +11,26 @@ project. Each KISS skill runs this as its last step (a Claude Code inline comman
 import json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
 
 
-def step(n, skill, env, root=os.path.dirname(HERE)):
+def step(n, skill, env):
     if env.get("KISS_FEEDBACK") != "1":
         return ""
-    rule = open(os.path.join(root, "rules", "feedback.md"), encoding="utf-8").read()
-    version = json.load(open(os.path.join(root, "gemini-extension.json")))["version"]
+    rule = open(os.path.join(ROOT, "rules", "feedback.md"), encoding="utf-8").read()
+    version = json.load(open(os.path.join(ROOT, "gemini-extension.json")))["version"]
     body = rule.split("\n\n", 2)[2].strip()                   # the rule without its heading and its intro
     body = body.replace("<the skill's name>", skill).replace("<version>", version)
     return ("%s. **KISS feedback** (the feedback mode is on), in every run, also one that stops early or fails. "
-            "This skill is `%s`, KISS %s.\n\n%s\n" % (n, skill, version, body))
+            "This skill is `%s`, KISS %s. This rule's home: rules/feedback.md.\n\n%s\n" % (n, skill, version, body))
 
 
 def selftest():
     on = step(7, "kiss-doctor", {"KISS_FEEDBACK": "1"})
-    version = json.load(open(os.path.join(os.path.dirname(HERE), "gemini-extension.json")))["version"]
+    version = json.load(open(os.path.join(ROOT, ".claude-plugin", "plugin.json")))["version"]   # another manifest
     assert on.startswith("7. **KISS feedback**"), on[:80]
     assert "Skill: kiss-doctor, KISS %s" % version in on and "## KISS feedback" in on and "Proposed changes:" in on, on
+    assert "This rule's home: rules/feedback.md" in on and "\n- **End your final message" in on and "\n1. " not in on, on
     assert "feedback mode is off by default" not in on and "<version>" not in on.replace("KISS <version>`", "") and "Keep the project out" in on, on
     for env in ({}, {"KISS_FEEDBACK": ""}, {"KISS_FEEDBACK": "0"}, {"KISS_FEEDBACK": "true"}):
         assert step(7, "kiss-doctor", env) == "", env
