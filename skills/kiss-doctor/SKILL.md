@@ -16,6 +16,8 @@ You check the setup and report it; the owner installs. `KD` is this skill's fold
    Done when it prints its summary line.
 2. **Compare with your own skill list.** The script reads the disk; your skill list is what this session loaded.
    A skill on disk but not in your list needs a reload: `/reload-plugins` in Claude Code, a new session elsewhere.
+   A user-only skill (`disable-model-invocation: true` in its SKILL.md, such as `kiss-doctor` and `kiss-code-clean`)
+   is never in your list: do not report it missing and do not ask for a reload.
    The script cannot see Antigravity's plugin folders, so there your list decides. A KISS skill in your list that
    the script calls "not installed" (a session loaded from a plugin folder, or a KISS repo newer than the install)
    is INFO with that reason, never FAIL; in Claude Code the script prints it as INFO itself.
