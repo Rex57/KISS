@@ -20,8 +20,10 @@ type Opts = {
   hang?: string[]
   tmp?: string
   cwd?: string
+  /** What `claude plugin list --json` answers: the installed plugins. */
+  plugins?: { id: string; enabled: boolean; installPath: string; readFromFolder?: string }[]
 }
-function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo' }: Opts = {}) {
+function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [] }: Opts = {}) {
   const w = {
     session: 's1',
     branch,
@@ -91,6 +93,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     const bad = fail[`${e.argv[3]} ${e.argv[4]}`] ?? fail[e.argv[3] ?? ''] ?? fail[e.argv[0] ?? '']
     if (bad && e.argv[3] === 'merge') w.merging = true
     if (bad) return { value: { exitCode: 1, stdout: bad.stdout ?? '', stderr: bad.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv.join(' ') === 'claude plugin list --json') return { value: { exitCode: 0, stdout: JSON.stringify(plugins), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const out = e.argv.includes('--abbrev-ref') ? `${w.branch}\n` : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -183,6 +186,42 @@ test('when the send to the host is refused, the mod starts a new host and the ta
   await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
   expect(w.spawned.length).toBe(1)
   expect(w.spawned[0]?.prompt).toContain('why?')
+})
+
+// Where Claude Code put KISS for each kind of sender: the host must load it the same way, or it reads another store.
+const CACHED = '/u/.claude/plugins/cache/kiss/kiss/2.0.0'
+// The plugin under test is this repo: its root is two folders up from this file.
+const ROOT = decodeURIComponent(new URL('../..', (import.meta as { url: string }).url).pathname).replace(/\/$/, '')
+async function hostStart($: any, w: ReturnType<typeof world>) {
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
+  return w.runs.find(argv => argv.includes('--bg')) ?? []
+}
+
+test('a sender running KISS installed from a git marketplace (in the plugin cache) starts the host with no --plugin-dir', async ($, on) => {
+  const w = world(on, { delivered: false, plugins: [{ id: 'kiss@kiss', enabled: true, installPath: ROOT }] })
+  const start = await hostStart($, w)
+  expect(start.slice(0, 4)).toEqual(['claude', '--bg', '--name', 'kiss-mini'])
+  expect(start).not.toContain('--plugin-dir')
+})
+
+test('a sender running KISS installed from a folder marketplace starts the host with no --plugin-dir', async ($, on) => {
+  const w = world(on, { delivered: false, plugins: [{ id: 'kiss@kiss', enabled: true, installPath: CACHED, readFromFolder: ROOT }] })
+  const start = await hostStart($, w)
+  expect(start.slice(0, 4)).toEqual(['claude', '--bg', '--name', 'kiss-mini'])
+  expect(start).not.toContain('--plugin-dir')
+})
+
+test('a --plugin-dir sender starts the host with --plugin-dir <its folder>, also beside an installed KISS', async ($, on) => {
+  const w = world(on, {
+    delivered: false,
+    plugins: [
+      { id: 'kiss@kiss', enabled: true, installPath: CACHED },
+      { id: 'kiss@dev', enabled: false, installPath: '/u/.claude/plugins/cache/dev/kiss/2.0.0', readFromFolder: ROOT },
+    ],
+  })
+  const start = await hostStart($, w)
+  expect(start.slice(start.indexOf('--plugin-dir'), start.indexOf('--plugin-dir') + 2)).toEqual(['--plugin-dir', ROOT])
 })
 
 test('with no open task the band draws nothing', async ($, on) => {

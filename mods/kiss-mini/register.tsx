@@ -316,6 +316,20 @@ async function run($: $, id: string) {
 
 /** Sender: wakes the host; when no host takes the message, starts one (it takes every waiting task as it starts). */
 /** Sender: one message to the host (a task, an answer, a stop); a new host when none takes it. */
+/** Whether this session runs KISS installed (from a git or a folder marketplace), not from --plugin-dir: the host must load
+ * it the same way, as each way has its own store. A folder marketplace's root is the folder itself, so the root alone
+ * cannot tell; the installed list can. */
+// shortcut: a --plugin-dir of the very folder an enabled folder marketplace installs reads as installed; rare, upgrade if met.
+async function installed($: $) {
+  try {
+    const r = await $.process.run(['claude', 'plugin', 'list', '--json'])
+    const list = JSON.parse(r.stdout) as { enabled?: boolean; installPath?: string; readFromFolder?: string }[]
+    return r.exitCode === 0 && list.some(p => p.enabled && (p.installPath === $.plugin.root || p.readFromFolder === $.plugin.root))
+  } catch {
+    return false
+  }
+}
+
 async function wake($: $, text: string) {
   const host = (await $.store.get(HOST)) as { sessionId: string; beat: number } | undefined
   // A host whose beat (every minute) is 3 minutes old is gone: no send to it.
@@ -324,7 +338,8 @@ async function wake($: $, text: string) {
   // No prompt: the host's own model never runs. Haiku in case the person attaches and types. The flag rides in
   // --settings: a session started from a background session does not get the caller's environment.
   const settings = JSON.stringify({ env: { KISS_MINI_HOST: '1' } })
-  const r = await $.process.run(['claude', '--bg', '--name', HOST_NAME, '--model', 'haiku', '--plugin-dir', $.plugin.root, '--settings', settings])
+  const dir = (await installed($)) ? [] : ['--plugin-dir', $.plugin.root]
+  const r = await $.process.run(['claude', '--bg', '--name', HOST_NAME, '--model', 'haiku', ...dir, '--settings', settings])
   return r.exitCode === 0 ? 'started a new host' : `${NO_HOST}: ${`${r.stderr}\n${r.stdout}`.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 300)}`
 }
 
