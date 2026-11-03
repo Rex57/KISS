@@ -220,7 +220,7 @@ Turn it on with the environment variable `KISS_FEEDBACK=1`, in one of these plac
 
 `kiss-doctor` reports the mode and where it is set in every run. `kiss-doctor feedback on` and
 `kiss-doctor feedback off` set it in Claude Code's user settings (`"1"` or `"0"`, so off wins over a shell
-profile), with a backup beside the file; for the other agents it prints the export line for your shell profile.
+profile), with a timestamped backup beside the file at each switch; for the other agents it prints the export line for your shell profile.
 
 Unset it, or set any other value, to turn it off. Each skill's last line runs `rules/feedback.py` when the skill
 loads (a Claude Code inline command): with the mode off it prints nothing, so the skill has no feedback step and the

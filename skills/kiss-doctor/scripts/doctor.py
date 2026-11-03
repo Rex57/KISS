@@ -12,7 +12,7 @@ Exit 1 when a line is FAIL.
 The required skills come from the table in kiss-harness/SKILL.md, the rule's markers from the bold lead-ins of
 rules/codegraph.md, so neither list is kept here.
 """
-import glob, json, os, re, shutil, subprocess, sys
+import glob, json, os, re, shutil, subprocess, sys, time
 
 KISS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 HOME = os.path.expanduser("~")
@@ -133,7 +133,8 @@ def check_rule(agent, text, files, marks):
 
 
 def check_skills(agent, roots, need, note="", here=()):
-    """here: the KISS skills of the folder this script runs from, which the running session loaded."""
+    """here: {name: SKILL.md} of the KISS skills in the folder this script runs from."""
+    mark = lambda path: " (user-only: never in the model's list)" if frontmatter(path).get("disable-model-invocation") == "true" else ""
     seen = {}
     for label, root in roots:
         for name, path in skills_in(root).items():
@@ -142,8 +143,8 @@ def check_skills(agent, roots, need, note="", here=()):
     for name, fix in need.items():
         copies = seen.get(name, {})
         if not copies and name in here:
-            out.append(("INFO", agent, f"skill {name}: not installed, but found in the KISS folder this script runs from ({KISS}):"
-                        " a --plugin-dir session, or a KISS repo newer than the install", ""))
+            out.append(("INFO", agent, f"skill {name}{mark(here[name])}: not installed, but found in the KISS folder this script"
+                        f" runs from ({KISS}): a --plugin-dir session, or a KISS repo newer than the install", ""))
             continue
         if not copies:
             out.append(("FAIL", agent, f"skill {name}: not installed{note}", fix))
@@ -154,7 +155,7 @@ def check_skills(agent, roots, need, note="", here=()):
         elif frontmatter(path).get("disable-model-invocation") == "true" and fix != "Install KISS":  # KISS's own: user-only on purpose
             out.append(("FAIL", agent, f"skill {name} ({label}): user-only (disable-model-invocation: true), so KISS cannot call it", "User-only skills"))
         else:
-            out.append(("OK", agent, f"skill {name} ({label})", ""))
+            out.append(("OK", agent, f"skill {name} ({label}){mark(path)}", ""))
     return out
 
 
@@ -223,9 +224,12 @@ def set_feedback(settings, on):
             assert isinstance(data, dict)
         except (OSError, ValueError, AssertionError) as e:
             sys.exit("%s: cannot read it as a JSON object (%s); left untouched" % (settings, type(e).__name__))
-        backup = settings + ".kiss-backup"
-        if not os.path.exists(backup):          # keep the state from before the first switch
-            shutil.copy2(settings, backup)
+        stamp = settings + ".kiss-backup-" + time.strftime("%Y%m%d-%H%M%S")
+        backup, n = stamp, 1
+        while os.path.exists(backup):           # one backup per switch, also two switches in one second
+            n += 1
+            backup = "%s-%d" % (stamp, n)
+        shutil.copy2(settings, backup)
     else:
         backup = None
         os.makedirs(os.path.dirname(settings), exist_ok=True)
@@ -276,12 +280,18 @@ def selftest():
         assert one == {"kiss-doctor": "FAIL", "kiss-harness": "FAIL", "tdd": "OK", "ponytail": "FAIL"}, one
         assert [r[3] for r in check_skills("claude", [("a", os.path.join(t, "a"))], need) if "user-only" in r[2]] == ["User-only skills"]
         # a KISS skill the session loaded from the script's own folder but not installed: INFO with the reason
-        here = {r[2].split()[1].rstrip(":"): r for r in check_skills("claude", [("a", os.path.join(t, "a"))], need, here={"kiss-harness"})}
+        here = {r[2].split()[1].rstrip(":"): r for r in check_skills("claude", [("a", os.path.join(t, "a"))], need, here={"kiss-harness": put("h/kiss-harness/SKILL.md", "---\nname: kiss-harness\n---\n")})}
         assert here["kiss-harness"][0] == "INFO" and "--plugin-dir" in here["kiss-harness"][2], here
         assert here["kiss-doctor"][0] == "FAIL", here
         # KISS's own skill is user-only on purpose: no FAIL
         put("c/skills/kiss-doctor/SKILL.md", "---\nname: kiss-doctor\ndisable-model-invocation: true\n---\n")
-        assert check_skills("claude", [("c", os.path.join(t, "c"))], {"kiss-doctor": "Install KISS"})[0][0] == "OK"
+        row = check_skills("claude", [("c", os.path.join(t, "c"))], {"kiss-doctor": "Install KISS"})[0]
+        assert row[0] == "OK" and row[2].endswith("(user-only: never in the model's list)"), row
+        # a user-only KISS skill found only in the script's own folder: INFO, marked user-only
+        row = check_skills("claude", [], {"kiss-system-design": "Install KISS"},
+                           here={"kiss-system-design": put("h/sd/SKILL.md", "---\nname: kiss-system-design\ndisable-model-invocation: true\n---\n")})[0]
+        assert row[0] == "INFO" and "user-only: never in the model's list" in row[2], row
+        assert "user-only" not in here["kiss-harness"][2], here
         two =check_skills("claude", [("a", os.path.join(t, "a")), ("b", os.path.join(t, "b"))], {"tdd": "x"})
         assert two[0][0] == "WARN" and "2 times" in two[0][2], two
         assert check_skills("claude", [("a", os.path.join(t, "a")), ("a", os.path.join(t, "a"))], {"tdd": "x"})[0][0] == "OK"
@@ -298,13 +308,16 @@ def selftest():
         original = {"model": "opus", "permissions": {"allow": ["Read"]}, "hooks": {"Stop": []}, "note": "café"}
         put("fhome/cfg/settings.json", json.dumps(original))
         lines = set_feedback(st, False)
-        assert os.path.isfile(st + ".kiss-backup") and json.load(open(st + ".kiss-backup")) == original, lines
+        backups = lambda: sorted(glob.glob(st + ".kiss-backup-*"))
+        assert len(backups()) == 1 and json.load(open(backups()[0])) == original and backups()[0] in lines[0], lines
         got = json.load(open(st))
         assert got == dict(original, env={"KISS_FEEDBACK": "0"}), got
         assert feedback_mode(st, home, env={"KISS_FEEDBACK": "0"}) == (False, "Claude Code's settings env (~/cfg/settings.json)")   # off wins over the profile
         assert "café" in read(st)                                                     # ensure_ascii=False
+        before = json.load(open(st))
         set_feedback(st, True)
-        assert json.load(open(st + ".kiss-backup")) == original                     # the backup keeps the first state
+        assert len(backups()) == 2 and json.load(open(backups()[1])) == before   # one backup per switch: the file before it
+        assert json.load(open(backups()[0])) == original
         put("fhome/cfg/settings.json", json.dumps(dict(original, env={"PATH_X": "y"})))
         set_feedback(st, True)
         assert json.load(open(st)) == dict(original, env={"PATH_X": "y", "KISS_FEEDBACK": "1"})
@@ -327,7 +340,7 @@ def selftest():
         assert read(st) == "{ not json"
         fresh = os.path.join(home, "new", "settings.json")
         set_feedback(fresh, True)
-        assert json.load(open(fresh)) == {"env": {"KISS_FEEDBACK": "1"}} and not os.path.exists(fresh + ".kiss-backup")
+        assert json.load(open(fresh)) == {"env": {"KISS_FEEDBACK": "1"}} and not glob.glob(fresh + ".kiss-backup*")
         # the session's own value decides; where names the place that sets it
         assert feedback_mode(fresh, home, env={"KISS_FEEDBACK": "1"}) == (True, "Claude Code's settings env (~/new/settings.json)")
         assert feedback_mode(os.path.join(t, "none.json"), home, env={"KISS_FEEDBACK": "1"}) == (True, "the shell profile ~/.zshrc")

@@ -21,8 +21,8 @@ backup, that a new session is needed, the export line for the other agents), and
    Done when it prints its summary line.
 2. **Compare with your own skill list.** The script reads the disk; your skill list is what this session loaded.
    A skill on disk but not in your list needs a reload: `/reload-plugins` in Claude Code, a new session elsewhere.
-   A user-only skill (`disable-model-invocation: true` in its SKILL.md, such as `kiss-doctor` and `kiss-code-clean`)
-   is never in your list: do not report it missing and do not ask for a reload.
+   A line marked `user-only: never in the model's list` is a skill only the owner starts: it is never in your
+   list, so report no reload for it.
    The script cannot see Antigravity's plugin folders, so there your list decides. A KISS skill in your list that
    the script calls "not installed" (a session loaded from a plugin folder, or a KISS repo newer than the install)
    is INFO with that reason, never FAIL; in Claude Code the script prints it as INFO itself.
