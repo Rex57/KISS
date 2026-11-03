@@ -28,7 +28,8 @@ this skill's folder; `M` the memory folder), and never through `cp`, `mv`, Write
 
 - `guard.py start "$M"` makes this run's private scratch folder (`~/.cache/kiss-dream/<project>@<time>/`, mode
   700) with `first/` and `expected/` copies of `M` and an empty `drafts/`, and prints its path; `guard.py where
-  "$M"` prints it again. Name it in the report; never keep it in another file.
+  "$M"` prints it again. Name it in the report; never keep it in another file. Under a held lock it prints
+  `LOCK-HELD` and copies nothing.
 - `guard.py write "$M" <file>...` copies each `drafts/<file>` into `M`; `guard.py move "$M" <Trash folder>
   <file>...` moves old notes to the Trash. Before it changes anything, the guard checks the lock (under one hour
   old, its process alive) and that `M` still equals `expected/`, then writes, updates `expected/` and compares each
@@ -36,8 +37,9 @@ this skill's folder; `M` the memory folder), and never through `cp`, `mv`, Write
 
 Its answer:
 
-- `LOCK-HELD` (exit 3): stop. Write no note, tell the owner that another consolidation is running and to run this
-  again when it ends, after the table of the report (step 6), and end the run.
+- `LOCK-HELD` (exit 3, from `start`, `write` or `move`): stop. Write no note, tell the owner that another consolidation is running and to run this
+  again when it ends, after the table of the report (step 6), and end the run (`guard.py finish` only when `start`
+  made a folder).
 - `CHANGED: <files>` (exit 4): a note changed that this run did not write. Run `guard.py again "$M"` (a new copy
   beside the first, which stays; it becomes `expected/`), read each changed note, fold its new facts into your
   drafts, and run the write again. Step 3 compares with `first/` plus each changed note.

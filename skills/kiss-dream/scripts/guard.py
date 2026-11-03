@@ -2,10 +2,11 @@
 """The guarded write of kiss-dream (SKILL.md, "Another writer"): every change to a memory folder goes through here.
 
   python3 -I guard.py start MEMDIR            make the private scratch folder (first/, expected/, drafts/); print it
+                                              (LOCK-HELD, exit 3, and no copy when the lock is held)
   python3 -I guard.py where MEMDIR            print this run's scratch folder (the newest one for MEMDIR)
   python3 -I guard.py write MEMDIR FILE...    copy drafts/FILE into MEMDIR
   python3 -I guard.py move MEMDIR TRASH FILE...  move MEMDIR/FILE into the TRASH folder
-  python3 -I guard.py again MEMDIR            after CHANGED: copy MEMDIR to second/ (third/...), make it the expected copy
+  python3 -I guard.py again MEMDIR            after CHANGED: copy MEMDIR to copy-2/ (copy-3/...), make it the expected copy
   python3 -I guard.py finish MEMDIR TRASH     at the end: move this run's scratch folder into the TRASH folder
   python3 -I guard.py --selftest
 
@@ -17,7 +18,6 @@ It never writes, touches or removes the lock. The scratch folder is ~/.cache/kis
 import filecmp, os, shutil, sys, time
 
 LOCK = ".consolidate-lock"
-STEPS = ["second", "third", "fourth", "fifth"]
 
 
 def root():
@@ -40,8 +40,14 @@ def copy(src, dst):
 
 
 def start(memdir):
+    if lock_held(memdir):
+        return None
     os.makedirs(root(), mode=0o700, exist_ok=True)
-    c = os.path.join(root(), "%s@%s" % (project(memdir), time.strftime("%Y%m%d-%H%M%S")))
+    base = os.path.join(root(), "%s@%s" % (project(memdir), time.strftime("%Y%m%d-%H%M%S")))
+    c, n = base, 1
+    while os.path.exists(c):
+        n += 1
+        c = "%s-%d" % (base, n)
     os.mkdir(c, 0o700)
     copy(memdir, os.path.join(c, "first"))
     copy(memdir, os.path.join(c, "expected"))
@@ -53,11 +59,15 @@ def lock_held(memdir, now=None):
     path = os.path.join(memdir, LOCK)
     try:
         age = (now or time.time()) - os.path.getmtime(path)
-        pid = int(open(path).read().split()[0])     # Claude Code may add a second line (a time)
-    except (OSError, ValueError):
+        text = open(path).read().split()
+    except OSError:
         return False
     if age >= 3600:
         return False
+    try:
+        pid = int(text[0])                          # Claude Code may add a second line (a time)
+    except (IndexError, ValueError):
+        return True                                 # a fresh lock we cannot read: treat it as held
     try:
         os.kill(pid, 0)
     except PermissionError:
@@ -77,6 +87,8 @@ def changed(memdir, expected):
 
 def guarded(memdir, c, change):
     """Check, then change. Returns (exit code, lines)."""
+    # shortcut: the lock is checked, not held; a writer that starts during this write is caught only at the next
+    # write. Upgrade to taking a lock of our own if Claude Code ever documents one for other writers.
     if lock_held(memdir):
         return 3, ["LOCK-HELD: another consolidation holds %s" % os.path.join(memdir, LOCK)]
     diff = changed(memdir, os.path.join(c, "expected"))
@@ -113,7 +125,10 @@ def move(memdir, c, trash, files):
 
 
 def again(memdir, c):
-    name = next(s for s in STEPS if not os.path.exists(os.path.join(c, s)))
+    n = 2
+    while os.path.exists(os.path.join(c, "copy-%d" % n)):
+        n += 1
+    name = "copy-%d" % n
     diff = changed(memdir, os.path.join(c, "expected"))
     copy(memdir, os.path.join(c, name))
     shutil.rmtree(os.path.join(c, "expected"))
@@ -137,6 +152,9 @@ def selftest():
         for f, text in [("MEMORY.md", "- [a](a.md)\n"), ("a.md", "old a\n"), ("b.md", "old b\n")]:
             open(os.path.join(mem, f), "w").write(text)
         c = start(mem)
+        c2 = start(mem)                                    # a second start in the same second gets its own folder
+        assert c2 != c and os.path.isdir(c2)
+        shutil.rmtree(c2)
         assert where(mem) == c and oct(os.stat(c).st_mode & 0o777) == "0o700", c
         assert sorted(os.listdir(c)) == ["drafts", "expected", "first"]
         open(os.path.join(c, "drafts", "a.md"), "w").write("new a\n")
@@ -146,6 +164,7 @@ def selftest():
             open(os.path.join(mem, LOCK), "w").write(str(sleeper.pid))
             code, out = write(mem, c, ["a.md"])
             assert code == 3 and out[0].startswith("LOCK-HELD"), out
+            assert start(mem) is None                      # start refuses under a held lock, before any copy
             assert open(os.path.join(mem, "a.md")).read() == "old a\n"
             assert move(mem, c, os.path.join(t, "trash"), ["b.md"])[0] == 3 and os.path.isfile(os.path.join(mem, "b.md"))
             # an old lock (over one hour) does not hold
@@ -163,6 +182,13 @@ def selftest():
         finally:
             sleeper.kill()
             sleeper.wait()
+        # an empty fresh lock reads as held; an empty old one does not
+        open(os.path.join(mem, LOCK), "w").close()
+        assert lock_held(mem)
+        old = time.time() - 3700
+        os.utime(os.path.join(mem, LOCK), (old, old))
+        assert not lock_held(mem)
+        open(os.path.join(mem, LOCK), "w").write("999999999")
         # a dead PID does not hold, also when the lock is new
         os.utime(os.path.join(mem, LOCK), None)
         assert not lock_held(mem)
@@ -172,7 +198,10 @@ def selftest():
         assert code == 4 and out == ["CHANGED: b.md"], out
         assert open(os.path.join(mem, "a.md")).read() == "old a\n"
         code, out = again(mem, c)
-        assert code == 0 and "second" in out[0] and out[0].endswith("b.md"), out
+        assert code == 0 and "copy-2" in out[0] and out[0].endswith("b.md"), out
+        for _ in range(5):                                 # more copies than names once existed: no StopIteration
+            again(mem, c)
+        assert os.path.isdir(os.path.join(c, "copy-7"))
         assert open(os.path.join(c, "first", "b.md")).read() == "old b\n"          # the first copy stays
         # the write goes through, expected follows, the lock is untouched
         lock_before = os.stat(os.path.join(mem, LOCK)).st_mtime
@@ -201,7 +230,11 @@ def main(argv):
     if not os.path.isdir(memdir):
         sys.exit("not a folder: %s" % memdir)
     if cmd == "start":
-        print(start(memdir))
+        c = start(memdir)
+        if c is None:
+            print("LOCK-HELD: another consolidation holds %s; nothing copied" % os.path.join(memdir, LOCK))
+            sys.exit(3)
+        print(c)
         return
     if cmd == "where":
         print(where(memdir))
