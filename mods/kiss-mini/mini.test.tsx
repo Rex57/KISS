@@ -212,6 +212,21 @@ test('a sender running KISS installed from a folder marketplace starts the host 
   expect(start).not.toContain('--plugin-dir')
 })
 
+test('a sender still on the KISS version it started with, after an update installed the next, starts the host with no --plugin-dir', async ($, on) => {
+  // The session's root names 2.0.0 (here: this repo's folder name); the list names the newly installed version beside it.
+  const next = ROOT.replace(/[^/]+$/, '2.0.1')
+  const w = world(on, { delivered: false, plugins: [{ id: 'kiss@kiss', enabled: true, installPath: next }] })
+  const start = await hostStart($, w)
+  expect(start.slice(0, 4)).toEqual(['claude', '--bg', '--name', 'kiss-mini'])
+  expect(start).not.toContain('--plugin-dir')
+})
+
+test('when claude plugin list fails, the host starts with --plugin-dir <its folder>', async ($, on) => {
+  const w = world(on, { delivered: false, fail: { '--json': { stderr: 'x' } }, plugins: [{ id: 'kiss@kiss', enabled: true, installPath: ROOT }] })
+  const start = await hostStart($, w)
+  expect(start.slice(start.indexOf('--plugin-dir'), start.indexOf('--plugin-dir') + 2)).toEqual(['--plugin-dir', ROOT])
+})
+
 test('a --plugin-dir sender starts the host with --plugin-dir <its folder>, also beside an installed KISS', async ($, on) => {
   const w = world(on, {
     delivered: false,

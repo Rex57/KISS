@@ -314,22 +314,23 @@ async function run($: $, id: string) {
   else if (r.agentId) await save($, { ...now, agentId: r.agentId })
 }
 
-/** Sender: wakes the host; when no host takes the message, starts one (it takes every waiting task as it starts). */
-/** Sender: one message to the host (a task, an answer, a stop); a new host when none takes it. */
 /** Whether this session runs KISS installed (from a git or a folder marketplace), not from --plugin-dir: the host must load
  * it the same way, as each way has its own store. A folder marketplace's root is the folder itself, so the root alone
- * cannot tell; the installed list can. */
+ * cannot tell; the installed list can. A cache root ends in its version, and a session keeps its version's root after an
+ * update installs the next: the cache paths match without that last folder. */
 // shortcut: a --plugin-dir of the very folder an enabled folder marketplace installs reads as installed; rare, upgrade if met.
 async function installed($: $) {
+  const up = (path: string) => path.replace(/\/[^/]+\/?$/, '')
   try {
     const r = await $.process.run(['claude', 'plugin', 'list', '--json'])
     const list = JSON.parse(r.stdout) as { enabled?: boolean; installPath?: string; readFromFolder?: string }[]
-    return r.exitCode === 0 && list.some(p => p.enabled && (p.installPath === $.plugin.root || p.readFromFolder === $.plugin.root))
+    return r.exitCode === 0 && list.some(p => p.enabled && ((p.installPath && up(p.installPath) === up($.plugin.root)) || p.readFromFolder === $.plugin.root))
   } catch {
     return false
   }
 }
 
+/** Sender: one message to the host (a task, an answer, a stop); a new host when none takes it. */
 async function wake($: $, text: string) {
   const host = (await $.store.get(HOST)) as { sessionId: string; beat: number } | undefined
   // A host whose beat (every minute) is 3 minutes old is gone: no send to it.
