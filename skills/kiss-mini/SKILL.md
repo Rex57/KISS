@@ -32,9 +32,9 @@ host, and the `/kiss-mini` pane shows the tasks: use them, not the steps below. 
    `MA/references/handoff.md`. `wc -c` must print at most 1500; else cut it.
 4. **Start the worker** in the background, its prompt the brief:
    - Claude Code: the `Agent` tool, `subagent_type: "kiss:kiss-worker"`, `run_in_background: true`. When the
-     owner wants the task to outlive this session: `claude --bg --name "mini <id>: <title>" --agent
+     owner wants the task to outlive this session: `claude --bg --name "kiss-mini <id>: <title>" --agent
      kiss:kiss-worker -- "$(cat "<T>/brief.md")"`, run in the worktree (a question: the checkout); at `status`,
-     `claude logs "mini <id>"` gives its report.
+     `claude logs "kiss-mini <id>"` gives its report.
    - Another agent: its start tool from `MA/../kiss-harness/references/agents.md`; the prompt is the text of
      `MA/../../claude-agents/kiss-worker.md` (below its front matter), then the brief.
    Tell the owner in one line: the id, the kind and the title.
