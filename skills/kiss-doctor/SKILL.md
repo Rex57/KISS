@@ -9,6 +9,11 @@ allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 
 You check the setup and report it; the owner installs. `KD` is this skill's folder (the folder of this file).
 
+**Feedback on or off.** When the owner asks `kiss-doctor feedback on` (or `feedback off`), run only
+`python3 -I "$KD/scripts/doctor.py" feedback on` (or `off`), report the lines it prints (the file it changed, its
+backup, that a new session is needed, the export line for the other agents), and stop. It sets only
+`env.KISS_FEEDBACK` in Claude Code's user settings (`"1"` or `"0"`) and edits no shell profile.
+
 1. **Run the checks:** `python3 -I "$KD/scripts/doctor.py"`. It checks each agent whose CLI is on PATH; name
    agents to check fewer (`claude`, `codex`, `gemini`, `antigravity`). Per agent: the CodeGraph rule in the global
    instructions file (KISS's `rules/codegraph.md`, found by its bold lead-ins, `@` imports followed), each skill in
@@ -21,7 +26,7 @@ You check the setup and report it; the owner installs. `KD` is this skill's fold
    The script cannot see Antigravity's plugin folders, so there your list decides. A KISS skill in your list that
    the script calls "not installed" (a session loaded from a plugin folder, or a KISS repo newer than the install)
    is INFO with that reason, never FAIL; in Claude Code the script prints it as INFO itself.
-3. **Report** every INFO line with its reason, and every WARN and FAIL line with its fix, taken from the README section in its `[fix: ...]`
+3. **Report** the feedback mode line (on or off, and where it is set), every INFO line with its reason, and every WARN and FAIL line with its fix, taken from the README section in its `[fix: ...]`
    (`$KD/../../README.md`). End the report with one line: "Ready for a KISS run" when no line is FAIL, else the FAIL lines to
    fix first. Done when each WARN and FAIL line has its fix.
 4. **Fix on the owner's yes.** The owner installs tools and skills, by the README commands. With a yes you may make

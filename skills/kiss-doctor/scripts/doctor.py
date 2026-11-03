@@ -2,6 +2,7 @@
 """Check this device for a KISS run (kiss-doctor/SKILL.md). Reads only; changes nothing.
 
   python3 -I doctor.py [AGENT ...]    AGENT: claude, codex, gemini, antigravity (default: each one whose CLI is on PATH)
+  python3 -I doctor.py feedback on|off   set env.KISS_FEEDBACK in Claude Code's user settings ("1" or "0"), with a backup
   python3 -I doctor.py --selftest
 
 Each line: OK, INFO, WARN or FAIL, the agent, what was checked, and for a WARN or FAIL the README section with the fix.
@@ -169,6 +170,69 @@ def check_tools():
     return out
 
 
+PROFILES = [".zshenv", ".zprofile", ".zshrc", ".bash_profile", ".bashrc", ".profile"]
+
+
+def settings_path():
+    return os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude"), "settings.json")
+
+
+def feedback_mode(settings, home=HOME, env=None, project=None):
+    """(on?, where). The value this session has (its environment) decides; where names the first place that sets
+    that value: Claude Code's user settings env, the project's .claude settings, then a shell profile's export."""
+    places = [(settings, "Claude Code's settings env (%s)" % settings.replace(home, "~", 1))]
+    if project:
+        places += [(os.path.join(project, ".claude", n), "the project's .claude/%s env" % n) for n in ("settings.local.json", "settings.json")]
+    found = []
+    for path, label in places:
+        try:
+            value = json.load(open(path)).get("env", {}).get("KISS_FEEDBACK")
+        except (OSError, ValueError, AttributeError):
+            value = None
+        if value is not None:
+            found.append((value, label))
+    for name in PROFILES:
+        path = os.path.join(home, name)
+        m = re.findall(r"^\s*export\s+KISS_FEEDBACK=[\"']?([^\"'\s]*)", read(path), re.M) if os.path.isfile(path) else []
+        if m:
+            found.append((m[-1], "the shell profile ~/%s" % name))
+    now = (env or {}).get("KISS_FEEDBACK")
+    if now is None:
+        return (found[0][0] == "1", found[0][1]) if found else (False, "set nowhere")
+    where = next((label for value, label in found if value == now), "this session's environment only: a --settings flag or the shell that started it")
+    return now == "1", where
+
+
+def check_feedback(settings):
+    on, where = feedback_mode(settings, env=os.environ, project=os.getcwd())
+    return [("INFO", "device", "feedback mode: %s (%s)" % ("on" if on else "off", where), "")]
+
+
+def set_feedback(settings, on):
+    """Set only env.KISS_FEEDBACK in the settings file, after a backup beside it. Returns the lines to print."""
+    data = {}
+    if os.path.exists(settings):
+        try:
+            data = json.load(open(settings))
+            assert isinstance(data, dict)
+        except (OSError, ValueError, AssertionError) as e:
+            sys.exit("%s: cannot read it as a JSON object (%s); left untouched" % (settings, type(e).__name__))
+        backup = settings + ".kiss-backup"
+        shutil.copy2(settings, backup)
+    else:
+        backup = None
+        os.makedirs(os.path.dirname(settings), exist_ok=True)
+    if not isinstance(data.get("env"), dict):
+        data["env"] = {}
+    data["env"]["KISS_FEEDBACK"] = "1" if on else "0"
+    with open(settings, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    return ["feedback mode %s in %s%s" % ("on" if on else "off", settings, " (backup: %s)" % backup if backup else ""),
+            "Claude Code: start a new session for it to apply.",
+            "Codex, Gemini CLI, Antigravity: put this line in your shell profile yourself: export KISS_FEEDBACK=%s" % ("1" if on else "0")]
+
+
 def selftest():
     import tempfile
     with tempfile.TemporaryDirectory() as t:
@@ -214,6 +278,40 @@ def selftest():
         two =check_skills("claude", [("a", os.path.join(t, "a")), ("b", os.path.join(t, "b"))], {"tdd": "x"})
         assert two[0][0] == "WARN" and "2 times" in two[0][2], two
         assert check_skills("claude", [("a", os.path.join(t, "a")), ("a", os.path.join(t, "a"))], {"tdd": "x"})[0][0] == "OK"
+        # the feedback mode: where it is set, and the switch on a scratch settings file
+        home = os.path.join(t, "fhome")
+        os.makedirs(home)
+        st = os.path.join(home, "cfg", "settings.json")
+        assert feedback_mode(st, home) == (False, "set nowhere")
+        put("fhome/.zshrc", "export PATH=x\nexport KISS_FEEDBACK=1\n")
+        assert feedback_mode(st, home) == (True, "the shell profile ~/.zshrc"), feedback_mode(st, home)
+        original = {"model": "opus", "permissions": {"allow": ["Read"]}, "hooks": {"Stop": []}}
+        put("fhome/cfg/settings.json", json.dumps(original))
+        lines = set_feedback(st, False)
+        assert os.path.isfile(st + ".kiss-backup") and json.load(open(st + ".kiss-backup")) == original, lines
+        got = json.load(open(st))
+        assert got == dict(original, env={"KISS_FEEDBACK": "0"}), got
+        assert feedback_mode(st, home) == (False, "Claude Code's settings env (~/cfg/settings.json)"), feedback_mode(st, home)   # off wins over the profile
+        put("fhome/cfg/settings.json", json.dumps(dict(original, env={"PATH_X": "y"})))
+        set_feedback(st, True)
+        assert json.load(open(st)) == dict(original, env={"PATH_X": "y", "KISS_FEEDBACK": "1"})
+        assert "new session" in " ".join(lines) and "export KISS_FEEDBACK=0" in " ".join(lines)
+        put("fhome/cfg/settings.json", "{ not json")
+        try:
+            set_feedback(st, True)
+            raise AssertionError("an unreadable file was written")
+        except SystemExit as e:
+            assert "left untouched" in str(e)
+        assert read(st) == "{ not json"
+        fresh = os.path.join(home, "new", "settings.json")
+        set_feedback(fresh, True)
+        assert json.load(open(fresh)) == {"env": {"KISS_FEEDBACK": "1"}} and not os.path.exists(fresh + ".kiss-backup")
+        # the session's own value decides; where names the place that sets it
+        assert feedback_mode(fresh, home, env={"KISS_FEEDBACK": "1"}) == (True, "Claude Code's settings env (~/new/settings.json)")
+        assert feedback_mode(os.path.join(t, "none.json"), home, env={"KISS_FEEDBACK": "1"}) == (True, "the shell profile ~/.zshrc")
+        assert feedback_mode(os.path.join(t, "none.json"), home, env={"KISS_FEEDBACK": "0"})[1].startswith("this session's environment only")
+        put("proj/.claude/settings.local.json", json.dumps({"env": {"KISS_FEEDBACK": "0"}}))
+        assert feedback_mode(os.path.join(t, "none.json"), home, env={"KISS_FEEDBACK": "0"}, project=os.path.join(t, "proj")) == (False, "the project's .claude/settings.local.json env")
     cfg = '[plugins."kiss@kiss"]\nenabled = true\n\n[plugins."old@m"]\nenabled = false\n[tui]\nenabled = true\n'
     assert codex_enabled(cfg) == ["kiss@kiss"], codex_enabled(cfg)
     print("doctor selftest ok")
@@ -222,12 +320,17 @@ def selftest():
 def main(argv):
     if argv[1:] == ["--selftest"]:
         return selftest()
+    if argv[1:2] == ["feedback"]:
+        if argv[2:] not in (["on"], ["off"]):
+            sys.exit("usage: doctor.py feedback on|off")
+        print("\n".join(set_feedback(settings_path(), argv[2] == "on")))
+        return
     agents = argv[1:] or [a for a, cli in CLI.items() if shutil.which(cli)]
     unknown = [a for a in agents if a not in CLI]
     if unknown or not agents:
         sys.exit(f"name an agent: {', '.join(CLI)}" + (f" (unknown: {', '.join(unknown)})" if unknown else " (none on PATH)"))
     need, marks = required(), markers()
-    rows = check_tools()
+    rows = check_tools() + check_feedback(settings_path())
     for agent in agents:
         text, files, roots, note = agent_setup(agent)
         # the script's own KISS folder is what this Claude Code session loaded (CLAUDECODE=1 in its shell)
