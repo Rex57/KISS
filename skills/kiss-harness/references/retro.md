@@ -21,4 +21,4 @@ messages you sent. Look for these candidates:
 
 List the candidates for the owner, most severe first, each with its evidence (the progress line or finding). This
 joins kiss-housekeeping's fold-back and replaces nothing there. On the owner's yes, write a facts-file rule
-yourself; a proposed check becomes a `/mini` task or a ticket of the next run, never product code of yours.
+yourself; a proposed check becomes a `/kiss-mini` task or a ticket of the next run, never product code of yours.
