@@ -4,6 +4,10 @@
   python3 -I metrics.py R              one line: the token part of the metrics line
   python3 -I metrics.py R --context    one line per subagent: its role, its id and its context now (the last
                                        request's input, cache-write and cache-read tokens), marked past the bound
+  python3 -I metrics.py R --record "<the controller's Metrics line>"   print the full line (the controller's part,
+                                       then the token part) and write it as `- <run>: <line>` into the metrics.md
+                                       of the .kiss folder that holds R's runs folder (a second record of a run
+                                       replaces its line)
   python3 -I metrics.py --selftest
 
 Transcripts: under CLAUDE_CONFIG_DIR (default ~/.claude), projects/*/<session>/subagents/**/agent-<id>.jsonl, each
@@ -186,6 +190,23 @@ def context(R):
     return "\n".join(lines)
 
 
+def record(R, line):
+    R = os.path.abspath(R)
+    full = f"{line}; {tokens(R)}"
+    book = os.path.join(os.path.dirname(os.path.dirname(R)), "metrics.md")
+    name = os.path.basename(R)
+    try:
+        with open(book) as f:
+            rows = [x for x in f.read().splitlines() if not x.startswith(f"- {name}: ")]
+    except FileNotFoundError:
+        rows = []
+    rows.append(f"- {name}: {full}")
+    os.makedirs(os.path.dirname(book), exist_ok=True)
+    with open(book, "w") as f:   # the other lines as they were; the runs' lines in run (folder name) order
+        f.write("\n".join([x for x in rows if not x.startswith("- ")] + sorted(x for x in rows if x.startswith("- "))) + "\n")
+    return full
+
+
 def selftest():
     import tempfile
 
@@ -268,6 +289,17 @@ def selftest():
     for cmd, want in (('for f in *.py; do grep -n x "$f"; done', (0, 1, 0)), ("find . | xargs grep -l foo", (0, 1, 0)),
                       ("time rg foo src", (0, 1, 0)), ("if true; then codegraph explore -p /w a; fi", (1, 0, 0))):
         assert bash_kinds(cmd) == want, (cmd, bash_kinds(cmd))
+    with tempfile.TemporaryDirectory() as t:                                # the metrics record, one line per run
+        os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(t, "no-config")
+        a, b = (os.path.join(t, "repo", ".kiss", "runs", n) for n in ("2026-01-02-a", "2026-01-03-b"))
+        book = os.path.join(t, "repo", ".kiss", "metrics.md")
+        assert record(b, "Metrics: subagents 2") == "Metrics: subagents 2; " + NA
+        record(a, "Metrics: subagents 3")
+        assert open(book).read() == ("- 2026-01-02-a: Metrics: subagents 3; " + NA + "\n"
+                                     "- 2026-01-03-b: Metrics: subagents 2; " + NA + "\n"), open(book).read()
+        record(a, "Metrics: subagents 4")                                    # a rerun of the close replaces it
+        assert open(book).read().splitlines() == ["- 2026-01-02-a: Metrics: subagents 4; " + NA,
+                                                  "- 2026-01-03-b: Metrics: subagents 2; " + NA], open(book).read()
     print("metrics selftest ok")
 
 
@@ -276,6 +308,8 @@ def main(argv):
         return selftest()
     if len(argv) == 3 and argv[2] == "--context":
         return print(context(argv[1]))
+    if len(argv) == 4 and argv[2] == "--record":
+        return print(record(argv[1], argv[3]))
     if len(argv) != 2:
         sys.exit(__doc__)
     print(tokens(argv[1]))

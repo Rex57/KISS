@@ -112,8 +112,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
     4. **Look back** by [references/retro.md](references/retro.md): the candidates for the owner, most severe first
        (a mechanical mistake → a proposed check, a judgement call → a facts-file rule); change no product file.
     5. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
-       <used> of <budget>`, then the line `python3 -I "$HB/scripts/metrics.py" R` prints (the tokens per role and the
-       CodeGraph share).
+       <used> of <budget>`, given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it prints the full
+       line (with the tokens per role and the CodeGraph share) and records it in `<repo>/.kiss/metrics.md`, one line
+       per run (a rerun of the close replaces the run's line).
     6. The **merge gate**, with the log findings. A push, a pull request or any write to a remote is its own gate;
        `pr` writes a pull request's body.
     7. The last line to the owner: start the next run in a new session (`R/` holds the run's state).
