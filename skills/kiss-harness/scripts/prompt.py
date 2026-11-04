@@ -70,6 +70,7 @@ def selftest():
     sv = loop["severity"]
     assert "a broken command or link" in sv and "a low finding with no effect" in sv, "A2: the fix bar"
     assert "merge gate" in sv and "2 fix rounds per review and 3 per run" in sv, "A2: log and round caps"
+    assert 'A finding of medium or higher severity that fits none of these is a "fix"' in sv, "F8: every finding has a bucket"
     assert "Start no subagent of your own" in rv, "A4"
     print("prompt selftest ok")
 
