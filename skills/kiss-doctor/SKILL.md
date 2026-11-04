@@ -1,6 +1,6 @@
 ---
 name: kiss-doctor
-description: Check this device's KISS setup - the CodeGraph rule in the global instructions file, the skills KISS calls and the tools - and, with `setup`, show a plan to install what is missing.
+description: Check this device's KISS setup (the CodeGraph rule, the skills and the tools KISS calls); with `setup`, plan the install of what is missing.
 disable-model-invocation: true
 allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---

@@ -139,7 +139,7 @@ If a skill is missing, a run still works: KISS follows its own copy of the same 
    takes the recommended answer, and you see it at the tickets gate.
 2. **Spec and tickets**, by rules adapted from Matt Pocock's `to-spec` and `to-tickets`: user stories, test seams,
    thin slices through every layer, a refactor first, blocking links. Each acceptance line names its seam. You
-   approve the tickets and the seams.
+   answer the test seams once, as a decision, and approve the tickets.
 3. **Build:** one implementer, one ticket at a time, with ponytail and `tdd`, in a worktree under the git-ignored
    `.kiss/worktrees/`. Each ticket ends with what it skipped
    and any risk.

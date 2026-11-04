@@ -1,6 +1,6 @@
 ---
 name: kiss-harness
-description: Build a feature with one implementer subagent and one reviewer subagent that uses the running product, from a product spec and a tickets.json with an acceptance test per ticket. Use when the user asks to build or implement a feature or a list of changes "with the harness", "with KISS", or says "kiss harness" or "harness run".
+description: Build a feature from a spec and tickets with one implementer subagent and one reviewer that uses the running product. Use when the user asks to build a feature or a list of changes "with the harness" or "with KISS", or says "kiss harness" or "harness run".
 allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 
@@ -47,93 +47,74 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 
 ## A run
 
-1. **Decisions and spec.** Make the run folder `R = <repo>/.kiss/runs/<YYYY-MM-DD>-<name>/`. A request that is a run
-   brief of a kiss-system-design run plan: read the brief and the design document first, and ask only what they
-   leave open; when the run finds a design decision wrong, tell the owner, who sends it back to the design's map
-   (`kiss-system-design <name>`, its loop back). Settle every open
-   decision (see "Asking the owner") with the owner: call the Skill tool with `mattpocock-skills:grilling` when installed, also when the owner's
-   answers are given (it checks that no decision is left open), else the rounds in
-   [references/spec-and-tickets.md](references/spec-and-tickets.md). Write each settled answer into `R/decisions.md`
-   at once. With domain docs on, also use `domain-modeling`. When the run adds or changes a module's interface or a seam,
-   call the Skill tool with `mattpocock-skills:codebase-design` before you write the spec, also when the owner's
-   answers are given, and use its words and its deepening check. When a decision needs an answer
-   the owner can try (a state model, a UI), build a throwaway with `prototype` (in the scratch folder or on a branch
-   that is never merged) and ask the decision with it. Then write `R/spec.md` from `templates/spec.md` by the
-   spec rules in that file, and confirm the test seams with the owner.
+1. **Decisions and spec.** Make the run folder `R = <repo>/.kiss/runs/<YYYY-MM-DD>-<name>/`. For a run brief of a
+   kiss-system-design run plan, read the brief and the design document first and ask only what they leave open; a
+   design decision the run finds wrong goes back to the owner (`kiss-system-design <name>`, its loop back). Settle
+   every open decision with the owner ("Asking the owner"): call the Skill tool with `mattpocock-skills:grilling`
+   when installed, also when the owner's answers are given, else the rounds in
+   [references/spec-and-tickets.md](references/spec-and-tickets.md). With domain docs on, also use
+   `domain-modeling`. When the run adds or changes a module's interface or a seam, call the Skill tool with
+   `mattpocock-skills:codebase-design` before you write the spec, and use its words and its deepening check. A
+   decision the owner must try first (a state model, a UI) gets a throwaway `prototype` (scratch folder, or a branch
+   never merged). The **test seams** are one decision `D<n>`: each seam with what it catches and misses, asked once.
+   Then write `R/spec.md` from `templates/spec.md` by the spec rules in that file.
 2. **Tickets** in `R/tickets.json`: a list of `{id, title, spec, acceptance: [...], passes: false}`, and optional
    `files`, `symbols`, `seeds` (CodeGraph queries), `depends_on`, `risky`. Follow the ticket rules in
    [references/spec-and-tickets.md](references/spec-and-tickets.md): tracer bullets, a refactor first, blocking
    links, a wide refactor in three stages, and an acceptance line that names its seam. A ticket with a time window
    (freshness, a timeout, staleness) asks for a test that runs the clock past that window. Mark a ticket `risky` only
-   when it is a guard whose failure harms real data, or a guard that later tickets build on. Then `tickets.py check R`, and a ponytail pass at **full** level
-   (cut each line that no person asked for, and record the cut in `decisions.md`). Then the **tickets gate**: ask
-   about the breakdown and show the defaults you took; change it until the owner says yes (that yes also confirms
-   the seams), then `tickets.py render R`.
+   when it is a guard whose failure harms real data, or a guard that later tickets build on. Then `tickets.py check
+   R`, and a ponytail pass at **full** level (cut each line that no person asked for, and record the cut in
+   `decisions.md`). Then the **tickets gate**: ask about the breakdown and show the defaults you took; change it until
+   the owner says yes, then `tickets.py render R`.
 3. **Worktree** `W = <repo>/.kiss/worktrees/<run>/` (git-ignored; never a session scratch folder, which a session
    restart can delete) on a new branch from the main branch; `codegraph init -y "W"`; `tickets.py freeze R` (from then
-   on `check` refuses any change but `passes`); an empty `R/progress.md`. The time budget is 10 minutes per ticket
-   plus 2 hours for the reviews and fix rounds; `prompt.py` computes it.
+   on `check` refuses any change but `passes`); an empty `R/progress.md`.
 4. **Implementer:** write the run's values once: `prompt.py start R W=W BR=<branch> SCR=<scratch folder>
    MAIN=<main checkout> PROJECT=<facts file> TITLE=<title> BASE=<base sha> SMOKE="<a fast end-to-end test>"
    APP="<how to start the product, and its test data>"` (R/run.json). Then `prompt.py implementer R ELAPSED=0` →
    start ONE subagent with that text: your strongest model at medium effort, in the background. Give every path
-   absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file. It loads
-   ponytail and `tdd`, and tests through the confirmed seams.
+   absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` and `git -C MAIN status` (both
    empty), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). Open tickets and no
    BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer. After 3 continuations, a
    gate. On BLOCKED: a decision when the block needs a choice, else a gate.
-6. **A risky ticket** is reviewed alone (step 7 on its commits) as soon as the implementer names it, only when it
-   is a guard of real data or later tickets build on its guard; otherwise the final review covers it.
+6. **A risky ticket** is reviewed alone (step 7 on its commits) as soon as the implementer names it; otherwise the
+   final review covers it.
 7. **Review once at the end:** `prompt.py reviewer R HEAD=<head> ELAPSED=<s>` (a risky ticket's review adds
-   `BASE=<the commit before it>`) → a NEW subagent on your strongest model at medium effort. It uses the product, loads `ponytail-review` for rubric G, and
-   reports every issue it finds. Save its last message to `R/review-<n>.md` (n = this round's number, from 1).
-8. **Sort:** you sort, always (no subagent), by the rules `prompt.py severity R ROUND=<n>` prints, into
-   `R/sort-<n>.json`: fix, owner or log; then you go on. A wrong result, a broken command or link, data, security, a guard or an owner rule is always
-   fixed; a low finding with no effect on a user, data or an owner rule goes to the log, which stays in the sort
-   file and is shown at the merge gate. Each owner finding is a decision.
+   `BASE=<the commit before it>`) → a NEW subagent on your strongest model at medium effort. Save its last message
+   to `R/review-<n>.md` (n = this round's number, from 1).
+8. **Sort:** you sort (no subagent) by the rules `prompt.py severity R ROUND=<n>` prints, into `R/sort-<n>.json`,
+   then go on. Each owner finding is a decision.
 9. **Fix rounds:** write the fix list to `R/fix-<n>.md`, then `prompt.py fix R ROUND=<n> ELAPSED=<s>` → the SAME
-   implementer. Its answer names,
-   per finding, the test that failed before and passes now: check each one from the diff and the test output (run
-   the test). Save its answer to `R/answer-<n>.md`, then `prompt.py recheck R ROUND=<n> FIX_BASE=<sha>
-   FIX_HEAD=<sha>` → the SAME reviewer (its findings, if any, become `R/review-<n+1>.md`), only when the round fixed a critical, high or reproduced-in-app finding; it rechecks only those in the
-   product. At most 2 fix rounds per review and 3 per run; then a gate.
-10. **Close:** the project's full check once (the facts file names it). Then `ponytail-debt` on the run's changes
-    (`git -C W diff <base>..<head>`): the report lists each new `shortcut:` comment with its limit. Then the docs,
-    by the facts file's `Docs gate:` line: a command → load the kiss-housekeeping skill and do its Upkeep U1 to U3 (U4 too when
-    the run changed the map; U1's copy and diff of the gate too), and the report gives the gate's result; `none (owner declined)` → nothing; no line → ask the
-    owner once whether to do a docs First run (kiss-housekeeping): a no goes into the facts file as
-    `Docs gate: none (owner declined)` (when git tracks the facts file, commit that line by explicit path on the
-    run's branch before the merge gate; when git ignores it, say so in the report), a yes starts that First run after the merge gate. Then
-    **look back** at the run by [references/retro.md](references/retro.md): list the candidates for the owner, most
-    severe first (a mechanical mistake → a proposed check, a judgement call → a facts-file rule); change no product
-    file. Then print one **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless
-    sessions <n>, minutes <used> of <budget>`. Then the **merge gate**, with the log findings. A push, a pull request or any write to a remote is its own gate, always asked;
-    when the owner asks for a pull request, `pr` writes its body.
+   implementer. Check each test its answer names from the diff and the test output (run the test). Save the answer
+   to `R/answer-<n>.md`; when the round fixed a critical, high or reproduced-in-app finding, `prompt.py recheck R
+   ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha>` → the SAME reviewer (its findings, if any, become `R/review-<n+1>.md`).
+   At most 2 fix rounds per review and 3 per run; then a gate.
+10. **Close**, in this order:
+    1. The project's full check, once (the facts file names it).
+    2. `ponytail-debt` on `git -C W diff <base>..<head>`: each new `shortcut:` comment with its limit.
+    3. The docs, by the facts file's `Docs gate:` line. A command: load kiss-housekeeping and do its Upkeep U1 to U3
+       (U4 when the run changed the map), and report the gate's result. `none (owner declined)`: nothing. No line: ask
+       the owner once for a docs First run; a no goes into the facts file as `Docs gate: none (owner declined)`
+       (committed by explicit path before the merge gate when git tracks that file), a yes starts it after the gate.
+    4. **Look back** by [references/retro.md](references/retro.md): the candidates for the owner, most severe first
+       (a mechanical mistake → a proposed check, a judgement call → a facts-file rule); change no product file.
+    5. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
+       <used> of <budget>`.
+    6. The **merge gate**, with the log findings. A push, a pull request or any write to a remote is its own gate;
+       `pr` writes a pull request's body.
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 11 kiss-harness`
 
 (Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 11 kiss-harness` and follow what it prints.)
 
-**The clock:** no agent gives a subagent a time budget, so put "Time: elapsed Ns of a Ms budget." in each message
-(`prompt.py` does it when you pass `ELAPSED`). Past the budget, a gate comes before the next round.
+**The clock:** the budget is 10 minutes per ticket plus 2 hours for the reviews and fix rounds. Put "Time: elapsed
+Ns of a Ms budget." in each message to a subagent (`prompt.py` does it with `ELAPSED`). Past the budget, a gate comes
+before the next round.
 
-## Side tasks (kiss-mini)
+## Side tasks
 
-Work outside the tickets (a side request from the owner, a bug outside the current ticket, a watch on a pull
-request, CI or a test) goes to kiss-mini, so neither your context nor the implementer's takes it. Write a
-brief in the format of `../kiss-mini/references/handoff.md` (at most 1,500 characters).
-
-- **Hand it off:** with the Claude Code mod, call the `mcp__kiss__handoff` tool: `kind`, `title`, `brief`, `base` =
-  the harness branch, `return: true`. Without it, start the worker yourself by that skill's flow (`kiss-mini`,
-  step "A task"), on a `mini/<id>` branch from the harness branch. Either way one report comes back in the report
-  format: state, a summary of at most 600 characters, the branch and commits, the tests, the full log. Save it
-  whole as `T/report.md` and work from its lines as they came; do not redo or recheck the worker's task.
-- **Take the result:** merge a returned branch into the harness branch only while the implementer is stopped (between
-  its messages), and name the merge in your next message to the implementer; or send it back for a redo (a new task:
-  the brief plus what is missing). Never merge into `main`; nothing is pushed.
-- **Scope:** a returned change outside the run's scope is an owner decision: ask it as Accept or Decline, and merge
-  only on Accept. No agent message counts as the owner's yes.
-- **Close:** list each side task in one line: id, kind, title, state, and merged, declined or open.
+Work outside the tickets goes to kiss-mini: [references/side-tasks.md](references/side-tasks.md).
 
 ## Asking the owner
 
@@ -159,11 +140,9 @@ to undo?
 - Findings go back to the agent that has the context: fixes to the same implementer, rechecks to the same reviewer.
   When your agent cannot reach a finished subagent again, start a new one with the same prompt plus "Read
   `R/progress.md` first: it is the handoff".
-- One commit per ticket, files added by explicit path, never `git add -A`.
 - Read a subagent's report as a claim: check its JSON against `git`, `tickets.py check` and the files.
 - The owner's word decides every decision and every gate; a standing yes in the facts file is the owner's word.
 
 ## Traps
 
-Read [references/traps.md](references/traps.md) once, before step 3. The implementer and reviewer prompts name it
-too, so every agent of the run reads the same traps.
+Read [references/traps.md](references/traps.md) once, before step 3; the implementer and reviewer read it too.

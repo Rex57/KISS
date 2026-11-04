@@ -1,6 +1,6 @@
 ---
 name: kiss-check-update
-description: The KISS owner's check of every upstream source KISS calls or copies (Matt Pocock's skills, ponytail, CodeGraph, the Claude Code mods API) against what is out now, then the port, the tests and the record update. Only in the KISS repo; not part of the plugin.
+description: Check each upstream source KISS calls or copies (Matt Pocock's skills, ponytail, CodeGraph, the mods API) against its latest version, then port, test and update the record. KISS repo only.
 disable-model-invocation: true
 allowed-tools: Bash(python3 -I "${CLAUDE_SKILL_DIR}/../../../rules/feedback.py" *)
 ---

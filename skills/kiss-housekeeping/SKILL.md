@@ -1,6 +1,6 @@
 ---
 name: kiss-housekeeping
-description: Housekeeping of a repo's documentation and knowledge base. It gives each fact one home, sorts pages into living pages, logs, records and history, builds the map that routes readers, retires stale pages, fixes names, moves files without breaking code or tests, keeps each page true to the code, and installs a docs gate in the project's tests. Use it for a docs clean-up, consolidation or reorganisation ("clean up the docs", "housekeeping", "docs gate"), and for the docs Upkeep at a harness close.
+description: Docs housekeeping of a repo - one home per fact, page kinds, the map, stale pages, names, safe moves, pages true to the code, and a docs gate in its tests. Use for a docs clean-up or reorganisation ("clean up the docs", "housekeeping", "docs gate") and for the docs Upkeep at a harness close.
 allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 

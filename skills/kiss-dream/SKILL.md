@@ -1,6 +1,6 @@
 ---
 name: kiss-dream
-description: Use when the user says "tidy up memory" (that phrase is the go for the whole flow), or asks to tidy, consolidate or clean a repo's file memory and agentmemory (then show the plan and wait for a yes). The full flow is inventory, file-memory merge, loss check, agentmemory revisions over REST, disk clean-up, and a report.
+description: Use when the user says "tidy up memory" (the go for the whole flow), or asks to tidy or consolidate a repo's file memory and agentmemory (then show the plan and wait for a yes).
 allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
 

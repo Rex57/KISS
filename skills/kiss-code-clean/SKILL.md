@@ -1,6 +1,6 @@
 ---
 name: kiss-code-clean
-description: Give one ranked list of clean-up candidates for a code base - bugs, risky code with no test, slow paths, code to delete, merge or split, shortcut debt and hot spots - each with its evidence and a strength. Reads only; changes no code.
+description: A ranked list of clean-up candidates for a code base (bugs, risky untested code, slow paths, code to delete, merge or split, shortcut debt, hot spots), each with its evidence. Reads only.
 disable-model-invocation: true
 allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---

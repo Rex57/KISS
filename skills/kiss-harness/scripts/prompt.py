@@ -149,6 +149,9 @@ def selftest():
     assert "merge gate" in sv and "2 fix rounds per review and 3 per run" in sv, "A2: log and round caps"
     assert 'A finding of medium or higher severity that fits none of these is a "fix"' in sv, "F8: every finding has a bucket"
     assert "Start no subagent of your own" in rv, "A4"
+    fx, rc = loop["fix"], loop["recheck"]
+    assert 'codegraph sync -q "/w"' in fx and fx.index("Fix each one") < fx.index("codegraph sync -q") < fx.index("Run the acceptance"), "T-7: fix syncs after its edits"
+    assert 'codegraph sync -q "/w"' in rc and rc.index("codegraph sync -q") < rc.index("CodeGraph"), "T-7: recheck syncs before CodeGraph"
     print("prompt selftest ok")
 
 

@@ -40,7 +40,7 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
 - **Security, privacy, observability:** one line each, "no change" or "none" when that is so.
 - **Testing decisions:** a good test checks behaviour through a public interface, never internals. The **seams** are
   the public interfaces the tests go through: prefer an existing seam, the highest one, and as few as possible (one is
-  best). Name similar tests in the repo to copy. **Confirm the seams with the owner.**
+  best). Name similar tests in the repo to copy. The seams are one decision `D<n>` of step 1, asked once.
 - **Out of scope**, and **Done means**: the steps by which the owner checks the result in the running product.
 
 ## The tickets (step 2)
@@ -60,4 +60,4 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
   test sees>`. No file paths or code in a ticket's `spec` or `acceptance`; `files` and `symbols` are only hints for
   the CodeGraph seed.
 - **Ask the owner** about the breakdown: is the size right (too large, too small), is each blocking link real,
-  should a ticket be merged or split? Change the list until the owner says yes. That yes also confirms the seams.
+  should a ticket be merged or split? Change the list until the owner says yes.

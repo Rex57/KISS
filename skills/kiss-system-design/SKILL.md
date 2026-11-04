@@ -1,6 +1,6 @@
 ---
 name: kiss-system-design
-description: Turn a new product idea into a product brief, a decision map, a system design document and an ordered run plan of kiss-harness runs. First version. Use for a product too big for one harness run; continue a design with its name.
+description: Turn a product idea too big for one harness run into a product brief, a decision map, a system design and an ordered run plan. Continue a design by its name.
 disable-model-invocation: true
 allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---

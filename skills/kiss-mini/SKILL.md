@@ -1,6 +1,6 @@
 ---
 name: kiss-mini
-description: Run a small side task in a background worker - a code change on its own branch, a read-only question, or a watch on a pull request, CI run or test. Use for "/kiss-mini", a "mini task", a side request, or a hand-off from kiss-harness.
+description: Run a side task in a background worker - a code change on its own branch, a read-only question, or a watch on a pull request, CI run or test. Use for "/kiss-mini", a "mini task", a side request, or a hand-off from kiss-harness.
 argument-hint: "[--now] <task> [--base <branch>] | ask <question> | watch pr <n> | watch run <id> | watch <test command> | stop <id> | status"
 allowed-tools: Bash(python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" *)
 ---
