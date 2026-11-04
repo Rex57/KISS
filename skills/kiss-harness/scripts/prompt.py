@@ -141,7 +141,8 @@ def selftest():
     for rule in ("codegraph node -p", "codegraph callers -p", "cgcallers.py", "codegraph sync -q", "codegraph affected",
                  "Never the full check", "by explicit path", "callcheck.py"):
         assert out.count(rule) == 1, ("T-5: each rule once", rule)
-    assert re.search(r'callcheck\.py" -p "/w" --cached`.*paste its output under the ticket in \S*/progress\.md', out), "T-3"
+    assert re.search(r'callcheck\.py" -p "/w" --cached`.*keep its output for step 6.*`## <ID> <commit>`, the callcheck output from step 5', out, re.S), "T-3, R16"
+    assert "read every `[grep only]` and `[lsp]` line" in out, "R15"
     assert "ponytail:ponytail-review" in rv and "G. Risk, load and speed" in rv and "A|B|C|D|E|F|G" in rv
     assert "failed before" in loop["fix"] and '"test":' in loop["fix"], "A1: each fix names its test"
     assert "only the findings of severity critical or high" in loop["recheck"], "A1: recheck by severity"

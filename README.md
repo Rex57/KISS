@@ -44,15 +44,16 @@ What KISS adds:
 - **Proof in the running product.** The reviewer uses the product (its UI, API or CLI), not only the diff, and
   each ticket has acceptance tests that name their seam.
 - **No missed caller.** Every agent reads the code through CodeGraph first, and each subagent gets CodeGraph's
-  output in its seed file. CodeGraph's `callers` misses some calls (a function passed as a value, a call through
-  `getattr`, an import inside a function). So before a delete, rename or signature change, the implementer and the
-  reviewer run `cgcallers`. It syncs the index, shows each definition of the name in its own block, and puts
-  CodeGraph's callers beside a word search of the files that import the function's module or package (every file
-  for a method; comments and strings left out, but not a name given to `getattr` as a string). It marks each call
-  that CodeGraph missed (`[grep only]`) and each edge CodeGraph only guessed from the name (`[cg guess]`). With
-  `pyright` (Python) or `typescript-language-server` (JS/TS) on your `PATH`, its LSP pass asks that server for the
-  references and marks each one CodeGraph did not list `[lsp]` (a method on a typed object, for example); with no
-  server it says that the pass was skipped.
+  output in its seed file. CodeGraph's `callers` misses some calls: the measured blind spots are in the
+  [CodeGraph rule](rules/codegraph.md) ("`callers` is incomplete"). So before a delete, rename or signature change,
+  the implementer and the reviewer run `cgcallers`, and `callcheck.py` runs it on each function the staged diff (or
+  a range of commits) removes, renames or re-signs. `cgcallers` syncs the index, shows each definition of the name
+  in its own block, and puts CodeGraph's callers beside a word search of the files that import the function's module
+  or package (every file for a method; comments and strings left out, but not a name given to `getattr` as a
+  string). It marks each call that CodeGraph missed (`[grep only]`) and each edge CodeGraph only guessed from the
+  name (`[cg guess]`). With `pyright` (Python) or `typescript-language-server` (JS/TS) on your `PATH`, its LSP pass
+  asks that server for the references and marks each one CodeGraph did not list `[lsp]` (a method on a typed object,
+  for example); with no server it says that the pass was skipped.
 - **You decide.** Only a choice that is costly to undo becomes a question (`D<n>`, kept in `decisions.md`). A gate
   (the tickets, the merge, a push) asks for your go with its evidence. Nothing is pushed without you.
 - **Safety in code.** A guard that protects your data is a script with a selftest, not an instruction the model

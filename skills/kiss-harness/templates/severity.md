@@ -10,4 +10,4 @@ The reviewer reported every issue on purpose; you decide which need a fix now. A
    A finding of medium or higher severity that fits none of these is a "fix": only a low finding goes to the log.
 4. Write $R/sort-$ROUND.json:
    {"fix": [<findings, highest severity first>], "owner": [{"id": "", "question": ""}], "log": [], "dropped": [{"id": "", "why": ""}]}
-5. Go on: ask each "owner" item as a decision, then write the "fix" findings to $R/fix-$ROUND.md and start fix round $ROUND (SKILL.md step 9). With no "fix" finding, go on to the close.
+5. Go on: ask each "owner" item as a decision, then write the "fix" findings to $R/fix-$ROUND.md and start fix round $ROUND (SKILL.md step 9). With no "fix" finding: after a risky ticket's solo review, send "continue" to the implementer; after the final review, go on to the close.
