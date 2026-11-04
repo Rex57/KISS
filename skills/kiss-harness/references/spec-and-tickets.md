@@ -59,5 +59,12 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
 - **Acceptance lines** are the definition of done. Each one names its seam: `through <seam>: <what a person or a
   test sees>`. No file paths or code in a ticket's `spec` or `acceptance`; `files` and `symbols` are only hints for
   the CodeGraph seed.
+- **Failure paths and totals** each get their own acceptance line:
+  - A ticket that makes state outside its process (a container, a file, an account, a plugin, a database): one
+    line for an interrupt, and one for a failure after the first write.
+  - A deploy ticket: one line through the built artifact, not the source.
+  - A ticket whose caller has a timeout: name that timeout as a time window.
+  - A line that measures a total (a count, a score) also names what must not get worse item by item.
+  - A line that says "as before" states the old behaviour as the code shows it.
 - **Ask the owner** about the breakdown: is the size right (too large, too small), is each blocking link real,
   should a ticket be merged or split? Change the list until the owner says yes.

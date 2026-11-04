@@ -153,6 +153,10 @@ def selftest():
             assert HB + "/references/traps.md" in text
     assert "mattpocock-skills:tdd" in out and "Skipped:" in out and "Risk:" in out
     assert "longer than about 2 minutes goes in the background" in out and "never a sleep or poll loop" in out, "D8"
+    for rule in ("at least three kinds of bad input", "sweeps every file type", "Never relax the limit or the expected value"):
+        assert out.count(rule) == 1, ("D7", rule)
+    assert "write a `Risk:` line instead" in out, "D7: the never-relax rule names its Risk line"
+    assert "Triage" in rv and "check that each settlement holds" in rv and "do not report a settled line again as new" in rv, "D6"
     assert 'codegraph node -p "/w" <name>` for each function the ticket changes' in out and "Never `grep" in out, "B2"
     for rule in ("codegraph node -p", "codegraph callers -p", "cgcallers.py", "codegraph sync -q", "codegraph affected",
                  "Never the full check", "by explicit path", "callcheck.py"):

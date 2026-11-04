@@ -61,7 +61,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 2. **Tickets** in `R/tickets.json`: a list of `{id, title, spec, acceptance: [...], passes: false}`, and optional
    `files`, `symbols`, `seeds` (CodeGraph queries), `depends_on`, `risky`. Follow the ticket rules in
    [references/spec-and-tickets.md](references/spec-and-tickets.md): tracer bullets, a refactor first, blocking
-   links, a wide refactor in three stages, and an acceptance line that names its seam. A ticket with a time window
+   links, a wide refactor in three stages, an acceptance line that names its seam, and the failure-path lines. A ticket with a time window
    (freshness, a timeout, staleness) asks for a test that runs the clock past that window. Mark a ticket `risky` only
    when it is a guard whose failure harms real data, or a guard that later tickets build on. Then `tickets.py check
    R`, and a ponytail pass at **full** level (cut each line that no person asked for, and record the cut in
@@ -76,7 +76,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    start ONE subagent with that text: your strongest model at medium effort, in the background. Give every path
    absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` and `git -C MAIN status` (both
-   empty), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). Run `callcheck.py -p
+   empty), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). **Triage** each new
+   `Skipped:` and `Risk:` line into one of three buckets: fix now (in the continue message), owner (a decision,
+   asked at once) or log; write each line and its bucket into the "Triage" part of `R/decisions.md`. Run `callcheck.py -p
    W <the HEAD at the last stop, or BASE at the first>..HEAD` and send each caller line it prints to read to the implementer. Open tickets and no
    BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer. Before each continue, fix
    round and recheck, run `metrics.py R --context` (Claude Code): an agent it marks gets the handoff of
