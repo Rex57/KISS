@@ -21,7 +21,10 @@ import glob, json, os, re, sys
 CG_READ = {"query", "explore", "context", "node", "files", "callers", "callees", "impact", "affected"}
 GREPS = {"grep", "egrep", "fgrep", "rg"}
 DOCS = {".md", ".json", ".jsonl", ".txt", ".log", ".yaml", ".yml", ".toml", ".csv"}
-HEREDOC = re.compile(r"(?:^|[\s;&|])<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)")
+HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)")
+# shortcut: a << inside $(( )) or (( )) is a shift, so those spans are dropped before the heredoc search; one that
+# holds a nested "))" ends early, and a << in quotes still starts a heredoc; upgrade when counts look wrong
+ARITH = re.compile(r"\$?\(\(.*?\)\)")
 LEAD = {"rtk", "do", "then", "else", "time", "xargs", "env", "sudo"}   # words before the command itself
 NA = "tokens: not available on this agent"
 RUN = re.compile(r"/runs/([\w.-]+)")   # a run folder's name in a path
@@ -112,7 +115,7 @@ def no_heredocs(cmd):
             end = None if line.strip() == end else end
             continue
         out.append(line)
-        m = HEREDOC.search(line)
+        m = HEREDOC.search(ARITH.sub("", line))
         end = m.group(1) if m else None
     return "\n".join(out)
 
@@ -328,7 +331,10 @@ def selftest():
                       ("python3 - <<EOF | grep ok\ngrep x y\nEOF\ngrep -rn z src", (0, 1, 1, 0)),
                       ("grep -n -e foo README.md", (0, 0, 0, 1)), ("grep -e a -e b x.json y.md", (0, 0, 0, 1)),
                       ("grep -n -e foo src", (0, 1, 0, 0)),
-                      ("echo $((1<<N))\ngrep -rn x src", (0, 1, 0, 0))):
+                      # the heredoc rule: a heredoc after any word or none; never inside $(( )) or (( ))
+                      ("echo $((1<<N))\ngrep -rn x src", (0, 1, 0, 0)), ("echo $((x<<n))\ngrep -rn x src", (0, 1, 0, 0)),
+                      ("((m = 2 <<N))\ngrep -rn x src", (0, 1, 0, 0)), ("x=1;cat<<EOF\ngrep a src\nEOF", (0, 0, 0, 0)),
+                      ("cat <<EOF\ngrep -rn x src\nEOF", (0, 0, 0, 0))):
         assert bash_kinds(cmd) == want, (cmd, bash_kinds(cmd))
     import contextlib, io
     with tempfile.TemporaryDirectory() as t, contextlib.redirect_stdout(io.StringIO()):   # the metrics record
