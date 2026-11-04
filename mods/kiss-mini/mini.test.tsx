@@ -55,6 +55,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     toasts: [] as string[],
     files: {} as Record<string, string>,
     commands: [] as string[],
+    /** The store's reads throw, as a store that is gone does. */
+    storeDown: false,
   }
   w.clock = mock.clock(on, { now: NOW })
   // The store in memory, readable by the test: the ledger is the contract every session reads.
@@ -63,7 +65,10 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
   on('store.get', ($, e) => ({ value: mem[e.key] }) as never)
   on('store.set', ($, e) => ((mem[e.key] = JSON.parse(JSON.stringify(e.value))), { value: undefined }) as never)
   on('store.delete', ($, e) => (delete mem[e.key], { value: undefined }) as never)
-  on('store.keys', () => ({ value: Object.keys(mem) }) as never)
+  on('store.keys', () => {
+    if (w.storeDown) throw new Error('store down')
+    return { value: Object.keys(mem) } as never
+  })
   mock.env(on, { KISS_MINI_HOST: '1', TMPDIR: tmp })
   on('session.id', () => ({ value: w.session }))
   on('session.cwd', () => ({ value: cwd }))
@@ -469,6 +474,82 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
   for (const command of allowed) await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
   await $.tool.call({ tool: 'Bash', command: 'git push', agentId: 'other' } as never)
   expect(ran).toEqual([...allowed, 'git push'])
+})
+
+// D1, D2: a code or bug worker writes only in its worktree WT; /repo (the sender's checkout) is outside it.
+const ONLY = 'kiss-mini: a worker writes only in its worktree'
+/** A working code task whose worker is w1, and each call that reached beneath the mod: its tool and command or path. */
+async function worker($: any, on: On, opts: Opts = {}) {
+  const w = world(on, opts)
+  const ran: string[] = []
+  on('tool.call', ($, e) => {
+    const a = e as { command?: string; file_path?: string; notebook_path?: string }
+    ran.push(`${String(e.tool)} ${a.command ?? a.file_path ?? a.notebook_path}`)
+    return { result: {}, text: 'ok' } as never
+  })
+  await working($, w)
+  return { w, ran }
+}
+const call = ($: any, tool: string, arg: Record<string, string>, agentId: string | null = 'w1') =>
+  $.tool.call({ tool, ...arg, ...(agentId ? { agentId } : {}) } as never)
+
+test('a code worker\'s git command that writes outside its worktree is denied: -C, cd, GIT_DIR, --work-tree, pushd, bash -c', async ($, on) => {
+  const { ran } = await worker($, on)
+  for (const command of ['git -C /repo commit -m x', 'cd /repo && git reset --hard', 'GIT_DIR=/repo/.git git checkout main',
+    'git --work-tree=/repo stash', 'pushd /repo; git rebase main', "bash -c 'git -C /repo merge x'",
+    // A quoted folder is still the folder; each -C starts from the one before; --git-dir with its value apart; eval runs its text.
+    'git -C "/srv/other repo" commit -m x', `git -C ${WT} -C ../.. reset --hard`, 'git --git-dir /repo/.git commit -m x',
+    'eval "cd /repo && git commit -m x"', 'git -C ~/repo commit -m x']) {
+    expect(JSON.stringify(await call($, 'Bash', { command })), command).toContain(ONLY)
+  }
+  expect(ran).toEqual([])
+})
+
+test('a code worker\'s git commands inside its worktree, and its git reads anywhere, pass', async ($, on) => {
+  const { ran } = await worker($, on)
+  const allowed = ['git commit -m "see /some/other/path"', "git commit -m 'git -C /repo reset'", 'git -C sub commit -m x',
+    `git -C ${WT}/sub commit -m x`, `cd ${WT}/sub && git add calc.py`, 'git -C /repo log', 'git -C /repo status', 'git -C /repo diff',
+    'GIT_DIR=/repo/.git git show HEAD']
+  for (const command of allowed) await call($, 'Bash', { command })
+  expect(ran).toEqual(allowed.map(c => `Bash ${c}`))
+})
+
+test('a /private/var spelling of a /var worktree is inside it', async ($, on) => {
+  const { ran } = await worker($, on, { tmp: '/var/kiss/' })
+  const wt = `/private/var/kiss/kiss-mini/${ID}/wt`
+  await call($, 'Bash', { command: `git -C ${wt} commit -m x` })
+  await call($, 'Write', { file_path: `${wt}/calc.py` })
+  expect(ran).toEqual([`Bash git -C ${wt} commit -m x`, `Write ${wt}/calc.py`])
+})
+
+test('a code worker\'s Edit, Write and NotebookEdit outside its worktree are denied; inside they pass', async ($, on) => {
+  const { ran } = await worker($, on)
+  for (const tool of ['Edit', 'Write', 'NotebookEdit']) {
+    const key = tool === 'NotebookEdit' ? 'notebook_path' : 'file_path'
+    for (const path of ['/repo/calc.py', `${WT}/../x.py`, `${WT}-other/x.py`]) {
+      expect(JSON.stringify(await call($, tool, { [key]: path })), `${tool} ${path}`).toContain(ONLY)
+    }
+    await call($, tool, { [key]: `${WT}/calc.py` })
+    await call($, tool, { [key]: 'sub/calc.py' })
+  }
+  expect(ran).toEqual(['Edit', 'Write', 'NotebookEdit'].flatMap(tool => [`${tool} ${WT}/calc.py`, `${tool} sub/calc.py`]))
+})
+
+test('the guard leaves the main loop, a subagent that is no task\'s worker and a worker\'s non-git command alone', async ($, on) => {
+  const { ran } = await worker($, on)
+  const outside = [['Bash', 'command', 'git -C /repo commit -m x'], ['Write', 'file_path', '/repo/x.py']] as const
+  for (const agentId of [null, 'other']) for (const [tool, key, value] of outside) await call($, tool, { [key]: value }, agentId)
+  await call($, 'Bash', { command: 'python3 /repo/tools/check.py' })
+  expect(ran).toEqual([...outside, ...outside].map(([tool, , value]) => `${tool} ${value}`).concat('Bash python3 /repo/tools/check.py'))
+})
+
+test('an error inside the guard (a store read that throws) denies a worker\'s git write and its Write outside', async ($, on) => {
+  const { w, ran } = await worker($, on)
+  w.storeDown = true
+  expect(JSON.stringify(await call($, 'Bash', { command: 'git -C /repo commit -m x' }))).toContain(ONLY)
+  expect(JSON.stringify(await call($, 'Write', { file_path: '/repo/x.py' }))).toContain(ONLY)
+  await call($, 'Bash', { command: 'git -C /repo log' })
+  expect(ran).toEqual(['Bash git -C /repo log'])
 })
 
 test('a delivered task keeps no PR body, diff or tests', async ($, on) => {
@@ -969,6 +1050,7 @@ test('a question may not write a file, and its commands leave no Python or pytes
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
   const r = await $.tool.call({ tool: 'Write', file_path: '/repo/x.py', content: 'x', agentId: 'w1' } as never)
   expect(JSON.stringify(r)).toContain('changes no file')
+  expect(JSON.stringify(r)).not.toContain('only in its worktree')
   await $.tool.call({ tool: 'Bash', command: 'pytest -q', agentId: 'w1' } as never)
   expect(ran).toEqual(['export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; pytest -q'])
 })

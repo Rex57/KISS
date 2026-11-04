@@ -66,6 +66,79 @@ const delivers = (command: string) =>
   GIT_DELIVERS.test(command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")) ||
   [...command.matchAll(RUNS_TEXT)].some(m => GIT_DELIVERS.test(m[1] ?? m[2] ?? '')) ||
   GIT_ALIAS.test(command) || GH_DELIVERS.test(command)
+// D1, D2: a code or bug worker writes only in its worktree; outside it, git only reads.
+const ONLY_WORKTREE = 'kiss-mini: a worker writes only in its worktree'
+const GIT_READS = ['status', 'log', 'diff', 'show', 'rev-parse', 'rev-list', 'ls-files', 'cat-file', 'blame', 'grep', 'merge-base', 'describe']
+const FILE_TOOLS = ['Edit', 'Write', 'NotebookEdit']
+/** `p` from the folder `base`, with `.` and `..` resolved and `/private/var|tmp` read as `/var|tmp`; undefined when `~`
+ * or a variable other than $PWD leaves it unknown. */
+function resolve(base: string | undefined, p: string): string | undefined {
+  const full = p.replace(/^\$\{?PWD\}?(?=\/|$)/, base ?? '$')
+  if (/^~|[$`]/.test(full) || (!full.startsWith('/') && base === undefined)) return undefined
+  const parts: string[] = []
+  for (const part of (full.startsWith('/') ? full : `${base}/${full}`).split('/')) {
+    if (part === '..') parts.pop()
+    else if (part && part !== '.') parts.push(part)
+  }
+  return `/${parts.join('/')}`.replace(/^\/private(?=\/(?:var|tmp)(?:\/|$))/, '')
+}
+const inside = (p: string | undefined, wt: string | undefined) => !!p && !!wt && (p === wt || p.startsWith(`${wt}/`))
+/** A shell command's words, cut into segments at each operator (; & | ( ) a backtick, a new line); quoted text is part
+ * of a word, never an operator or a word of its own. */
+function segments(command: string): string[][] {
+  const all: string[][] = [[]]
+  let word: string | undefined
+  const end = () => {
+    if (word !== undefined) all[all.length - 1]!.push(word)
+    word = undefined
+  }
+  for (const m of command.replace(/\\\n/g, '').matchAll(/'([^']*)'|"((?:[^"\\]|\\.)*)"|\\(.)|([;&|()`\n])|(\s)|([^\s'"\\;&|()`]+)/g)) {
+    if (m[4]) {
+      end()
+      all.push([])
+    } else if (m[5]) end()
+    else word = (word ?? '') + (m[1] ?? m[2]?.replace(/\\(.)/g, '$1') ?? m[3] ?? m[6])
+  }
+  end()
+  return all
+}
+/** Whether a git command in `command`, run from `dir`, writes in a folder outside `wt`: its -C folders (each from the one
+ * before), --git-dir, --work-tree, GIT_DIR= and GIT_WORK_TREE=, after a cd or pushd; bash|sh|zsh -c and eval text runs too. */
+function gitOutside(command: string, dir: string | undefined, wt: string | undefined, env: Record<string, string | undefined> = {}): boolean {
+  for (const seg of segments(command)) {
+    for (let i = 0; i < seg.length; i++) {
+      const w = seg[i]!
+      const set = /^(GIT_DIR|GIT_WORK_TREE)=(.*)$/s.exec(w)
+      if (set) env[set[1]!] = resolve(dir, set[2]!)
+      else if (w === 'cd' || w === 'pushd') dir = resolve(dir, seg.slice(i + 1).find(a => !/^-[LPe@]+$/.test(a)) ?? '~')
+      else if (/^(?:bash|sh|zsh)$/.test(w) && /^-[a-z]*c[a-z]*$/.test(seg[i + 1] ?? '') && gitOutside(seg[i + 2] ?? '', dir, wt, { ...env })) return true
+      else if (w === 'eval' && gitOutside(seg.slice(i + 1).join(' '), dir, wt, { ...env })) return true
+      else if (w === 'git' || w.endsWith('/git')) {
+        const folders = Object.keys(env).map(k => env[k])
+        let here = dir
+        let sub: string | undefined
+        for (let j = i + 1; j < seg.length && sub === undefined; j++) {
+          const a = seg[j]!
+          const eq = a.startsWith('--') ? a.indexOf('=') : -1
+          const [opt, given] = eq > 0 ? [a.slice(0, eq), a.slice(eq + 1)] : /^-C./.test(a) ? ['-C', a.slice(2)] : [a, undefined]
+          const value = () => given ?? seg[++j] ?? ''
+          if (opt === '-C') here = resolve(here, value())
+          else if (opt === '--git-dir' || opt === '--work-tree') folders.push(resolve(here, value()))
+          else if (['-c', '--namespace', '--config-env'].includes(opt)) value()
+          else if (!a.startsWith('-')) sub = a
+        }
+        if (sub !== undefined && !GIT_READS.includes(sub) && [here, ...folders].some(f => !inside(f, wt))) return true
+      }
+    }
+  }
+  return false
+}
+/** Whether a worker's tool call writes outside its worktree `wt`; with no `wt` known, every write does. */
+function writesOutside(e: Record<string, unknown>, worktree?: string): boolean {
+  const wt = worktree === undefined ? undefined : resolve('/', worktree)
+  if (FILE_TOOLS.includes(String(e.tool))) return !inside(resolve(wt, String(e.file_path ?? e.notebook_path ?? '')), wt)
+  return String(e.tool) === 'Bash' && gitOutside(String(e.command ?? ''), wt, wt)
+}
 // A GitHub tool of an MCP server that writes (a pull request, a merge, a push).
 const GITHUB_WRITES = /^mcp__.*github.*__.*(?:create|merge|update|push|delete)/i
 const NOT_GIVEN = 'not given: read the files the first line names.'
@@ -667,6 +740,23 @@ export const register: Register = on => {
     await refresh($)
     return next(e)
   })
+
+  // Host: a code or bug worker's git writes and file writes stay in its worktree; its git reads may look outside. It
+  // runs before the push guard, so a command that does both gets one deny that names both rules.
+  // shortcut: symlinks are not followed, and Bash writes other than git (sed -i, >) are not caught; upgrade: run the
+  // worker in a sandbox that allows writes only in its worktree.
+  on('tool.call', { tool: ['Bash', 'Edit', 'Write', 'NotebookEdit'] }, async ($, e, next) => {
+    const a = e as unknown as Record<string, unknown>
+    if (e.agentId === undefined || !(await isHost($))) return next(e)
+    const t = (await tasks($)).find(x => x.agentId === e.agentId)
+    if (!t || !isCode(t) || !writesOutside(a, t.worktree)) return next(e)
+    const alsoDelivers = String(e.tool) === 'Bash' && delivers(String(a.command))
+    return { deny: `${ONLY_WORKTREE}${alsoDelivers ? ", and only the owner's press in the /kiss-mini pane pushes, merges or opens a pull request" : ''}. Commit on your branch and report.` }
+  }).catch(($, e, next) =>
+    next.called || e.agentId === undefined || !writesOutside(e as unknown as Record<string, unknown>)
+      ? next(e)
+      : { deny: `${ONLY_WORKTREE}; its guard failed, so it denies every git write and file write of a subagent.` },
+  )
 
   // Host: D8 holds in code, not only in the brief: a worker may not push, merge or open a pull request.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
