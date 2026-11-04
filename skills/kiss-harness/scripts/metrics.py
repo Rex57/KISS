@@ -169,7 +169,7 @@ def context(R):
             u = m.get("usage") or {}
         n = u.get("input_tokens", 0) + u.get("cache_creation_input_tokens", 0) + u.get("cache_read_input_tokens", 0)
         agent = os.path.basename(f)[len("agent-"):-len(".jsonl")]
-        lines.append(f"{r.rstrip('s')} {agent}: context {n}" + ("; past 350k: start a new one at this boundary"
+        lines.append(f"{r.rstrip('s')} {agent}: context {n}" + (f"; past {BOUND // 1000}k: start a new one at this boundary"
                                                                     if n > BOUND else ""))
     return "\n".join(lines)
 
@@ -245,6 +245,10 @@ def selftest():
             "implementer a1: context 3005", "reviewer a2: context 3100",
             "implementer a5: context 351000; past 350k: start a new one at this boundary",
             "reviewer a6: context 349000"], context(R)
+        global BOUND
+        BOUND, keep = 3_000, BOUND                                          # the mark's number is the bound's
+        assert context(R).splitlines()[1] == "reviewer a2: context 3100; past 3k: start a new one at this boundary", context(R)
+        BOUND = keep
     for cmd, want in (('for f in *.py; do grep -n x "$f"; done', (0, 1, 0)), ("find . | xargs grep -l foo", (0, 1, 0)),
                       ("time rg foo src", (0, 1, 0)), ("if true; then codegraph explore -p /w a; fi", (1, 0, 0))):
         assert bash_kinds(cmd) == want, (cmd, bash_kinds(cmd))
