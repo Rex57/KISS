@@ -64,8 +64,11 @@ const GH_DELIVERS = /\bgh\s+pr\s+(?:create|merge|ready)\b|\bgh\s+api\b(?=[^;&|]*
 // as a command, and the $(...) or backtick text inside double quotes.
 const RUNS_TEXT = /\b(?:(?:bash|sh|zsh)(?:\s+-[a-zA-Z]+)*?\s+-[a-zA-Z]*c[a-zA-Z]*|eval)\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
 const RUNS_IN_QUOTES = /\$\(|`/
-// A double-quoted word; a $(...) in it may hold quotes of its own and one more level of parentheses.
-const DQ = /"((?:[^"\\$`]|\\.|\$\((?:[^()'"]|'[^']*'|"(?:[^"\\]|\\.)*"|\([^()]*\))*\)|`[^`]*`|\$)*)"/
+// A $(...) that may hold quotes of its own and one more level of parentheses.
+const SUB = /\$\((?:[^()'"]|'[^']*'|"(?:[^"\\]|\\.)*"|\([^()]*\))*\)/.source
+// A double-quoted word. A $ that starts no SUB (deeper parentheses) is a character, so each $ has one reading and a
+// quote that never closes cannot backtrack for long.
+const DQ = new RegExp(`"((?:[^"\\\\$\`]|\\\\.|${SUB}|\`[^\`]*\`|(?!${SUB})\\$)*)"`)
 // A line that feeds a heredoc to a shell or eval (bash <<EOF, cat <<EOF | sh): its body runs.
 const RUNS_SHELL = /(?:^|[\s;&|(`])(?:[^\s;&|()`]*\/)?(?:bash|sh|zsh|eval)(?=$|[\s;&|)`])/
 /** `command` without its heredoc bodies (text, such as a commit message), except a body a shell or eval runs; each

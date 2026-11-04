@@ -479,7 +479,8 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
     'bash -c "git push origin x"', "sh -c 'cd x && git push'", 'eval "git push"', 'git subtree push --prefix d origin b',
     'git -c alias.p=push p origin x', 'bash -lc "git push origin x"', 'gh api -X PUT repos/o/r/pulls/12/merge',
     "bash -e -c 'git push origin x'", "/bin/bash -x -c 'git push'", 'echo "$(git push origin x)"',
-    'echo "$(git push origin "x")"', "bash <<'EOF'\ngit push origin x\nEOF", 'cat <<EOF | sh\ngit push\nEOF']) {
+    'echo "$(git push origin "x")"', "bash <<'EOF'\ngit push origin x\nEOF", 'cat <<EOF | sh\ngit push\nEOF',
+    'git commit -m "n=$(( (1) ))" && git push origin "x"']) {
     const r = await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
     expect(JSON.stringify(r)).toContain('press in the /kiss-mini pane')
   }
@@ -528,7 +529,9 @@ test('a code worker\'s git command that writes outside its worktree is denied: -
     'git -C $(echo /repo) commit -m x', 'git -C `echo /repo` commit -m x', 'git --git-dir $(echo /repo/.git) commit -m x',
     // A heredoc fed to a shell or eval runs its body.
     "bash <<'EOF'\ngit -C /repo commit -m x\nEOF", 'cat <<EOF | sh\ncd /repo && git reset --hard\nEOF',
-    `eval "$(cat <<'EOF'\ngit -C /repo commit -m x\nEOF\n)"`]) {
+    `eval "$(cat <<'EOF'\ngit -C /repo commit -m x\nEOF\n)"`,
+    // A quoted $(( )) with deeper parentheses is still one word, so a later quote cannot hide a command.
+    'git commit -m "n=$(( (1) ))" && git -C /repo commit -m "x"']) {
     expect(JSON.stringify(await call($, 'Bash', { command })), command).toContain(ONLY)
   }
   expect(ran).toEqual([])
@@ -546,6 +549,21 @@ test('a code worker\'s git commands inside its worktree, and its git reads anywh
     `git -C "${WT}/my sub" commit -m x`, 'echo $((1 << 2)) && git commit -m x']
   for (const command of allowed) await call($, 'Bash', { command })
   expect(ran).toEqual(allowed.map(c => `Bash cd '${WT}' && ${c}`))
+})
+
+test('a double quote that never closes, with 30 $(...) after it, is read at once; a quoted word with \\" and a $(...) that holds quotes is one word', async ($, on) => {
+  // A $ before ( matches one branch of the double-quote pattern only, so a quote that never closes cannot backtrack for long.
+  const { ran } = await worker($, on)
+  const open = `git commit -m "${'$(a) '.repeat(30)}`
+  const start = Date.now()
+  await call($, 'Bash', { command: open })
+  expect(Date.now() - start).toBeLessThan(500)
+  const word = 'git commit -m "fix: $(date) and \\"x\\" $(git -C "/repo" log)"'
+  await call($, 'Bash', { command: word })
+  // The same word with a write or a push in its last $(...): both readers find it after the \" and the inner quotes.
+  expect(JSON.stringify(await call($, 'Bash', { command: word.replace(' log)', ' commit -m y)') }))).toContain(ONLY)
+  expect(JSON.stringify(await call($, 'Bash', { command: word.replace(' log)', ' push)') }))).toContain('press in the /kiss-mini pane')
+  expect(ran).toEqual([open, word].map(c => `Bash cd '${WT}' && ${c}`))
 })
 
 test('a code worker\'s git stash, git worktree change and --output outside are denied, also from its worktree', async ($, on) => {
