@@ -11,7 +11,8 @@ FIX_BASE, FIX_HEAD, ELAPSED (a call value wins over run.json). A step reads its 
 review-<ROUND>.md (the reviewer's findings), fix fix-<ROUND>.md (the fix list), recheck answer-<ROUND>.md (the
 implementer's answer); the sort writes sort-<ROUND>.json. Filled here: HB (the skill folder) and CLOCK (ELAPSED and
 BUDGET, in seconds: "Time: elapsed 340s of a 1200s budget."; empty without ELAPSED). With ELAPSED and no BUDGET, the
-budget is 10 minutes per ticket in R/tickets.json plus 2 hours for the reviews and fix rounds. A value the template
+budget is 10 minutes per ticket in R/tickets.json plus 2 hours for the reviews and fix rounds, plus the facts
+file's `Full check time:` minutes when it has that line. A value the template
 needs that neither run.json nor the call gives is an error that names it.
 """
 import json, os, re, string, sys
@@ -25,9 +26,15 @@ FILES = {"severity": ("FINDINGS", "review-{}.md"), "fix": ("FINDINGS", "fix-{}.m
 
 
 def budget(run):
-    """Seconds for a run: 10 min per ticket in run/tickets.json, plus 2 h."""
+    """Seconds for a run: 10 min per ticket in run/tickets.json, plus 2 h, plus the facts file's full check time."""
     with open(os.path.join(run, "tickets.json")) as f:
-        return PER_TICKET_S * len(json.load(f)) + REVIEW_S
+        s = PER_TICKET_S * len(json.load(f)) + REVIEW_S
+    try:
+        with open(os.path.join(run, "run.json")) as f, open(json.load(f)["PROJECT"]) as p:
+            m = re.search(r"^\W*Full check time:\s*(\d+)", p.read(), re.M)
+    except (OSError, KeyError, ValueError):
+        m = None
+    return s + 60 * int(m.group(1)) if m else s
 
 
 def fill(step, keys):
@@ -133,10 +140,19 @@ def selftest():
         assert "missing ROUND" in stops("fix", R) and "review-2.md" in stops("severity", R, "ROUND=2")
         sv = loop["severity"]
         assert os.path.join(R, "sort-1.json") in sv and "End with one message" not in sv, "the sort writes a file and goes on"
+        start_keys = ["W=/w", "BR=b", "SCR=/s", "MAIN=/m", "TITLE=Run 9", "BASE=abc", "SMOKE=x", "APP=y"]
+        facts = os.path.join(R, "project.md")
+        for body, want in (("- Full check time: 12 minutes\n", 13800 + 720), ("- The full check: make all\n", 13800)):
+            with open(facts, "w") as f:
+                f.write(body)
+            run("start", R, "PROJECT=" + facts, *start_keys)
+            assert f"of a {want}s budget" in run("implementer", R, "ELAPSED=0"), ("D8: the full check time", body)
+        run("start", R, "PROJECT=/w/.kiss/project.md", *start_keys)
         assert os.path.exists(os.path.join(HB, "references", "traps.md"))
         for text in (out, rv):   # every agent of a run reads the same traps
             assert HB + "/references/traps.md" in text
     assert "mattpocock-skills:tdd" in out and "Skipped:" in out and "Risk:" in out
+    assert "longer than about 2 minutes goes in the background" in out and "never a sleep or poll loop" in out, "D8"
     assert 'codegraph node -p "/w" <name>` for each function the ticket changes' in out and "Never `grep" in out, "B2"
     for rule in ("codegraph node -p", "codegraph callers -p", "cgcallers.py", "codegraph sync -q", "codegraph affected",
                  "Never the full check", "by explicit path", "callcheck.py"):

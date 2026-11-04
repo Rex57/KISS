@@ -118,7 +118,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 
 (Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 11 kiss-harness` and follow what it prints.)
 
-**The clock:** the budget is 10 minutes per ticket plus 2 hours for the reviews and fix rounds. Put "Time: elapsed
+**The clock:** the budget is 10 minutes per ticket plus 2 hours for the reviews and fix rounds, plus the facts
+file's `Full check time:`. Put "Time: elapsed
 Ns of a Ms budget." in each message to a subagent (`prompt.py` does it with `ELAPSED`). Past the budget, a gate comes
 before the next round.
 
