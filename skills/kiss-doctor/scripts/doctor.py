@@ -288,7 +288,7 @@ INSTALL = [
      "after": {"codex": "in Codex, open /hooks, trust ponytail's two hooks, and start a new thread"}},
     {"key": "Install Matt Pocock's skills", "what": "Matt Pocock's skills", "source": "https://github.com/mattpocock/skills",
      "changes": "adds Matt Pocock's skills to {agent}",
-     "agents": {"claude": ["claude plugin install mattpocock-skills@claude-plugins-official"],
+     "agents": {"claude": ["claude plugin marketplace add mattpocock/skills", "claude plugin install mattpocock-skills@mattpocock"],
                 "codex": ["codex plugin marketplace add mattpocock/skills", "codex plugin add mattpocock-skills@mattpocock"],
                 "gemini": ["gemini skills install https://github.com/mattpocock/skills.git --path skills/engineering",
                            "gemini skills install https://github.com/mattpocock/skills.git --path skills/productivity"]},
@@ -594,6 +594,8 @@ def selftest():
         ("ponytail", "codex", ["codex plugin marketplace add DietrichGebert/ponytail", "codex plugin add ponytail@ponytail"], ""),
         ("Matt Pocock's skills", "codex", ["codex plugin marketplace add mattpocock/skills", "codex plugin add mattpocock-skills@mattpocock"], ""),
     ], got                                                                    # gemini is not on PATH: not planned
+    assert show(plan(sysfor(), {("claude", "Install Matt Pocock's skills"): {}}))[0][2] == [    # his own marketplace
+        "claude plugin marketplace add mattpocock/skills", "claude plugin install mattpocock-skills@mattpocock"]
     items = plan(sysfor(), gaps)
     assert [i["n"] for i in items] == [1, 2, 3, 4, 5, 6, 7] and all(i["source"] and i["changes"] for i in items), items
     assert "/hooks" in items[5]["after"] and items[4]["after"] == "", items
