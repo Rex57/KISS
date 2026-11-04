@@ -1083,7 +1083,8 @@ test('a repo with no index gets no seed and no CodeGraph line; the task still st
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
-  expect(w.spawned[0]?.prompt).not.toContain('codegraph')
+  // the CodeGraph command line, not the word: the plugin's own path may hold "codegraph"
+  expect(w.spawned[0]?.prompt).not.toMatch(/^CodeGraph |codegraph (explore|node|callers|sync)\b/m)
   expect(Object.keys(w.files).some(f => f.endsWith('seed.md'))).toBe(false)
   expect(w.store[`kiss-mini/task/${ID}`].state).toBe('working')
 })
