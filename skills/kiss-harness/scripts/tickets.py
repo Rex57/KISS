@@ -2,7 +2,8 @@
 """The run's feature list, RUN/tickets.json (SKILL.md, step 2).
 
   python3 -I tickets.py check RUN        the shape; after `freeze`, also: only `passes` changed; a WARN (exit 0)
-                                         for a ticket that lists code files and no symbols
+                                         for a ticket that lists code files that exist in the repo of RUN, and no
+                                         symbols
   python3 -I tickets.py freeze RUN       copy tickets.json to tickets.orig.json at the build start
   python3 -I tickets.py render RUN       write issues/<ID>.md, the text briefs.py seeds
   python3 -I tickets.py open RUN         the open tickets, one per line
@@ -71,10 +72,12 @@ def problems(rows, orig=None):
     return out
 
 
-def warnings(rows):
-    """A code ticket with no symbols gets a seed with no node or callers: warn, never fail."""
+def warnings(rows, root):
+    """A code ticket with no symbols gets a seed with no node or callers: warn, never fail. Only code files that exist
+    in root (the repo that holds the run) count: a new file has no symbol yet."""
     return [f"WARN {r['id']}: lists code files and no symbols: its seed holds no node or callers" for r in rows
-            if not r.get("symbols") and any(os.path.splitext(f)[1] in CODE for f in r.get("files") or [])]
+            if not r.get("symbols") and any(os.path.splitext(f)[1] in CODE and os.path.isfile(os.path.join(root, f))
+                                            for f in r.get("files") or [])]
 
 
 def open_tickets(rows):
@@ -148,10 +151,14 @@ def selftest():
         "stop."), continue_text(four, review="T-2")
     assert continue_text(four[:3], review="T-1") == "", "every open ticket waits for the risky one: no message"
     assert continue_text(four) == "continue: open tickets T-2 (d), T-3 (g), T-4 (h). 1 of 4 pass. Take the next open ticket."
-    code = dict(good[0], files=["app/x.py", "README.md"])
-    assert warnings([code]) == ["WARN T-1: lists code files and no symbols: its seed holds no node or callers"]
-    assert warnings([dict(code, symbols=["f"])]) == [] and warnings([dict(good[0], files=["README.md", "a.json"])]) == []
     import tempfile
+    with tempfile.TemporaryDirectory() as root:                          # the repo that holds R
+        os.makedirs(os.path.join(root, "app"))
+        open(os.path.join(root, "app", "x.py"), "w").close()
+        code = dict(good[0], files=["app/x.py", "README.md"])
+        assert warnings([code], root) == ["WARN T-1: lists code files and no symbols: its seed holds no node or callers"]
+        assert warnings([dict(code, symbols=["f"])], root) == [] and warnings([dict(good[0], files=["README.md", "a.json"])], root) == []
+        assert warnings([dict(good[0], files=["app/new.py", "README.md"])], root) == [], "a new code file: no WARN"
     with tempfile.TemporaryDirectory() as run:
         with open(os.path.join(run, "tickets.json"), "w") as f:
             json.dump(four, f)
@@ -176,7 +183,8 @@ def main(argv):
     if cmd == "check":
         orig = load(run, "tickets.orig.json") if os.path.exists(os.path.join(run, "tickets.orig.json")) else None
         bad = problems(rows, orig)
-        print("\n".join(bad + warnings(rows)) if bad else "\n".join(warnings(rows) + [
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(run))))   # <repo>/.kiss/runs/<run>
+        print("\n".join(bad + warnings(rows, root)) if bad else "\n".join(warnings(rows, root) + [
             f"ok: {len(rows)} tickets, {len(rows) - len(open_tickets(rows))} pass"]))
         sys.exit(1 if bad else 0)
     if cmd == "freeze":
