@@ -388,7 +388,7 @@ def execute(argv):
 
 def apply(items, answer, runner=execute):
     """Run the items the owner's answer names (all, none, or numbers), in the plan's order, one at a time; stop at
-    the first failure. (lines, ok, the items that ran)."""
+    the first failure. (lines, ok, the items that ran to the end)."""
     numbered = {i["n"]: i for i in items if i["n"]}
     words = [w for w in re.split(r"[,\s]+", answer.strip().lower()) if w]
     if words == ["all"] or words == ["none"]:
@@ -410,7 +410,7 @@ def apply(items, answer, runner=execute):
                 rest = [str(m) for m in want if m > n]
                 return out + [f"FAIL {n}. {i['what']} ({i['agent']}): {command(argv)} exited {code}"] + [
                     "   " + line for line in output.splitlines()[-20:]] + (
-                    [f"not run: {', '.join(rest)}"] if rest else []), False, ran + [i]
+                    [f"not run: {', '.join(rest)}"] if rest else []), False, ran
         out.append(f"done {n}. {i['what']} ({i['agent']})")
         ran.append(i)
     return out, True, ran
@@ -422,9 +422,10 @@ def setup(system, answer=None, runner=execute, find=None, checks=None):
     if answer is None:
         return plan_lines(system, items), True
     lines, ok, ran = apply(items, answer, runner)
-    if ran:
+    failed = any(line.startswith("FAIL ") for line in lines)
+    if ran or failed:                                       # the checks run again after a failure too
         lines += ["", "The checks again:"] + (checks or (lambda: report(system["agents"])[0]))()
-    if ran or ok:
+    if ran or ok or failed:
         lines += [""] + by_hand(items, ran)
     return lines, ok
 
@@ -657,6 +658,9 @@ def selftest():
              "source": "s", "changes": "c", "after": ""}]
     lines, ok, _ = apply(sudo, "1", runner())                              # a sudo command never runs, even if numbered
     assert not ok and ran == [] and "sudo" in lines[0], lines
+    # F5: a failed item installed nothing: no steps after it, but the checks run again
+    text = "\n".join(setup(sysfor(), "6", runner(fail={"codex plugin marketplace add DietrichGebert/ponytail"}), find, checks)[0])
+    assert "CHECKS AGAIN" in text and "/hooks" not in text and "start a new session" not in text, text
     # the two file commands run in Python: the rule appended once, cgcallers copied executable
     with tempfile.TemporaryDirectory() as fx:
         dst, src = os.path.join(fx, "home", "CLAUDE.md"), os.path.join(fx, "rule.md")
