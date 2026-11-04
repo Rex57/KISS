@@ -227,11 +227,15 @@ def replace_section(path, rule):
     try:
         with open(tmp, "w", encoding="utf-8", newline="") as f:
             f.write(text[:span[0]] + new + gap + rest)
+            f.flush()
+            os.fsync(f.fileno())                        # on disk before the rename: a power loss leaves a whole file
         shutil.copymode(path, tmp)
         os.replace(tmp, path)
     except OSError as e:
-        if os.path.exists(tmp):
+        try:
             os.remove(tmp)
+        except OSError:                                 # its own failure must not hide the backup's path
+            pass
         return 1, f"{e}; {path} is unchanged; its backup: {old}"
     return 0, f"backup: {old}"
 
@@ -391,6 +395,8 @@ def back_up(path):
         n += 1
         out = "%s-%d" % (stamp, n)
     shutil.copy2(path, out)
+    with open(out, "rb") as f:                          # on disk before the caller changes the original
+        os.fsync(f.fileno())
     return out
 
 
@@ -803,6 +809,10 @@ def selftest():
         finally:
             os.replace = real
         assert code and raw(path) == mid == raw(backups(path)[0]) and backups(path)[0] in out, (code, out)
+        left = put("left/s10.md", mid)                           # a folder at the temp path: its cleanup fails too
+        os.mkdir(left + ".kiss-new")
+        code, out = replace(left)
+        assert code and raw(left) == mid and backups(left) and backups(left)[0] in out, (code, out)
         assert sorted(os.listdir(os.path.join(t, "r"))) == sorted(["mid.md", "last.md", "none.md", "nohead.md", "fail.md"] + [
             os.path.basename(b) for b in backups(os.path.join(t, "r", "mid.md")) + backups(os.path.join(t, "r", "last.md")) + backups(path)]), os.listdir(os.path.join(t, "r"))
         # the skills: once, twice, user-only, missing
