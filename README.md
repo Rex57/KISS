@@ -46,8 +46,10 @@ What KISS adds:
 - **No missed caller.** Every agent reads the code through CodeGraph first, and each subagent gets CodeGraph's
   output in its brief. CodeGraph's `callers` misses some calls (a function passed as a value, a call through
   `getattr`, an import inside a function). So before a delete, rename or signature change, the implementer and the
-  reviewer run `cgcallers`, which shows CodeGraph's callers beside a word search and marks each call that CodeGraph
-  missed.
+  reviewer run `cgcallers`. It syncs the index, shows each definition of the name in its own block, and puts
+  CodeGraph's callers beside a word search of the files that import the function's module (comments and strings
+  left out). It marks each call that CodeGraph missed (`[grep only]`) and each edge CodeGraph only guessed from the
+  name (`[cg guess]`).
 - **You decide.** Only a choice that is costly to undo becomes a question (`D<n>`, kept in `decisions.md`). A gate
   (the tickets, the merge, a push) asks for your go with its evidence. Nothing is pushed without you.
 - **Safety in code.** A guard that protects your data is a script with a selftest, not an instruction the model
@@ -100,7 +102,7 @@ it checks each one.
 | [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `kiss-doctor setup`, or `npm install -g @colbymchenry/codegraph`, then `codegraph init -y <repo>` in each project |
 | [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close; `ponytail-audit` and `ponytail-debt`: `kiss-code-clean`'s audit report and debt ledger (`kiss-doctor` does not check `ponytail-audit`) | `kiss-doctor setup`, or see "Install ponytail" below |
 | [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate; `research`: `kiss-system-design`'s research decisions (`kiss-doctor` does not check `research`) | `kiss-doctor setup`, or see "Install Matt Pocock's skills" below |
-| `cgcallers` (in this repo) | CodeGraph's callers plus a word grep, before a delete or rename | `kiss-doctor setup` (into `~/.local/bin`, or the folder `KISS_BIN` names), or `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (that folder on your `PATH`) |
+| `cgcallers` (in this repo) | CodeGraph's callers plus a word search of the importing files, before a delete or rename | `kiss-doctor setup` (into `~/.local/bin`, or the folder `KISS_BIN` names), or `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (that folder on your `PATH`) |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
 | [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-dream` | its README |
 
