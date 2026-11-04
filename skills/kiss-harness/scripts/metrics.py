@@ -15,12 +15,14 @@ beside agent-<id>.meta.json (its agentType gives the role). A subagent counts wh
 names R; the controller is the session file beside that subagents folder, counted from its first message that names
 R. Each message id counts once. CodeGraph share (subagents only): CodeGraph calls (the CLI's read commands,
 cgcallers, the MCP tools) over CodeGraph calls plus code searches (the Grep tool, grep, rg, git grep); a grep that
-filters another command's output is counted apart. No subagent names R: "tokens: not available on this agent".
+filters another command's output, or reads only docs or data files, is counted apart; a heredoc's body is text. No subagent names R: "tokens: not available on this agent".
 """
 import glob, json, os, re, sys
 
 CG_READ = {"query", "explore", "context", "node", "files", "callers", "callees", "impact", "affected"}
 GREPS = {"grep", "egrep", "fgrep", "rg"}
+DOCS = {".md", ".json", ".jsonl", ".txt", ".log", ".yaml", ".yml", ".toml", ".csv"}
+HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)")
 LEAD = {"rtk", "do", "then", "else", "time", "xargs", "env", "sudo"}   # words before the command itself
 NA = "tokens: not available on this agent"
 RUN = re.compile(r"/runs/([\w.-]+)")   # a run folder's name in a path
@@ -103,11 +105,31 @@ def other_run(path, R):
     return False
 
 
+def no_heredocs(cmd):
+    """The command without the bodies of its heredocs (text, not commands)."""
+    out, end = [], None
+    for line in cmd.split("\n"):
+        if end is not None:
+            end = None if line.strip() == end else end
+            continue
+        out.append(line)
+        m = HEREDOC.search(line)
+        end = m.group(1) if m else None
+    return "\n".join(out)
+
+
+def on_docs(w):
+    """True when every file a grep names (after its pattern) is a doc or data file."""
+    args = [x.strip("'\"") for x in w[1:] if not x.startswith("-")]
+    files = args if "-e" in w else args[1:]
+    return bool(files) and all(os.path.splitext(x)[1].lower() in DOCS for x in files)
+
+
 def bash_kinds(cmd):
-    """(codegraph, search, piped grep) counts of one Bash command."""
-    cg = search = piped = 0
-    # shortcut: splits on ; && || | and newlines without reading quotes or heredocs; upgrade when counts look wrong
-    for seg in re.split(r"\|\||&&|;|\n", cmd):
+    """(codegraph, code search, piped grep, grep on docs or data) counts of one Bash command."""
+    cg = search = piped = docs = 0
+    # shortcut: splits on ; && || | and newlines without reading quotes; upgrade when counts look wrong
+    for seg in re.split(r"\|\||&&|;|\n", no_heredocs(cmd)):
         for i, stage in enumerate(seg.split("|")):
             w = [x for x in stage.split() if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", x)]
             fed = False   # after xargs, a grep searches the files the pipe names: a search, not a filter
@@ -122,9 +144,11 @@ def bash_kinds(cmd):
             elif first in GREPS or (first == "git" and w[1:2] == ["grep"]):
                 if i and not fed:
                     piped += 1
+                elif on_docs(w[1:] if first == "git" else w):
+                    docs += 1
                 else:
                     search += 1
-    return cg, search, piped
+    return cg, search, piped, docs
 
 
 def k(n):
@@ -156,7 +180,7 @@ def tokens(R):
         reads += u.get("cache_read_input_tokens", 0)
         inp += u.get("input_tokens", 0) + u.get("cache_creation_input_tokens", 0) + u.get("cache_read_input_tokens", 0)
         hour += (u.get("cache_creation") or {}).get("ephemeral_1h_input_tokens", 0)
-    cg = search = piped = 0
+    cg = search = piped = docs = 0
     for b in tools.values():
         name = b.get("name", "")
         if name.startswith("mcp__codegraph__"):
@@ -164,14 +188,14 @@ def tokens(R):
         elif name == "Grep":
             search += 1
         elif name == "Bash":
-            c, s, p = bash_kinds((b.get("input") or {}).get("command", ""))
-            cg, search, piped = cg + c, search + s, piped + p
+            c, s, p, d = bash_kinds((b.get("input") or {}).get("command", ""))
+            cg, search, piped, docs = cg + c, search + s, piped + p, docs + d
     share = f"{cg / (cg + search):.2f}" if cg + search else "n/a"
     return (f"Tokens: output {k(sum(out.values()))} (implementer {k(out['implementer'])}, reviewers "
             f"{k(out['reviewers'])}, controller {k(out['controller'])}"
             f"{' (the session also carries another run)' if carries else ''}), input {k(inp)} "
             f"({round(100 * reads / inp) if inp else 0}% cache reads), 1-hour cache writes {k(hour)}; CodeGraph share "
-            f"{share} (CodeGraph {cg}, search {search}, {piped} more greps after a pipe)")
+            f"{share} (CodeGraph {cg}, code search {search}; apart: {piped} greps after a pipe, {docs} on docs or data)")
 
 
 def context(R):
@@ -257,7 +281,8 @@ def selftest():
         # 1-hour writes 2000; CodeGraph 3 (codegraph explore, MCP explore, cgcallers), search 2 (grep -rn, Grep),
         # 2 greps after a pipe; share 3 / 5; the controller's Grep is not a subagent's
         want = ("Tokens: output 4k (implementer 2k, reviewers 1k, controller 1k), input 13k (71% cache reads), "
-                "1-hour cache writes 2k; CodeGraph share 0.60 (CodeGraph 3, search 2, 2 more greps after a pipe)")
+                "1-hour cache writes 2k; CodeGraph share 0.60 (CodeGraph 3, code search 2; apart: 2 greps after a pipe, 0 on "
+                "docs or data)")
         got = tokens(R)
         assert got == want, got
         assert tokens(R + "/") == want, "a trailing slash names the same run"
@@ -286,8 +311,12 @@ def selftest():
         BOUND, keep = 3_000, BOUND                                          # the mark's number is the bound's
         assert context(R).splitlines()[1] == "reviewer a2: context 3100; past 3k: start a new one at this boundary", context(R)
         BOUND = keep
-    for cmd, want in (('for f in *.py; do grep -n x "$f"; done', (0, 1, 0)), ("find . | xargs grep -l foo", (0, 1, 0)),
-                      ("time rg foo src", (0, 1, 0)), ("if true; then codegraph explore -p /w a; fi", (1, 0, 0))):
+    for cmd, want in (('for f in *.py; do grep -n x "$f"; done', (0, 1, 0, 0)), ("find . | xargs grep -l foo", (0, 1, 0, 0)),
+                      ("time rg foo src", (0, 1, 0, 0)), ("if true; then codegraph explore -p /w a; fi", (1, 0, 0, 0)),
+                      ("grep -n x README.md", (0, 0, 0, 1)), ("grep -c y a.jsonl", (0, 0, 0, 1)),
+                      ("grep -rn x src", (0, 1, 0, 0)), ("grep -n x app.py", (0, 1, 0, 0)),
+                      ("cat > /s/n.md <<'EOF'\ngrep -rn x src\ncodegraph explore a\nEOF", (0, 0, 0, 0)),
+                      ("python3 - <<EOF | grep ok\ngrep x y\nEOF\ngrep -rn z src", (0, 1, 1, 0))):
         assert bash_kinds(cmd) == want, (cmd, bash_kinds(cmd))
     with tempfile.TemporaryDirectory() as t:                                # the metrics record, one line per run
         os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(t, "no-config")

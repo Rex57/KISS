@@ -162,7 +162,8 @@ If a skill is missing, a run still works: KISS follows its own copy of the same 
    task). A risky ticket gets its own review only when it guards real data or later tickets build on its guard;
    meanwhile the implementer builds the tickets that do not depend on it.
 5. **Close:** the project's full check, one metrics line (subagents, fix rounds, rechecks, headless sessions,
-   minutes against the budget, and on Claude Code the tokens per role and the CodeGraph share), recorded one line
+   minutes against the budget, and on Claude Code the tokens per role and the CodeGraph share against code searches, with a grep after a
+   pipe or on docs or data counted apart), recorded one line
    per run in `.kiss/metrics.md`, a look back at the run (each mistake becomes a proposed check or a rule, on your yes), the list of new `shortcut:` comments (`ponytail-debt`), the docs Upkeep
    (`kiss-housekeeping`) when `.kiss/project.md` names a docs gate (with no `Docs gate:` line it asks you once
    whether to do a docs First run, and records a no), and the merge gate: one yes, or none when `.kiss/project.md` says `Merge: after a green close`. A push always asks.
