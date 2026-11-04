@@ -6,10 +6,10 @@
 
 It syncs W's index first. Then, for each definition of NAME (only the one in FILE with -f, a path or suffix, as
 `codegraph callers -f` does), it prints a block: the definition, its caller lines and a count line. The word search
-reads only that definition's own file and the files that import its module (Python `import` / `from ... import`;
-JS/TS/Svelte `import ... from` a path that ends in the module); for a method, and with --all, it reads every indexed
-file of the language. A hit in a comment, a string or a docstring is not counted. For a language with no import filter it reads every indexed
-file of that language and prints a warning. codegraph misses a function passed as a value, a call through getattr
+reads only that definition's own file and the files that import its module or its package (Python `import` /
+`from ... import` / `importlib.import_module`; JS/TS/Svelte `import ... from` a path that ends in either); for a
+method, and with --all, it reads every indexed file of the language. A hit in a comment, a string or a docstring is
+not counted. For a language with no import filter it reads every indexed file of that language and prints a warning. codegraph misses a function passed as a value, a call through getattr
 with a string, a method on an object when two classes define the name, and recursion (KISS rules/codegraph.md,
 "callers is incomplete"). Each caller line is marked:
   [both]       codegraph has an edge on this line and the word search finds the name on it
@@ -29,6 +29,7 @@ import tokenize
 
 PY = {"python"}
 JS = {"javascript", "typescript", "tsx", "jsx", "svelte"}
+IMPORT_MODULE = re.compile(r"""import_module\(\s*['"]([\w.]+)['"]""")
 IMPORT_FROM = re.compile(r"""(?:\bfrom|\bimport|\brequire)\s*\(?\s*['"]([^'"]+)['"]""")
 
 
@@ -54,20 +55,22 @@ def module_of(path):
     return os.path.basename(os.path.dirname(path)) if stem in ("__init__", "index") else stem
 
 
-def imports(src, lang, mod):
-    """Does this source import the module `mod`?"""
+def imported(src, lang):
+    """The module names this source imports: the last part of each module path, each name a from-import takes
+    (a module of a package), and each importlib.import_module("...") string."""
     if lang in JS:
-        return any(module_of(p) == mod for p in IMPORT_FROM.findall(src))
+        return {module_of(p) for p in IMPORT_FROM.findall(src)}
+    names = {m.split(".")[-1] for m in IMPORT_MODULE.findall(src)}
     try:
         tree = ast.parse(src)
     except SyntaxError:
-        return bool(re.search(r"^\s*(from|import)\s.*\b%s\b" % re.escape(mod), src, re.M))
+        return names | {w for l in re.findall(r"^\s*(?:from|import)\s.*$", src, re.M) for w in re.findall(r"\w+", l)}
     for n in ast.walk(tree):
-        if isinstance(n, ast.ImportFrom) and ((n.module or "").split(".")[-1] == mod or any(a.name == mod for a in n.names)):
-            return True
-        if isinstance(n, ast.Import) and any(a.name.split(".")[-1] == mod for a in n.names):
-            return True
-    return False
+        if isinstance(n, ast.ImportFrom):
+            names |= {(n.module or "").split(".")[-1]} | {a.name for a in n.names}
+        elif isinstance(n, ast.Import):
+            names |= {a.name.split(".")[-1] for a in n.names}
+    return names
 
 
 def code_only(src, quotes="'\"`"):
@@ -181,7 +184,7 @@ def main(argv=None, cg=None, git=None, read=read_file):
         indexed = [(f["path"], f.get("language", "")) for f in json.loads(cg(["files", "-p", W, "-j"]) or "[]")]
     except json.JSONDecodeError:
         indexed = []
-    texts, warned = {}, set()
+    texts, imports, scans, warned = {}, {}, {}, set()
 
     def text(f):
         if f not in texts:
@@ -191,7 +194,18 @@ def main(argv=None, cg=None, git=None, read=read_file):
                 texts[f] = ""
         return texts[f]
 
-    n = re.escape(a.name)
+    def names(f, lang):                     # each file parsed once, for every definition
+        if f not in imports:
+            imports[f] = imported(text(f), lang)
+        return imports[f]
+
+    def scan(f, lang):                      # (word lines, def spans) of a file, once for every definition
+        if f not in scans:
+            scans[f] = (word_lines(text(f), lang, word), def_spans(text(f)) if lang in PY else [])
+        return scans[f]
+
+    word = a.name
+    n = re.escape(word)
     for d in defs:
         dd = d["definition"]
         home, lang = dd["filePath"], dd.get("language", "")
@@ -200,10 +214,12 @@ def main(argv=None, cg=None, git=None, read=read_file):
         if not family & (PY | JS) and lang not in warned:
             warned.add(lang)
             print("warning: no import filter for %s: searched every indexed %s file" % (lang, lang))
-        mod = module_of(home)
+        # its module, and its package: `from pkg import name` reaches a name pkg/__init__ re-exports
+        mods = {module_of(home), os.path.basename(os.path.dirname(home))} - {""}
         # a method is called on an object, whose file seldom imports the class's module: no import filter
         files = [f for f, l in indexed if l in family and (f == home or a.all or not family & (PY | JS)
-                                                            or dd.get("kind") == "method" or imports(text(f), l, mod))]
+                                                            or dd.get("kind") == "method"
+                                                            or mods & names(f, l))]
         langs = dict(indexed)
         who_cg = {c["id"]: c for c in d.get("callers") or []}
         edges = {}   # (file, line) -> (caller name, a guess?)
@@ -214,10 +230,9 @@ def main(argv=None, cg=None, git=None, read=read_file):
                     c["name"], m.get("confidence") == 0.4 and m.get("resolvedBy") == "exact-match")
         rows, matched = [], set()
         for f in files:
-            src = text(f)
-            body = src.splitlines()
-            spans = def_spans(src) if langs.get(f) in PY else []
-            for ln in word_lines(src, langs.get(f), a.name):
+            body = text(f).splitlines()
+            hits, spans = scan(f, langs.get(f))
+            for ln in hits:
                 line = body[ln - 1].strip() if ln <= len(body) else ""
                 if (f == home and ln == dd["startLine"]) or re.search(r"\b(def|function)\s*\*?\s*%s\b" % n, line):
                     continue                       # this definition, or a namesake's
@@ -262,6 +277,10 @@ def selftest():
         "svc/serve.go": "package svc\n\nfunc Serve() {}\n",
         "lib/eng.py": "class Engine:\n    def ack(self):\n        return 1\n\nclass Other:\n    def ack(self):\n        return 2\n",
         "user.py": "def go3(e):\n    return e.ack()\n",
+        "pkg/__init__.py": "from .util import helper2\n",
+        "pkg/util.py": "def helper2():\n    return 1\n",
+        "routes.py": "from pkg import helper2\nROUTES = [(\"GET\", helper2)]\n",
+        "lazy.py": "import importlib\nm = importlib.import_module(\"pkg.util\")\nm.helper2()\n",
         "svc/main.go": "package svc\n\nfunc main() { Serve() }\n",
     }
     lang = {".py": "python", ".ts": "typescript", ".go": "go"}
@@ -273,6 +292,7 @@ def selftest():
                        (d_("lib/more.py", "helper", 1, "python"), [])],
             "fetchIt": [(d_("web/api.ts", "fetchIt", 1, "typescript"), [edge("web/page.ts", "x", 5)])],
             "Serve": [(d_("svc/serve.go", "Serve", 3, "go"), [])],
+            "helper2": [(d_("pkg/util.py", "helper2", 1, "python"), [])],
             "ack": [(d_("lib/eng.py", "ack", 2, "python", "method"), []), (d_("lib/eng.py", "ack", 6, "python", "method"), [])]}
     calls = []
 
@@ -324,6 +344,8 @@ def selftest():
         assert "[grep only] svc/main.go:3" in o, o
         o = out("ack", "-p", W)
         assert o.count("[grep only] user.py:2  go3  return e.ack()") == 2, o              # F1: a method's caller needs no import
+        o = out("helper2", "-p", W)
+        assert "[grep only] routes.py:2  -  ROUTES" in o and "[grep only] lazy.py:3  -  m.helper2()" in o, o   # F2: via the package
     assert code_only("a('x // y') // z\n/* q\n */ b(\"c\")") == "a('      ')     \n    \n    b(\" \")"
     print("cgcallers selftest ok")
     return 0
