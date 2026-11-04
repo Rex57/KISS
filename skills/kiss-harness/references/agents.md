@@ -11,7 +11,8 @@ When your tool list differs from this page, trust the tool list.
 | Gemini CLI | the built-in `generalist` subagent (a tool of that name, or `@generalist`), with the prompt | not documented: start a new `generalist` with the handoff below | A subagent does one task and reports back |
 | Antigravity | `invoke_subagent` with the prompt | not documented: start a new subagent with the handoff below | |
 
-**The handoff, when a subagent cannot be continued:** start a new one with the same prompt as the first, plus the
+**The handoff, when a subagent cannot be continued, or when `metrics.py R --context` marks it at a round
+boundary (its context has grown past the bound):** start a new one with the same prompt as the first, plus the
 new message, plus: "Read `R/progress.md` first: it is the record of the work so far." For a reviewer, add its last
 findings file. `progress.md` and the commits hold everything the next agent needs; that is why the implementer
 writes them after each ticket.

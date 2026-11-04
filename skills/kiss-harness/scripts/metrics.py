@@ -2,6 +2,8 @@
 """The run's token use from Claude Code's transcripts (SKILL.md, step 10). Reads only; prints counts, never text.
 
   python3 -I metrics.py R              one line: the token part of the metrics line
+  python3 -I metrics.py R --context    one line per subagent: its role, its id and its context now (the last
+                                       request's input, cache-write and cache-read tokens), marked past the bound
   python3 -I metrics.py --selftest
 
 Transcripts: under CLAUDE_CONFIG_DIR (default ~/.claude), projects/*/<session>/subagents/**/agent-<id>.jsonl, each
@@ -16,6 +18,7 @@ import glob, json, os, re, sys
 CG_READ = {"query", "explore", "context", "node", "files", "callers", "callees", "impact", "affected"}
 GREPS = {"grep", "egrep", "fgrep", "rg"}
 NA = "tokens: not available on this agent"
+BOUND = 350_000   # context tokens; past it, the controller starts a new agent at the next round boundary
 
 
 def config():
@@ -132,6 +135,22 @@ def tokens(R):
             f"{share} (CodeGraph {cg}, search {search}, {piped} more greps after a pipe)")
 
 
+def context(R):
+    subs = subagents(os.path.abspath(R))
+    if not subs:
+        return NA
+    lines = []
+    for f, r in sorted(subs):
+        u = {}
+        for m in messages(f):
+            u = m.get("usage") or {}
+        n = u.get("input_tokens", 0) + u.get("cache_creation_input_tokens", 0) + u.get("cache_read_input_tokens", 0)
+        agent = os.path.basename(f)[len("agent-"):-len(".jsonl")]
+        lines.append(f"{r.rstrip('s')} {agent}: context {n}" + ("; past 350k: start a new one at this boundary"
+                                                                    if n > BOUND else ""))
+    return "\n".join(lines)
+
+
 def selftest():
     import tempfile
 
@@ -184,12 +203,27 @@ def selftest():
         assert got == want, got
         assert tokens(R + "/") == want, "a trailing slash names the same run"
         assert tokens("/x/runs/none") == NA
+        assert context("/x/runs/none") == NA
+        put(os.path.join(S, "subagents", "agent-a5.jsonl"), [
+            user(f"You are the implementer. R = {R}"), said("m6", 1, 1, 0, 399_999), said("m7", 1, 1, 1000, 349_999)],
+            "kiss:kiss-implementer")
+        put(os.path.join(S, "subagents", "agent-a6.jsonl"), [
+            user(f"You are the reviewer of {R}"), said("m8", 1, 1, 0, 500_000), said("m9", 1, 2, 998, 348_000)],
+            "kiss:kiss-reviewer")
+        # a1's last request 5 + 0 + 3000; a2's 100 + 1000 + 2000; a5's 351,000 is past the bound; a6's 349,000 is
+        # not, though its earlier request was larger
+        assert context(R).splitlines() == [
+            "implementer a1: context 3005", "reviewer a2: context 3100",
+            "implementer a5: context 351000; past 350k: start a new one at this boundary",
+            "reviewer a6: context 349000"], context(R)
     print("metrics selftest ok")
 
 
 def main(argv):
     if argv[1:] == ["--selftest"]:
         return selftest()
+    if len(argv) == 3 and argv[2] == "--context":
+        return print(context(argv[1]))
     if len(argv) != 2:
         sys.exit(__doc__)
     print(tokens(argv[1]))

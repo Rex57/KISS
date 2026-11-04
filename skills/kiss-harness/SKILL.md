@@ -78,7 +78,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` and `git -C MAIN status` (both
    empty), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). Run `callcheck.py -p
    W <the HEAD at the last stop, or BASE at the first>..HEAD` and send each caller line it prints to read to the implementer. Open tickets and no
-   BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer. After 3 continuations, a
+   BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer. Before each continue, fix
+   round and recheck, run `metrics.py R --context` (Claude Code): an agent it marks gets the handoff of
+   [references/agents.md](references/agents.md) instead, and the round goes to the new one. After 3 continuations, a
    gate. On BLOCKED: a decision when the block needs a choice, else a gate.
 6. **A risky ticket** is reviewed alone (step 7 on its commits) as soon as the implementer names it; otherwise the
    final review covers it.
@@ -91,6 +93,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    implementer. Check each test its answer names from the diff and the test output (run the test). Save the answer
    to `R/answer-<n>.md`; when the round fixed a critical, high or reproduced-in-app finding, `prompt.py recheck R
    ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha>` → the SAME reviewer (its findings, if any, become `R/review-<n+1>.md`).
+   Before each one, the context check of step 5: a marked implementer or reviewer is replaced by the handoff.
    At most 2 fix rounds per review and 3 per run; then a gate.
 10. **Close**, in this order:
     1. The project's full check, once (the facts file names it).
@@ -106,6 +109,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
        CodeGraph share).
     6. The **merge gate**, with the log findings. A push, a pull request or any write to a remote is its own gate;
        `pr` writes a pull request's body.
+    7. The last line to the owner: start the next run in a new session (`R/` holds the run's state).
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 11 kiss-harness`
 
 (Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 11 kiss-harness` and follow what it prints.)
