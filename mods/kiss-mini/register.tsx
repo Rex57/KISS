@@ -133,11 +133,12 @@ function gitOutside(command: string, dir: string | undefined, wt: string | undef
   }
   return false
 }
-/** Whether a worker's tool call writes outside its worktree `wt`; with no `wt` known, every write does. */
+/** Whether a worker's tool call writes outside its worktree `wt`; with no `wt` known, every write does. A Bash command
+ * starts in the host's folder, unknown here: only the mod's cd before it puts it in the worktree. */
 function writesOutside(e: Record<string, unknown>, worktree?: string): boolean {
   const wt = worktree === undefined ? undefined : resolve('/', worktree)
   if (FILE_TOOLS.includes(String(e.tool))) return !inside(resolve(wt, String(e.file_path ?? e.notebook_path ?? '')), wt)
-  return String(e.tool) === 'Bash' && gitOutside(String(e.command ?? ''), wt, wt)
+  return String(e.tool) === 'Bash' && gitOutside(String(e.command ?? ''), undefined, wt)
 }
 // A GitHub tool of an MCP server that writes (a pull request, a merge, a push).
 const GITHUB_WRITES = /^mcp__.*github.*__.*(?:create|merge|update|push|delete)/i
@@ -686,8 +687,11 @@ export const register: Register = on => {
     if (t?.kind === 'question' && ['Edit', 'Write', 'NotebookEdit'].includes(String(e.tool))) {
       return { deny: 'kiss-mini: a question changes no file. Answer from what you read.' }
     }
-    const quiet = t?.kind === 'question' && String(e.tool) === 'Bash'
-    const r = await next(quiet ? { ...e, command: `export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; ${(e as { command: string }).command}` } as typeof e : e)
+    // D21: a worker's shell starts in the host's folder whatever the spawn's cwd, so each Bash command first goes to the
+    // worker's own folder (a question: its checkout); the guard below judges the command as it then runs.
+    const quiet = t?.kind === 'question' ? 'export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; ' : ''
+    const home = t && `'${(t.worktree ?? t.cwd).replace(/'/g, `'\\''`)}'`
+    const r = await next(home && String(e.tool) === 'Bash' ? { ...e, command: `${quiet}cd ${home} && ${(e as { command: string }).command}` } as typeof e : e)
     if (!t || String(e.tool) === 'mcp__kiss__progress') return r
     const a = e as unknown as Record<string, unknown>
     const arg = [a.command, a.file_path, a.pattern, a.description, a.url].find(v => typeof v === 'string') as string | undefined

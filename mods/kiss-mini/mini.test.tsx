@@ -481,7 +481,7 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
   const allowed = ['git commit -m "docs: how to git push a branch"', 'git commit -m fix', 'git add merge.py', './build.sh && git commit -m "docs: how to git push a branch"', 'git add run.sh && git commit -m "explain git merge in the readme"', 'git commit -m "bash: git merge notes"', 'git commit -m "merge the push docs"', 'git merge-base main HEAD', 'git log --grep merge', 'gh pr view 12']
   for (const command of allowed) await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
   await $.tool.call({ tool: 'Bash', command: 'git push', agentId: 'other' } as never)
-  expect(ran).toEqual([...allowed, 'git push'])
+  expect(ran).toEqual([...allowed.map(c => `cd '${WT}' && ${c}`), 'git push'])
 })
 
 // D1, D2: a code or bug worker writes only in its worktree WT; /repo (the sender's checkout) is outside it.
@@ -519,7 +519,15 @@ test('a code worker\'s git commands inside its worktree, and its git reads anywh
     `git -C ${WT}/sub commit -m x`, `cd ${WT}/sub && git add calc.py`, 'git -C /repo log', 'git -C /repo status', 'git -C /repo diff',
     'GIT_DIR=/repo/.git git show HEAD']
   for (const command of allowed) await call($, 'Bash', { command })
-  expect(ran).toEqual(allowed.map(c => `Bash ${c}`))
+  expect(ran).toEqual(allowed.map(c => `Bash cd '${WT}' && ${c}`))
+})
+
+test('a worker\'s Bash command runs in its worktree: the mod puts a cd there first, one word with a space or a quote', async ($, on) => {
+  // The worker's shell starts in the host's folder (the spawn's cwd does not move it), so a bare git write needs the cd.
+  const { ran } = await worker($, on, { tmp: "/tmp/it's a dir/" })
+  await call($, 'Bash', { command: 'git commit -m x' })
+  expect(JSON.stringify(await call($, 'Bash', { command: 'git -C /repo commit -m x' }))).toContain(ONLY)
+  expect(ran).toEqual([`Bash cd '/tmp/it'\\''s a dir/kiss-mini/${ID}/wt' && git commit -m x`])
 })
 
 test('a /private/var spelling of a /var worktree is inside it', async ($, on) => {
@@ -527,7 +535,7 @@ test('a /private/var spelling of a /var worktree is inside it', async ($, on) =>
   const wt = `/private/var/kiss/kiss-mini/${ID}/wt`
   await call($, 'Bash', { command: `git -C ${wt} commit -m x` })
   await call($, 'Write', { file_path: `${wt}/calc.py` })
-  expect(ran).toEqual([`Bash git -C ${wt} commit -m x`, `Write ${wt}/calc.py`])
+  expect(ran).toEqual([`Bash cd '/var/kiss/kiss-mini/${ID}/wt' && git -C ${wt} commit -m x`, `Write ${wt}/calc.py`])
 })
 
 test('a code worker\'s Edit, Write and NotebookEdit outside its worktree are denied; inside they pass', async ($, on) => {
@@ -548,7 +556,7 @@ test('the guard leaves the main loop, a subagent that is no task\'s worker and a
   const outside = [['Bash', 'command', 'git -C /repo commit -m x'], ['Write', 'file_path', '/repo/x.py']] as const
   for (const agentId of [null, 'other']) for (const [tool, key, value] of outside) await call($, tool, { [key]: value }, agentId)
   await call($, 'Bash', { command: 'python3 /repo/tools/check.py' })
-  expect(ran).toEqual([...outside, ...outside].map(([tool, , value]) => `${tool} ${value}`).concat('Bash python3 /repo/tools/check.py'))
+  expect(ran).toEqual([...outside, ...outside].map(([tool, , value]) => `${tool} ${value}`).concat(`Bash cd '${WT}' && python3 /repo/tools/check.py`))
 })
 
 test('an error inside the guard (a store read that throws) denies a worker\'s git write and its Write outside', async ($, on) => {
@@ -1136,7 +1144,10 @@ test('a question may not write a file, and its commands leave no Python or pytes
   expect(JSON.stringify(r)).toContain('changes no file')
   expect(JSON.stringify(r)).not.toContain('only in its worktree')
   await $.tool.call({ tool: 'Bash', command: 'pytest -q', agentId: 'w1' } as never)
-  expect(ran).toEqual(['export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; pytest -q'])
+  // The worktree guard leaves a question alone: its command runs in its checkout.
+  await $.tool.call({ tool: 'Bash', command: 'git -C /repo commit -m x', agentId: 'w1' } as never)
+  const quiet = `export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; cd '/repo' && `
+  expect(ran).toEqual([`${quiet}pytest -q`, `${quiet}git -C /repo commit -m x`])
 })
 
 test('a ready task with no commit is not taken as merged', async ($, on) => {
