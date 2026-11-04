@@ -102,7 +102,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
     4. **Look back** by [references/retro.md](references/retro.md): the candidates for the owner, most severe first
        (a mechanical mistake → a proposed check, a judgement call → a facts-file rule); change no product file.
     5. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
-       <used> of <budget>`.
+       <used> of <budget>`, then the line `python3 -I "$HB/scripts/metrics.py" R` prints (the tokens per role and the
+       CodeGraph share).
     6. The **merge gate**, with the log findings. A push, a pull request or any write to a remote is its own gate;
        `pr` writes a pull request's body.
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 11 kiss-harness`
