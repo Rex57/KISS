@@ -43,9 +43,9 @@ An answer the script refuses: show its line and ask again.
 3. **Report** the feedback mode line (on or off, and where it is set), every INFO line with its reason, and every WARN and FAIL line with its fix, taken from the README section in its `[fix: ...]`
    (`$KD/../../README.md`). End the report with one line: "Ready for a KISS run" when no line is FAIL, else the FAIL lines to
    fix first. Done when each WARN and FAIL line has its fix.
-4. **Fix on the owner's yes.** The owner installs tools and skills with `kiss-doctor setup` or the README links. With a yes you may make
-   a file fix: append `$KD/../../rules/codegraph.md` to the global instructions file once (read the file
-   first), or delete a `CODEGRAPH_START` block. Then run step 1 again.
+4. **Fix on the owner's yes.** The owner installs tools, skills and the CodeGraph rule with `kiss-doctor setup`
+   (or the README links); never append the rule by hand. With a yes, your one file fix is to delete a
+   `CODEGRAPH_START` block (read the file first). Then run step 1 again.
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 5 kiss-doctor`
 
 (Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 5 kiss-doctor` and follow what it prints.)
