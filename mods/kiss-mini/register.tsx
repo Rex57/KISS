@@ -166,6 +166,10 @@ const NOT_GIVEN = 'not given: read the files the first line names.'
 const TEXT_MIN = 200
 
 const isCode = (t: Task) => t.kind === 'code' || t.kind === 'bug'
+/** What starts a worker's Bash command (D21, D24): a cd to its own folder `home` (a question: its checkout, after the
+ * export that turns off the Python and pytest caches). The brief names it; the mod puts it before a command that lacks it. */
+const bashPrefix = (t: Task, home = `'${(t.worktree ?? t.cwd).replace(/'/g, `'\\''`)}'`) =>
+  `${t.kind === 'question' ? 'export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; ' : ''}cd ${home} && `
 
 /** The brief; `text` is the part that may be cut: the owner's task text, or a hand-off's own brief. */
 function briefLines(t: Task, text: string, rules: string, dir: string, seed = false, short = false) {
@@ -174,6 +178,8 @@ function briefLines(t: Task, text: string, rules: string, dir: string, seed = fa
   const where = [...(isCode(t)
     ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`]
     : [`Checkout: ${t.cwd} (read only)    Task folder: ${dir}`]),
+  // The folder by its field's name: the path is on the line above, and a second copy would cost the task text its length.
+  `Bash: ${bashPrefix(t, isCode(t) ? "'<Worktree>'" : "'<Checkout>'")}<command>`,
   // $PWD is W: the worker starts in its worktree (a question: its checkout); after a cd into the Checkout, -p "$PWD"
   // would query the base branch's index. Two full paths here would cost the task text 150 characters.
   ...(seed ? ['CodeGraph (never cd first): codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder'] : [])]
@@ -717,10 +723,11 @@ export const register: Register = on => {
       return { deny: 'kiss-mini: a question changes no file. Answer from what you read.' }
     }
     // D21: a worker's shell starts in the host's folder whatever the spawn's cwd, so each Bash command first goes to the
-    // worker's own folder (a question: its checkout); the guard below judges the command as it then runs.
-    const quiet = t?.kind === 'question' ? 'export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; ' : ''
-    const home = t && `'${(t.worktree ?? t.cwd).replace(/'/g, `'\\''`)}'`
-    const r = await next(home && String(e.tool) === 'Bash' ? { ...e, command: `${quiet}cd ${home} && ${(e as { command: string }).command}` } as typeof e : e)
+    // worker's own folder (a question: its checkout); the guard below judges the command as it then runs. D24: a command
+    // the worker already started with the prefix stays as it is, as auto mode reviewed it.
+    const prefix = t && String(e.tool) === 'Bash' ? bashPrefix(t) : undefined
+    const command = String((e as { command?: string }).command ?? '')
+    const r = await next(prefix && !command.startsWith(prefix) ? { ...e, command: prefix + command } as typeof e : e)
     if (!t || String(e.tool) === 'mcp__kiss__progress') return r
     const a = e as unknown as Record<string, unknown>
     const arg = [a.command, a.file_path, a.pattern, a.description, a.url].find(v => typeof v === 'string') as string | undefined

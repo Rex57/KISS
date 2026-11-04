@@ -552,6 +552,15 @@ test('a worker\'s Bash command runs in its worktree: the mod puts a cd there fir
   expect(ran).toEqual([`Bash cd '/tmp/it'\\''s a dir/kiss-mini/${ID}/wt' && git commit -m x`])
 })
 
+test('a worker\'s command that starts with the brief\'s prefix reaches beneath the mod unchanged; one without gets it once', async ($, on) => {
+  // D24: the mod's rewrite makes auto mode review a command again, so the brief names the prefix for the worker to type.
+  const { w, ran } = await worker($, on)
+  const prefix = `cd '${WT}' && `
+  expect(w.spawned[0]?.prompt).toContain(`\nBash: cd '<Worktree>' && <command>\n`)
+  for (const command of [`${prefix}git status`, 'pytest -q', `${prefix}cd sub && git add calc.py`]) await call($, 'Bash', { command })
+  expect(ran).toEqual([`Bash ${prefix}git status`, `Bash ${prefix}pytest -q`, `Bash ${prefix}cd sub && git add calc.py`])
+})
+
 test('a /private/var spelling of a /var worktree is inside it', async ($, on) => {
   const { ran } = await worker($, on, { tmp: '/var/kiss/' })
   const wt = `/private/var/kiss/kiss-mini/${ID}/wt`
@@ -1179,7 +1188,10 @@ test('a question may not write a file, and its commands leave no Python or pytes
   // The worktree guard leaves a question alone: its command runs in its checkout.
   await $.tool.call({ tool: 'Bash', command: 'git -C /repo commit -m x', agentId: 'w1' } as never)
   const quiet = `export PYTHONDONTWRITEBYTECODE=1 PYTEST_ADDOPTS="-p no:cacheprovider"; cd '/repo' && `
-  expect(ran).toEqual([`${quiet}pytest -q`, `${quiet}git -C /repo commit -m x`])
+  // The brief names the whole prefix; a command that holds it is left as it is.
+  expect(w.spawned[0]?.prompt).toContain(`\nBash: ${quiet.replace("'/repo'", "'<Checkout>'")}<command>\n`)
+  await $.tool.call({ tool: 'Bash', command: `${quiet}ls`, agentId: 'w1' } as never)
+  expect(ran).toEqual([`${quiet}pytest -q`, `${quiet}git -C /repo commit -m x`, `${quiet}ls`])
 })
 
 test('a ready task with no commit is not taken as merged', async ($, on) => {
@@ -1267,9 +1279,10 @@ test('when the paths leave under 200 characters for the task text, its first 200
 })
 
 test('in an indexed repo a code task\'s brief names W, the CodeGraph commands with -p and the seed file, within 1,500 characters', async ($, on) => {
-  // A long cwd, so pin() has room to shorten it for a long checkout path; Linux's /tmp/ keeps the brief's budget.
+  // A long cwd, so pin() has room to shorten it for a long checkout path; Linux's /tmp/ keeps the brief's budget. The
+  // brief's task text keeps exactly its 200 characters here: the path is 33 characters shorter since the Bash line (D24).
   const tmp = '/tmp/'
-  const cwd = pin('/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/notes-app-with-a-long-name-0123456789abcdefghijklmnopqrstuvwxyz-0123456789abcdefghij')
+  const cwd = pin('/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/notes-app-with-a-long-name-0123456789abcdefghijklmn')
   const w = world(on, { tmp, cwd, indexed: true })
   await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'kiss:kiss-mini', args: `fix ${'the long bug text '.repeat(30)}`.trim() } as never)

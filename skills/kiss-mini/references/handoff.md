@@ -19,6 +19,7 @@ Kind: code | bug | question | watch
 Checkout: <absolute path>    Base: <branch>    Branch: mini/<id>    Worktree: <absolute path>
 Task folder: <T>             Return: harness | owner    Checks: run | skip (owner)
 Rules: <the absolute path of this file>
+Bash: cd '<Worktree>' && <command>
 CodeGraph (never cd first): codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder
 Summary: <one line: what must happen>
 Current behaviour: <what happens now>
@@ -30,7 +31,8 @@ Out of scope: <what the worker leaves alone>
 Suggested skills: <the skills for this kind, from the table below>
 ```
 
-A question task leaves out `Base`, `Branch` and `Worktree`. The `CodeGraph` line is there only when the checkout
+A question task leaves out `Base`, `Branch` and `Worktree`; its `Bash` line is `export PYTHONDONTWRITEBYTECODE=1
+PYTEST_ADDOPTS="-p no:cacheprovider"; cd '<Checkout>' && <command>`. The `CodeGraph` line is there only when the checkout
 has a CodeGraph index. `W`, the worker's starting folder (`$PWD`), is the worktree (a question: the checkout); the
 mod indexes it, and `T/seed.md` holds `codegraph explore -p "W"` on the task's words. Run the commands from that folder: after a
 `cd` into the Checkout, `-p "$PWD"` reads the base branch's index, with no warning. Read code with `codegraph explore|node|callers -p "W"` (one
@@ -75,7 +77,9 @@ skill when it is installed: a draft pull request takes it as its body.
    outside the worktree (git reads such as status, log and diff pass), its `git stash` and `git worktree` changes
    anywhere (both reach every worktree), and its Edit, Write or NotebookEdit outside it,
    with "kiss-mini: a worker writes only in its worktree": commit in the worktree and report, never try again
-   elsewhere. A question task changes no file in the checkout: it runs in the owner's own working tree, read-only by this rule;
+   elsewhere. Start every Bash command as the brief's `Bash` line shows, with the folder's path in single quotes: a
+   worker's shell starts in the host's folder, and the mod puts that prefix before a command without it, which makes
+   auto mode review the command again. A question task changes no file in the checkout: it runs in the owner's own working tree, read-only by this rule;
    the mod denies only Edit, Write and NotebookEdit and turns off the Python and pytest caches, so a Bash command can
    still write there.
 4. **Conduct:** ask one concrete question at a time. Stop at a design choice and ask it. Mark a draft as unfinished.
