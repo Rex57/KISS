@@ -5,9 +5,8 @@
   python3 -I metrics.py R --context    one line per subagent: its role, its id and its context now (the last
                                        request's input, cache-write and cache-read tokens), marked past the bound
   python3 -I metrics.py R --record "<the controller's Metrics line>"   print the full line (the controller's part,
-                                       then the token part) and write it as `- <run>: <line>` into the metrics.md
-                                       of the .kiss folder that holds R's runs folder (a second record of a run
-                                       replaces its line)
+                                       then the token part) and write it as `- <run>: <line>` into metrics.md in
+                                       the folder that holds R (a second record of a run replaces its line)
   python3 -I metrics.py --selftest
 
 Transcripts: under CLAUDE_CONFIG_DIR (default ~/.claude), projects/*/<session>/subagents/**/agent-<id>.jsonl, each
@@ -215,19 +214,29 @@ def context(R):
 
 
 def record(R, line):
+    """Print the full line, then put it in R's runs folder's metrics.md: a rerun replaces its line in place, a new
+    run's line goes at the end, every other line stays. The book is replaced whole, so a failed write keeps it."""
     R = os.path.abspath(R)
-    full = f"{line}; {tokens(R)}"
-    book = os.path.join(os.path.dirname(os.path.dirname(R)), "metrics.md")
-    name = os.path.basename(R)
+    full = re.sub(r"[\r\n]", " ", f"{line}; {tokens(R)}")
+    print(full)
+    book = os.path.join(os.path.dirname(R), "metrics.md")
+    mine = f"- {os.path.basename(R)}: "
     try:
         with open(book) as f:
-            rows = [x for x in f.read().splitlines() if not x.startswith(f"- {name}: ")]
+            rows = f.read().splitlines()
     except FileNotFoundError:
         rows = []
-    rows.append(f"- {name}: {full}")
+    at = next((i for i, x in enumerate(rows) if x.startswith(mine)), len(rows))
+    rows[at:at + 1] = [mine + full]
     os.makedirs(os.path.dirname(book), exist_ok=True)
-    with open(book, "w") as f:   # the other lines as they were; the runs' lines in run (folder name) order
-        f.write("\n".join([x for x in rows if not x.startswith("- ")] + sorted(x for x in rows if x.startswith("- "))) + "\n")
+    tmp = f"{book}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w") as f:
+            f.write("\n".join(rows) + "\n")
+        os.replace(tmp, book)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     return full
 
 
@@ -318,17 +327,28 @@ def selftest():
                       ("cat > /s/n.md <<'EOF'\ngrep -rn x src\ncodegraph explore a\nEOF", (0, 0, 0, 0)),
                       ("python3 - <<EOF | grep ok\ngrep x y\nEOF\ngrep -rn z src", (0, 1, 1, 0))):
         assert bash_kinds(cmd) == want, (cmd, bash_kinds(cmd))
-    with tempfile.TemporaryDirectory() as t:                                # the metrics record, one line per run
+    import contextlib, io
+    with tempfile.TemporaryDirectory() as t, contextlib.redirect_stdout(io.StringIO()):   # the metrics record
         os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(t, "no-config")
-        a, b = (os.path.join(t, "repo", ".kiss", "runs", n) for n in ("2026-01-02-a", "2026-01-03-b"))
-        book = os.path.join(t, "repo", ".kiss", "metrics.md")
+        a, b, c = (os.path.join(t, "repo", ".kiss", "runs", n) for n in ("2026-01-02-a", "2026-01-03-b", "2026-01-01-c"))
+        book = os.path.join(t, "repo", ".kiss", "runs", "metrics.md")      # beside the run folders (R1)
         assert record(b, "Metrics: subagents 2") == "Metrics: subagents 2; " + NA
         record(a, "Metrics: subagents 3")
-        assert open(book).read() == ("- 2026-01-02-a: Metrics: subagents 3; " + NA + "\n"
-                                     "- 2026-01-03-b: Metrics: subagents 2; " + NA + "\n"), open(book).read()
-        record(a, "Metrics: subagents 4")                                    # a rerun of the close replaces it
-        assert open(book).read().splitlines() == ["- 2026-01-02-a: Metrics: subagents 4; " + NA,
-                                                  "- 2026-01-03-b: Metrics: subagents 2; " + NA], open(book).read()
+        record(c, "Metrics: subagents\r\n5")                              # R3: one line; R4: a new run at the end
+        assert open(book).read() == ("- 2026-01-03-b: Metrics: subagents 2; " + NA + "\n"
+                                     "- 2026-01-02-a: Metrics: subagents 3; " + NA + "\n"
+                                     "- 2026-01-01-c: Metrics: subagents  5; " + NA + "\n"), open(book).read()
+        record(a, "Metrics: subagents 4")                                    # a rerun replaces its line in place
+        assert open(book).read().splitlines()[1] == "- 2026-01-02-a: Metrics: subagents 4; " + NA, open(book).read()
+        os.chmod(os.path.dirname(book), 0o500)                              # R2: a write error keeps the old lines
+        try:
+            record(a, "Metrics: subagents 9")
+            raise AssertionError("a write to a read-only folder must fail")
+        except OSError:
+            pass
+        finally:
+            os.chmod(os.path.dirname(book), 0o700)
+        assert len(open(book).read().splitlines()) == 3 and not glob.glob(book + ".*"), open(book).read()
     print("metrics selftest ok")
 
 
@@ -338,7 +358,7 @@ def main(argv):
     if len(argv) == 3 and argv[2] == "--context":
         return print(context(argv[1]))
     if len(argv) == 4 and argv[2] == "--record":
-        return print(record(argv[1], argv[3]))
+        return record(argv[1], argv[3])
     if len(argv) != 2:
         sys.exit(__doc__)
     print(tokens(argv[1]))

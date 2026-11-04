@@ -113,7 +113,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
        (a mechanical mistake → a proposed check, a judgement call → a facts-file rule); change no product file.
     5. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
        <used> of <budget>`, given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it prints the full
-       line (with the tokens per role and the CodeGraph share) and records it in `<repo>/.kiss/metrics.md`, one line
+       line (with the tokens per role and the CodeGraph share) and records it in `<repo>/.kiss/runs/metrics.md`, one line
        per run (a rerun of the close replaces the run's line).
     6. The **merge gate**, with the log findings. A push, a pull request or any write to a remote is its own gate;
        `pr` writes a pull request's body.
