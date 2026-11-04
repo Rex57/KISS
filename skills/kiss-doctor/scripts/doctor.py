@@ -185,13 +185,36 @@ def rule_file(files, marks, depth):
     return next((p for p, x in texts if first and first in x), None)
 
 
+def exact(path):
+    """`path`'s text as it is on disk: UTF-8 read strictly, no newline translation."""
+    with open(path, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def replace_item(path, listed, marks):
+    """The replace item's values for the file that holds the rule (None: no file holds a bold lead-in; `listed` is the
+    agent's instructions file): the section's first line and its end for the changes line, or the reason the owner
+    does it by hand."""
+    yourself = ": replace the rule's lines with rules/codegraph.md yourself"
+    if not path:
+        return {"file": listed, "hand": f"no bold lead-in of the rule in {listed}{yourself}"}
+    try:
+        text = exact(path)
+    except (OSError, UnicodeDecodeError) as e:
+        return {"file": path, "hand": f"{path} is not readable as UTF-8 ({e}){yourself}"}
+    start, end = rule_span(text, marks)
+    if start is None:
+        return {"file": path, "hand": f"no heading above the rule in {path}{yourself}"}
+    line = lambda at: text[at:].split("\n", 1)[0].rstrip("\r")
+    return {"file": path, "first": line(start), "until": f'just before "{line(end)}"' if end < len(text) else "the end of the file"}
+
+
 def replace_section(path, rule):
     """The rule's section of `path` replaced with all of the rule file `{kiss}/rules/codegraph.md` (D4): a timestamped
     backup beside it first, then a temp file and a rename, so a failure or an interrupt leaves the old file whole.
     Every byte outside the section stays (no newline translation). (exit code, output)."""
     try:
-        with open(path, encoding="utf-8", newline="") as f:
-            text = f.read()
+        text = exact(path)
     except (OSError, UnicodeDecodeError) as e:
         return 1, f"{path}: {e}; nothing changed"
     span, new = rule_span(text, markers(os.path.dirname(os.path.dirname(rule)))), read(rule)
@@ -425,9 +448,8 @@ INSTALL = [
     {"key": "rule", "what": "the CodeGraph rule", "source": "https://github.com/Rex57/KISS (rules/codegraph.md)",
      "changes": "appends the rule to {file}", "agents": {a: ["cat {kiss}/rules/codegraph.md >> {file}"] for a in CLI}},
     {"key": "rule-replace", "what": "replace the CodeGraph section of {file}", "source": "https://github.com/Rex57/KISS (rules/codegraph.md)",
-     "changes": "replaces the section that holds the rule in {file} (from the heading above it to the next # or ## heading)"
-                " with all of rules/codegraph.md, after a backup beside the file; your own lines inside that section are"
-                " lost, and kept in the backup",
+     "changes": 'replaces the lines of {file} from "{first}" to {until} with all of rules/codegraph.md, after a backup'
+                " beside the file; your own lines inside that section are lost, and kept in the backup",
      "agents": {a: ["replace the CodeGraph section of {file} with {kiss}/rules/codegraph.md"] for a in CLI}},
     {"key": "mcp", "what": "CodeGraph's MCP server", "source": "https://github.com/colbymchenry/codegraph",
      "changes": "adds the MCP server codegraph (codegraph serve --mcp) to {agent}'s user settings",
@@ -493,8 +515,8 @@ def plan(system, gaps):
             run = [[w.format(**values) for w in shlex.split(c)] for c in cmds]
             n += bool(run and not hand)
             out.append({"n": n if run and not hand else None, "what": row["what"].format(**values), "agent": agent, "run": run, "hand": hand,
-                        "source": row["source"], "changes": row["changes"].format(**values) if cmds or "pm" not in row else
-                        "nothing: you install it yourself from the link",
+                        "source": row["source"], "changes": "nothing: setup does not change the file" if "hand" in values else
+                        row["changes"].format(**values) if cmds or "pm" not in row else "nothing: you install it yourself from the link",
                         "after": row.get("after", {}).get(agent, "")})
     return out
 
@@ -676,10 +698,7 @@ def gaps(system):
         if level == "FAIL":
             out[(agent, "rule")] = {"file": files[0]}
         elif level == "WARN":                   # an older or edited copy: its section replaced (D4)
-            where = rule_file(files, marks, 5 if agent == "claude" else 0)
-            out[(agent, "rule-replace")] = {"file": where} if where and rule_span(read(where), marks)[0] is not None else {
-                "file": where or files[0], "hand": f"no heading above the rule in {where or files[0]}: replace the rule's"
-                                                  " lines with rules/codegraph.md yourself"}
+            out[(agent, "rule-replace")] = replace_item(rule_file(files, marks, 5 if agent == "claude" else 0), files[0], marks)
         for level, _, _, fix in check_skills(agent, roots, need, note, loaded_here(agent)):
             if level == "FAIL" and fix.startswith("Install "):
                 out[(agent, fix)] = {}
@@ -917,12 +936,15 @@ def selftest():
         ("ponytail", "antigravity", [], "by hand: follow https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md"),
     ], show(shared)
     # D4: one replace item per file (Gemini CLI and Antigravity share GEMINI.md); a file with no heading: by hand
-    two = plan(sysfor(agents=["gemini", "antigravity"]), {(a, "rule-replace"): {"file": "/h/.gemini/GEMINI.md"} for a in ("gemini", "antigravity")})
+    span = {"first": "## CodeGraph", "until": 'just before "## Mine"'}
+    two = plan(sysfor(agents=["gemini", "antigravity"]), {(a, "rule-replace"): dict(span, file="/h/.gemini/GEMINI.md") for a in ("gemini", "antigravity")})
     assert show(two) == [("replace the CodeGraph section of /h/.gemini/GEMINI.md", "gemini",
                           ["replace the CodeGraph section of /h/.gemini/GEMINI.md with /k/rules/codegraph.md"], "")], show(two)
     assert two[0]["n"] == 1 and "own lines inside that section are lost, and kept in the backup" in two[0]["changes"], two
+    assert two[0]["changes"].startswith('replaces the lines of /h/.gemini/GEMINI.md from "## CodeGraph" to just before "## Mine" '), two
     hand = plan(sysfor(), {("claude", "rule-replace"): {"file": "/h/c.md", "hand": "no heading above the rule in /h/c.md"}})
     assert show(hand) == [("replace the CodeGraph section of /h/c.md", "claude", [], "by hand: no heading above the rule in /h/c.md")]
+    assert hand[0]["changes"] == "nothing: setup does not change the file", hand
     assert hand[0]["n"] is None, hand
     text = "\n".join(plan_lines(sysfor(os="linux", pm="apt"), plan(sysfor(os="linux", pm="apt"), dict(known, git={}))))
     for want in ("1. CodeGraph (device)", "   command: npm install -g @colbymchenry/codegraph",
@@ -1120,11 +1142,22 @@ def selftest():
             for text in (edited, older):
                 mine, _ = items("codex", md, text)
                 assert [(bool(i["n"]), i["what"]) for i in mine] == [(True, "replace the CodeGraph section of " + os.path.realpath(md))], mine
+                assert mine[0]["changes"].startswith('replaces the lines of %s from "## CodeGraph — the rule" to just before "## Mine" '
+                                                     'with all of rules/codegraph.md' % os.path.realpath(md)), mine
+            mine, _ = items("codex", md, edited.split("## Mine")[0])           # the section is the file's last
+            assert ' to the end of the file with ' in mine[0]["changes"], mine
             for text in ("# Me\n\n" + real, "nothing"):
                 mine, found = items("codex", md, text)
                 assert mine == [] and (("codex", "rule") in found) == (text == "nothing"), (mine, found)
+            nothing = "nothing: setup does not change the file"             # a step by hand promises no backup
             mine, _ = items("codex", md, "intro\n" + real.split("\n", 1)[1].replace("Decide once", "Decide"))   # no heading
-            assert [(i["n"], i["hand"].startswith("by hand: no heading above")) for i in mine] == [(None, True)], mine
+            assert [(i["n"], i["hand"].startswith("by hand: no heading above"), i["changes"]) for i in mine] == [(None, True, nothing)], mine
+            mine, _ = items("codex", md, "## CodeGraph\n- Which index: decide once.\n- Keep it fresh: sync.\n")   # no bold lead-in
+            assert [(i["n"], i["hand"].startswith("by hand: no bold lead-in of the rule in "), i["changes"]) for i in mine] == [(None, True, nothing)], mine
+            with open(md, "wb") as f:                                   # not UTF-8: a step by hand, not an item that fails
+                f.write(b"# Me\n\xe9t\xe9\n\n" + edited.encode())
+            mine = [i for i in plan(dict(got, agents=["codex"]), gaps(dict(got, agents=["codex"]))) if i["what"].startswith("replace the CodeGraph")]
+            assert [(i["n"], "UTF-8" in i["hand"], i["changes"]) for i in mine] == [(None, True, nothing)], mine
             # the rule in an @-imported file: that file changes, the importing file (with the owner's own bold word of a
             # lead-in) does not; the checks then say OK
             cmd = os.path.join(fx, "ccd", "CLAUDE.md")
