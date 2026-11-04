@@ -139,8 +139,9 @@ def selftest():
     assert "mattpocock-skills:tdd" in out and "Skipped:" in out and "Risk:" in out
     assert 'codegraph node -p "/w" <name>` for each function the ticket changes' in out and "Never `grep" in out, "B2"
     for rule in ("codegraph node -p", "codegraph callers -p", "cgcallers.py", "codegraph sync -q", "codegraph affected",
-                 "Never the full check", "Commit by explicit path"):
+                 "Never the full check", "by explicit path", "callcheck.py"):
         assert out.count(rule) == 1, ("T-5: each rule once", rule)
+    assert re.search(r'callcheck\.py" -p "/w" --cached`.*paste its output under the ticket in \S*/progress\.md', out), "T-3"
     assert "ponytail:ponytail-review" in rv and "G. Risk, load and speed" in rv and "A|B|C|D|E|F|G" in rv
     assert "failed before" in loop["fix"] and '"test":' in loop["fix"], "A1: each fix names its test"
     assert "only the findings of severity critical or high" in loop["recheck"], "A1: recheck by severity"

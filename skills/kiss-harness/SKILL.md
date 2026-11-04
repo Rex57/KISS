@@ -76,7 +76,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    start ONE subagent with that text: your strongest model at medium effort, in the background. Give every path
    absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` and `git -C MAIN status` (both
-   empty), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). Open tickets and no
+   empty), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). Run `callcheck.py -p
+   W <the HEAD at the last stop>..HEAD` and send each caller line it prints to read to the implementer. Open tickets and no
    BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer. After 3 continuations, a
    gate. On BLOCKED: a decision when the block needs a choice, else a gate.
 6. **A risky ticket** is reviewed alone (step 7 on its commits) as soon as the implementer names it; otherwise the
