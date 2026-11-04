@@ -227,7 +227,9 @@ of each agent you use:
 | Codex | `~/.codex/AGENTS.md` | `cat rules/codegraph.md >> ~/.codex/AGENTS.md` |
 | Gemini CLI and Antigravity | `~/.gemini/GEMINI.md` (both read it) | `cat rules/codegraph.md >> ~/.gemini/GEMINI.md` |
 
-`kiss-doctor setup` appends it for you, on your answer. Read the file first: append it once, not again on each update. If `codegraph install` added a
+`kiss-doctor setup` appends it for you, on your answer, and replaces an older or edited copy: the section that holds
+it (from the heading above it to the next `#` or `##` heading) becomes `rules/codegraph.md`, after a backup beside the
+file that keeps your own lines. Read the file first: append it once, not again on each update. If `codegraph install` added a
 `CODEGRAPH_START`/`CODEGRAPH_END` block to the same file, delete that block.
 
 ## Use it in a project

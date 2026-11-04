@@ -53,8 +53,11 @@ An answer the script refuses: show its line and ask again.
    (`$KD/../../README.md`). End the report with one line: "Ready for a KISS run" when no line is FAIL, else the FAIL lines to
    fix first. Done when each WARN and FAIL line has its fix.
 4. **Fix on the owner's yes.** The owner installs tools, skills and the CodeGraph rule with `kiss-doctor setup`
-   (or the README links); never append the rule by hand. With a yes, your one file fix is to delete a
-   `CODEGRAPH_START` block (read the file first). Then run step 1 again.
+   (or the README links); never append or replace the rule by hand. A WARN copy of the rule (it differs from KISS's
+   text, or is an older or edited copy) gets the setup item "replace the CodeGraph section of <file>": show it with
+   its changes line (the owner's own lines in that section are lost and kept in the backup), and on the owner's yes
+   run only that item, with the plan's call `setup [<agents>] --apply <its number> --plan <id>`. With a yes, your
+   one file fix is to delete a `CODEGRAPH_START` block (read the file first). Then run step 1 again.
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 5 kiss-doctor`
 
 (Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 5 kiss-doctor` and follow what it prints.)
