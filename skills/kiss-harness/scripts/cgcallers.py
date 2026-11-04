@@ -7,8 +7,8 @@
 It syncs W's index first. Then, for each definition of NAME (only the one in FILE with -f, a path or suffix, as
 `codegraph callers -f` does), it prints a block: the definition, its caller lines and a count line. The word search
 reads only that definition's own file and the files that import its module (Python `import` / `from ... import`;
-JS/TS/Svelte `import ... from` a path that ends in the module); --all reads every indexed file of the language. A hit
-in a comment, a string or a docstring is not counted. For a language with no import filter it reads every indexed
+JS/TS/Svelte `import ... from` a path that ends in the module); for a method, and with --all, it reads every indexed
+file of the language. A hit in a comment, a string or a docstring is not counted. For a language with no import filter it reads every indexed
 file of that language and prints a warning. codegraph misses a function passed as a value, a call through getattr
 with a string, a method on an object when two classes define the name, and recursion (KISS rules/codegraph.md,
 "callers is incomplete"). Each caller line is marked:
@@ -201,8 +201,9 @@ def main(argv=None, cg=None, git=None, read=read_file):
             warned.add(lang)
             print("warning: no import filter for %s: searched every indexed %s file" % (lang, lang))
         mod = module_of(home)
+        # a method is called on an object, whose file seldom imports the class's module: no import filter
         files = [f for f, l in indexed if l in family and (f == home or a.all or not family & (PY | JS)
-                                                            or imports(text(f), l, mod))]
+                                                            or dd.get("kind") == "method" or imports(text(f), l, mod))]
         langs = dict(indexed)
         who_cg = {c["id"]: c for c in d.get("callers") or []}
         edges = {}   # (file, line) -> (caller name, a guess?)
@@ -259,17 +260,20 @@ def selftest():
         "web/stray.ts": "fetchIt();\n",
         "web/own.ts": "import { fetchIt as f } from './api'\nexport function fetchIt() {}\n",
         "svc/serve.go": "package svc\n\nfunc Serve() {}\n",
+        "lib/eng.py": "class Engine:\n    def ack(self):\n        return 1\n\nclass Other:\n    def ack(self):\n        return 2\n",
+        "user.py": "def go3(e):\n    return e.ack()\n",
         "svc/main.go": "package svc\n\nfunc main() { Serve() }\n",
     }
     lang = {".py": "python", ".ts": "typescript", ".go": "go"}
-    d_ = lambda f, n, line, lg: {"name": n, "kind": "function", "filePath": f, "startLine": line, "id": "def:" + f, "language": lg}
+    d_ = lambda f, n, line, lg, kind="function": {"name": n, "kind": kind, "filePath": f, "startLine": line, "id": "def:" + f, "language": lg}
     edge = lambda f, who, line, conf=0.9: ({"id": "c:%s:%s" % (f, who), "name": who, "kind": "function", "filePath": f, "startLine": 1},
                                            {"source": "c:%s:%s" % (f, who), "line": line,
                                             "metadata": {"confidence": conf, "resolvedBy": "exact-match"}})
     defs = {"helper": [(d_("lib/util.py", "helper", 1, "python"), [edge("app.py", "go", 6)] + [edge("app.py", "go2", 9, 0.4)]),
                        (d_("lib/more.py", "helper", 1, "python"), [])],
             "fetchIt": [(d_("web/api.ts", "fetchIt", 1, "typescript"), [edge("web/page.ts", "x", 5)])],
-            "Serve": [(d_("svc/serve.go", "Serve", 3, "go"), [])]}
+            "Serve": [(d_("svc/serve.go", "Serve", 3, "go"), [])],
+            "ack": [(d_("lib/eng.py", "ack", 2, "python", "method"), []), (d_("lib/eng.py", "ack", 6, "python", "method"), [])]}
     calls = []
 
     def fake_cg(args):
@@ -318,6 +322,8 @@ def selftest():
         o = out("Serve", git=lambda args: W)                                               # W from git
         assert "warning: no import filter for go: searched every indexed go file" in o, o
         assert "[grep only] svc/main.go:3" in o, o
+        o = out("ack", "-p", W)
+        assert o.count("[grep only] user.py:2  go3  return e.ack()") == 2, o              # F1: a method's caller needs no import
     assert code_only("a('x // y') // z\n/* q\n */ b(\"c\")") == "a('      ')     \n    \n    b(\" \")"
     print("cgcallers selftest ok")
     return 0
