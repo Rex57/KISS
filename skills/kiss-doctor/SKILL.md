@@ -20,9 +20,12 @@ the OS, the shell, the package manager and the agents on PATH, runs the checks, 
 is missing: each item with its command, its source and what it changes, then the steps only the owner can do (a
 `sudo` command, Antigravity's copy steps, Codex's `/hooks` trust, a new session) and the optional links. Show the
 plan as printed, ask "all, none, or the numbers?", and wait. The owner's answer is the go: run only
-`python3 -I "$KD/scripts/doctor.py" setup --apply <answer>`, with `all`, `none` or the owner's numbers (`1,3`) as
-the one argument; the installs can take minutes, so give the call a 10-minute timeout (Claude Code: the Bash
-tool's `timeout: 600000`) and wait for it. Never type an install command yourself; every command comes from the script's install table. The
+`python3 -I "$KD/scripts/doctor.py" setup --apply <answer> --plan <id>`, with `all`, `none` or the owner's numbers
+(`1,3`) as the answer and the plan id the plan printed; a plan that changed since the owner saw it is refused, so
+show it again. Each command stops after 5 minutes as a FAIL, so the call needs up to 5 minutes per command it runs:
+for one or two items give it a 10-minute timeout (Claude Code: the Bash tool's `timeout: 600000`); for more, run it
+in the background (Claude Code: `run_in_background`) and wait for it to end.
+Never type an install command yourself; every command comes from the script's install table. The
 script runs the items one at a time, stops at the first failure, runs the checks again, and prints the steps by
 hand. Report what it printed: each item done, a FAIL with its output and the items not run, the checks again, and
 the manual steps (a `sudo` command, Antigravity's copy steps, Codex's `/hooks` trust, a new session and its login).
