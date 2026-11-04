@@ -64,11 +64,35 @@ const GH_DELIVERS = /\bgh\s+pr\s+(?:create|merge|ready)\b|\bgh\s+api\b(?=[^;&|]*
 // as a command, and the $(...) or backtick text inside double quotes.
 const RUNS_TEXT = /\b(?:(?:bash|sh|zsh)(?:\s+-[a-zA-Z]+)*?\s+-[a-zA-Z]*c[a-zA-Z]*|eval)\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
 const RUNS_IN_QUOTES = /\$\(|`/
-const delivers = (command: string) =>
-  GIT_DELIVERS.test(command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")) ||
-  [...command.matchAll(RUNS_TEXT)].some(m => GIT_DELIVERS.test(m[1] ?? m[2] ?? '')) ||
-  [...command.matchAll(/"((?:[^"\\]|\\.)*)"/g)].some(m => RUNS_IN_QUOTES.test(m[1]!) && GIT_DELIVERS.test(m[1]!)) ||
-  GIT_ALIAS.test(command) || GH_DELIVERS.test(command)
+// A double-quoted word; a $(...) in it may hold quotes of its own and one more level of parentheses.
+const DQ = /"((?:[^"\\$`]|\\.|\$\((?:[^()'"]|'[^']*'|"(?:[^"\\]|\\.)*"|\([^()]*\))*\)|`[^`]*`|\$)*)"/
+// A line that feeds a heredoc to a shell or eval (bash <<EOF, cat <<EOF | sh): its body runs.
+const RUNS_SHELL = /(?:^|[\s;&|(`])(?:[^\s;&|()`]*\/)?(?:bash|sh|zsh|eval)(?=$|[\s;&|)`])/
+/** `command` without its heredoc bodies (text, such as a commit message), except a body a shell or eval runs; each
+ * delimiter line stays. A << inside (( )) is a shift. */
+function unheredoc(command: string): string {
+  const lines = command.split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    out.push(line)
+    if (RUNS_SHELL.test(line)) continue
+    for (const m of line.matchAll(/(?<!<)<<(?!<)(-?)[ \t]*(['"]?)([A-Za-z_][\w.-]*)\2/g)) {
+      const before = line.slice(0, m.index)
+      if ((before.match(/\(\(/g) ?? []).length > (before.match(/\)\)/g) ?? []).length) continue
+      while (i + 1 < lines.length && (m[1] ? lines[i + 1]!.replace(/^\t+/, '') : lines[i + 1]) !== m[3]) i++
+      if (i + 1 < lines.length) out.push(lines[++i]!)
+    }
+  }
+  return out.join('\n')
+}
+function delivers(raw: string) {
+  const command = unheredoc(raw)
+  return GIT_DELIVERS.test(command.replace(new RegExp(`'[^']*'|${DQ.source}`, 'g'), "''")) ||
+    [...command.matchAll(RUNS_TEXT)].some(m => GIT_DELIVERS.test(m[1] ?? m[2] ?? '')) ||
+    [...command.matchAll(new RegExp(DQ.source, 'g'))].some(m => RUNS_IN_QUOTES.test(m[1]!) && GIT_DELIVERS.test(m[1]!)) ||
+    GIT_ALIAS.test(command) || GH_DELIVERS.test(command)
+}
 // D1, D2: a code or bug worker writes only in its worktree; outside it, git only reads.
 const ONLY_WORKTREE = 'kiss-mini: a worker writes only in its worktree'
 const GIT_READS = ['status', 'log', 'diff', 'show', 'rev-parse', 'rev-list', 'ls-files', 'cat-file', 'blame', 'grep', 'merge-base', 'describe']
@@ -88,6 +112,7 @@ function resolve(base: string | undefined, p: string): string | undefined {
 const inside = (p: string | undefined, wt: string | undefined) => !!p && !!wt && (p === wt || p.startsWith(`${wt}/`))
 /** A shell command's words, cut into segments at each operator (; & | ( ) a backtick, a new line); quoted text is part
  * of a word, never an operator or a word of its own. */
+const WORDS = new RegExp([/'([^']*)'/.source, DQ.source, /\\(.)|([;&|()`\n])|(\s)|([^\s'"\\;&|()`]+)/.source].join('|'), 'g')
 function segments(command: string): string[][] {
   const all: string[][] = [[]]
   let word: string | undefined
@@ -95,7 +120,7 @@ function segments(command: string): string[][] {
     if (word !== undefined) all[all.length - 1]!.push(word)
     word = undefined
   }
-  for (const m of command.replace(/\\\n/g, '').matchAll(/'([^']*)'|"((?:[^"\\]|\\.)*)"|\\(.)|([;&|()`\n])|(\s)|([^\s'"\\;&|()`]+)/g)) {
+  for (const m of command.replace(/\\\n/g, '').matchAll(WORDS)) {
     if (m[4]) {
       end()
       all.push([])
@@ -112,7 +137,7 @@ function segments(command: string): string[][] {
 /** Whether a git command in `command`, run from `dir`, writes in a folder outside `wt`: its -C folders (each from the one
  * before), --git-dir, --work-tree, GIT_DIR= and GIT_WORK_TREE=, after a cd or pushd; bash|sh|zsh -c and eval text runs too. */
 function gitOutside(command: string, dir: string | undefined, wt: string | undefined, env: Record<string, string | undefined> = {}): boolean {
-  for (const seg of segments(command)) {
+  for (const seg of segments(unheredoc(command))) {
     for (let i = 0; i < seg.length; i++) {
       const w = seg[i]!
       const set = /^(GIT_DIR|GIT_WORK_TREE)=(.*)$/s.exec(w)
@@ -136,8 +161,13 @@ function gitOutside(command: string, dir: string | undefined, wt: string | undef
           const eq = a.startsWith('--') ? a.indexOf('=') : -1
           const [opt, given] = eq > 0 ? [a.slice(0, eq), a.slice(eq + 1)] : /^-C./.test(a) ? ['-C', a.slice(2)] : [a, undefined]
           const value = () => given ?? seg[++j] ?? ''
-          if (opt === '-C') here = resolve(here, value())
-          else if (opt === '--git-dir' || opt === '--work-tree') folders.push(resolve(here, value()))
+          if (opt === '-C' || opt === '--git-dir' || opt === '--work-tree') {
+            const v = value()
+            // An unquoted $(...) or backtick value cuts the command there: its folder is unknown and its verb unseen.
+            if (v === '' || v === '$') return true
+            if (opt === '-C') here = resolve(here, v)
+            else folders.push(resolve(here, v))
+          }
           else if (['-c', '--namespace', '--config-env'].includes(opt)) value()
           else if (!a.startsWith('-')) sub = a
         }

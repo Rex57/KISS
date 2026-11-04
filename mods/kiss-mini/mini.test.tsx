@@ -475,11 +475,13 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
     'git --no-pager push origin x', 'git -C/x push', 'gh api -X POST repos/o/r/pulls -f head=x -f base=main',
     'bash -c "git push origin x"', "sh -c 'cd x && git push'", 'eval "git push"', 'git subtree push --prefix d origin b',
     'git -c alias.p=push p origin x', 'bash -lc "git push origin x"', 'gh api -X PUT repos/o/r/pulls/12/merge',
-    "bash -e -c 'git push origin x'", "/bin/bash -x -c 'git push'", 'echo "$(git push origin x)"']) {
+    "bash -e -c 'git push origin x'", "/bin/bash -x -c 'git push'", 'echo "$(git push origin x)"',
+    'echo "$(git push origin "x")"', "bash <<'EOF'\ngit push origin x\nEOF", 'cat <<EOF | sh\ngit push\nEOF']) {
     const r = await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
     expect(JSON.stringify(r)).toContain('press in the /kiss-mini pane')
   }
-  const allowed = ['git commit -m "docs: how to git push a branch"', 'git commit -m fix', 'git add merge.py', './build.sh && git commit -m "docs: how to git push a branch"', 'git add run.sh && git commit -m "explain git merge in the readme"', 'git commit -m "bash: git merge notes"', 'git commit -m "merge the push docs"', 'git merge-base main HEAD', 'git log --grep merge', 'gh pr view 12']
+  const allowed = ['git commit -m "docs: how to git push a branch"', 'git commit -m fix', 'git add merge.py', './build.sh && git commit -m "docs: how to git push a branch"', 'git add run.sh && git commit -m "explain git merge in the readme"', 'git commit -m "bash: git merge notes"', 'git commit -m "merge the push docs"', 'git merge-base main HEAD', 'git log --grep merge', 'gh pr view 12',
+    `git commit -m "$(cat <<'EOF'\ndocs: how to git push a branch\n\nexplain git merge in the readme\nEOF\n)"`, 'git commit -F - <<EOF\nmerge: git merge main is the old way\nEOF']
   for (const command of allowed) await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
   await $.tool.call({ tool: 'Bash', command: 'git push', agentId: 'other' } as never)
   expect(ran).toEqual([...allowed.map(c => `cd '${WT}' && ${c}`), 'git push'])
@@ -516,7 +518,14 @@ test('a code worker\'s git command that writes outside its worktree is denied: -
     // A shell by its path, and the text after its first flag that holds c.
     "/bin/bash -c 'git -C /repo commit -m x'", "bash -e -c 'git -C /repo commit -m x'", 'sh -x -c "cd /repo && git reset --hard"',
     // $(...) and backtick text inside double quotes runs.
-    'echo "$(git -C /repo commit -m x)"', 'msg="$(cd /repo && git reset --hard)"', 'echo "`git -C /repo commit -m x`"']) {
+    'echo "$(git -C /repo commit -m x)"', 'msg="$(cd /repo && git reset --hard)"', 'echo "`git -C /repo commit -m x`"',
+    // ... also when it holds double quotes of its own.
+    'out="$(git -C "/repo" commit -am wip 2>&1)"', 'msg="$(cd "/repo" && git reset --hard)"', 'echo "$(git -C "/srv/other repo" commit -m x)"',
+    // An unquoted $(...) or backtick as a folder value leaves the folder unknown: denied.
+    'git -C $(echo /repo) commit -m x', 'git -C `echo /repo` commit -m x', 'git --git-dir $(echo /repo/.git) commit -m x',
+    // A heredoc fed to a shell or eval runs its body.
+    "bash <<'EOF'\ngit -C /repo commit -m x\nEOF", 'cat <<EOF | sh\ncd /repo && git reset --hard\nEOF',
+    `eval "$(cat <<'EOF'\ngit -C /repo commit -m x\nEOF\n)"`]) {
     expect(JSON.stringify(await call($, 'Bash', { command })), command).toContain(ONLY)
   }
   expect(ran).toEqual([])
@@ -526,7 +535,12 @@ test('a code worker\'s git commands inside its worktree, and its git reads anywh
   const { ran } = await worker($, on)
   const allowed = ['git commit -m "see /some/other/path"', "git commit -m 'git -C /repo reset'", 'git -C sub commit -m x',
     `git -C ${WT}/sub commit -m x`, `cd ${WT}/sub && git add calc.py`, 'git -C /repo log', 'git -C /repo status', 'git -C /repo diff',
-    'GIT_DIR=/repo/.git git show HEAD', 'cd -- sub && git add calc.py', 'echo "$(git -C /repo log -1)"', 'git commit -m "fix: $(date)"']
+    'GIT_DIR=/repo/.git git show HEAD', 'cd -- sub && git add calc.py', 'echo "$(git -C /repo log -1)"', 'git commit -m "fix: $(date)"',
+    // A heredoc's body is text, such as a commit message, in each of its spellings.
+    `git commit -m "$(cat <<'EOF'\nkiss-mini: deny a worker's git stash\n\nRun cd /tmp first, then git -C /repo reset --hard.\nEOF\n)"`,
+    'git commit -F - <<EOF\nFix the `cd` prefix: git -C /repo commit -m x\nEOF', 'git commit -F - <<"MSG"\ncd /repo && git reset --hard\nMSG',
+    'cat <<-EOF > notes.txt\n\tgit -C /repo commit -m x\n\tEOF', 'git commit -m "docs: run git -C /repo reset --hard first"',
+    `git -C "${WT}/my sub" commit -m x`, 'echo $((1 << 2)) && git commit -m x']
   for (const command of allowed) await call($, 'Bash', { command })
   expect(ran).toEqual(allowed.map(c => `Bash cd '${WT}' && ${c}`))
 })
