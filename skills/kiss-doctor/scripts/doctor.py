@@ -135,17 +135,18 @@ def unfenced(text):
             yield line
 
 
-def section_end(text, at):
-    """Where the rule's section that holds `at` ends: the next `#` or `##` heading or the CODEGRAPH_START line of
-    `codegraph install`'s block, out of fences; else the end. The check's comparison and the replace both end there."""
+def section_end(text, at, level=2):
+    """Where the rule's section that holds `at` ends: the next heading of `level` or less (the replace: `#` or `##`)
+    or the CODEGRAPH_START line of `codegraph install`'s block, out of fences; else the end."""
     return next((line.start() for line in unfenced(text)
-                 if line.start() > at and re.match(r"#{1,2} |\W*CODEGRAPH_START\W*$", line.group())), len(text))
+                 if line.start() > at and re.match(r"#{1,%d} |\W*CODEGRAPH_START\W*$" % level, line.group())), len(text))
 
 
 def section(text, first):
-    """The rule's words in a text: from its first bold lead-in to the section's end, whitespace collapsed."""
+    """The rule's words in a text: from its first bold lead-in to the next heading of any level (an owner's own `###`
+    after an exact copy is not compared) or the CODEGRAPH_START line, out of fences, whitespace collapsed."""
     at = text.find("**" + first)
-    return " ".join(text[at:section_end(text, at)].split()) if at >= 0 else ""
+    return " ".join(text[at:section_end(text, at, 6)].split()) if at >= 0 else ""
 
 
 def check_rule(agent, text, files, marks, rule=""):
@@ -817,8 +818,17 @@ def selftest():
             path = put("spans/" + rel, before)
             code, out = replace(path)
             assert code == 0 and raw(path) == after, (rel, code, out, raw(path))
+        # The check of each case (the normal one, the file's last section, every span): the copy before differs, the
+        # replaced one is KISS's text.
+        cases = [("r/mid.md", mid), ("r/last.md", last)] + [("spans/" + rel, before) for rel, (before, _) in spans.items()]
+        got = [(rel, check_rule("claude", before, [rel], marks, rule)[0][0], check_rule("claude", raw(os.path.join(t, rel)), [rel], marks, rule)[0][0])
+               for rel, before in cases]
+        assert got == [(rel, "WARN", "OK") for rel, _ in cases], got
         again = check_rule("claude", raw(os.path.join(t, "spans", "s2.md")), ["s2.md"], marks, rule)
         assert [(o[0], "CODEGRAPH_START block" in o[2]) for o in again] == [("OK", False), ("WARN", True)], again
+        # S14: an exact copy with the owner's own ### subsection after it: the comparison ends at that heading.
+        k = "# Me\n" + rule + "### My CodeGraph notes\n- a note\n## Last\n"
+        assert check_rule("claude", k, ["k.md"], marks, rule) == [("OK", "claude", "CodeGraph rule in k.md", "")], k
         bad = {"r/none.md": "# Mine\n**Other.** x\n", "r/nohead.md": "intro\n**Which index.** a\n"}
         for rel, text in bad.items():                            # three kinds of bad input: each a FAIL, nothing changed
             path = put(rel, text)
@@ -1198,7 +1208,7 @@ def selftest():
                                                      'with all of rules/codegraph.md' % os.path.realpath(md)), mine
             mine, _ = items("codex", md, edited.split("## Mine")[0])           # the section is the file's last
             assert ' to the end of the file with ' in mine[0]["changes"], mine
-            for text in ("# Me\n\n" + real, "nothing"):
+            for text in ("# Me\n\n" + real, "# Me\n" + real + "### My CodeGraph notes\n- a note\n## Last\n", "nothing"):   # OK (S14: K), FAIL
                 mine, found = items("codex", md, text)
                 assert mine == [] and (("codex", "rule") in found) == (text == "nothing"), (mine, found)
             nothing = "nothing: setup does not change the file"             # a step by hand promises no backup
