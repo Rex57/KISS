@@ -35,7 +35,8 @@ An answer the script refuses: show its line and ask again.
 
 1. **Run the checks:** `python3 -I "$KD/scripts/doctor.py"`. It checks each agent whose CLI is on PATH; name
    agents to check fewer (`claude`, `codex`, `gemini`, `antigravity`). Per agent: the CodeGraph rule in the global
-   instructions file (KISS's `rules/codegraph.md`, found by its bold lead-ins, `@` imports followed), each skill in
+   instructions file (KISS's `rules/codegraph.md`, found by its bold lead-ins, `@` imports followed; a copy with every
+   lead-in but other words is a WARN: replace the section), each skill in
    the harness's skill table and KISS's own (installed, enabled, once, callable by the model), and the tools.
    Done when it prints its summary line.
 2. **Compare with your own skill list.** The script reads the disk; your skill list is what this session loaded.

@@ -120,11 +120,22 @@ def agent_setup(agent):
     return "\n".join(with_imports(f, 0) for f in files), files, roots, note
 
 
-def check_rule(agent, text, files, marks):
+def section(text, first):
+    """The rule's words in a text: from its first bold lead-in to the next heading, whitespace collapsed."""
+    at = text.find("**" + first)
+    end = re.search(r"^#{1,6} ", text[at:], re.M) if at >= 0 else None
+    return " ".join(text[at:at + end.start() if end else len(text)].split()) if at >= 0 else ""
+
+
+def check_rule(agent, text, files, marks, rule=""):
+    """The rule in an agent's instructions: every lead-in is OK, unless KISS's rule text is given and the copy differs."""
     shown = " or ".join(f.replace(HOME, "~") for f in files)
     have = [m for m in marks if m in text]
     if not text:
         out = [("FAIL", agent, f"CodeGraph rule: no {shown}", "The CodeGraph rule")]
+    elif len(have) == len(marks) and rule and section(text, marks[0]) != section(rule, marks[0]):
+        out = [("WARN", agent, f"CodeGraph rule in {shown} differs from KISS's text: replace the section with "
+                f"rules/codegraph.md", "The CodeGraph rule")]
     elif len(have) == len(marks):
         out = [("OK", agent, f"CodeGraph rule in {shown}", "")]
     elif have:
@@ -527,6 +538,14 @@ def selftest():
         assert check_rule("claude", "**Which index.** only", [main], marks)[0][0] == "WARN"
         assert check_rule("claude", "nothing", [main], marks)[0][0] == "FAIL"
         assert check_rule("claude", "", [main], marks)[0][0] == "FAIL"
+        # T-4: a copy with every lead-in is compared with KISS's text (whitespace and the text around it aside)
+        rule = read(os.path.join(kiss, "rules", "codegraph.md"))
+        same = "# Mine\n\n## CodeGraph\n\n**Which index.**  a\n**`callers` is incomplete:** b\n\n## Other\nmore\n"
+        assert check_rule("claude", same, [main], marks, rule) == [("OK", "claude", "CodeGraph rule in " + main, "")]
+        old = check_rule("claude", "**Which index.** a\n**`callers` is incomplete:** older b\n", [main], marks, rule)
+        assert old[0][0] == "WARN" and "differs from KISS's text: replace the section" in old[0][2], old
+        assert check_rule("claude", "**Which index.** only", [main], marks, rule)[0][0] == "WARN"   # lacks a lead-in: as before
+        assert check_rule("claude", "nothing", [main], marks, rule)[0][0] == "FAIL"
         assert len(check_rule("claude", "Which index `callers` is incomplete: delete a `CODEGRAPH_START` block", [main], marks)) == 1
         assert check_rule("claude", "Which index `callers` is incomplete\n<!-- CODEGRAPH_START -->\n", [main], marks)[1][0] == "WARN"
         # the skills: once, twice, user-only, missing
@@ -805,10 +824,11 @@ def main(argv):
 def report(agents):
     """The checks: (the report's lines, the number of FAIL lines)."""
     need, marks = required(), markers()
+    rule = read(os.path.join(KISS, "rules", "codegraph.md"))
     rows = check_tools() + check_feedback(settings_path(), project=os.getcwd())
     for agent in agents:
         text, files, roots, note = agent_setup(agent)
-        rows += check_rule(agent, text, files, marks) + check_skills(agent, roots, need, note, loaded_here(agent))
+        rows += check_rule(agent, text, files, marks, rule) + check_skills(agent, roots, need, note, loaded_here(agent))
     out = [f"{level:<5} {agent:<12} {what}" + (f"  [fix: README \"{fix}\"]" if fix else "") for level, agent, what, fix in rows]
     fails, warns, infos = (sum(r[0] == lv for r in rows) for lv in ("FAIL", "WARN", "INFO"))
     return out + [f"\n{fails} FAIL, {warns} WARN, {infos} INFO, {len(rows) - fails - warns - infos} OK ({', '.join(agents)})"], fails
