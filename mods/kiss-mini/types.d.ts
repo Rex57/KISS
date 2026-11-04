@@ -58,6 +58,9 @@ export type Task = {
   delivered?: Delivery
   /** A delivery under way, claimed before its first git call: a second press finds it taken. */
   busy?: Delivery
+  /** The repository Discard runs in, kept from its first press: a press after an interrupt finds it with the worktree
+   * and the sender's folder gone. */
+  repo?: string
 }
 
 declare module 'claude-code' {

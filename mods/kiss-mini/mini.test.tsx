@@ -16,7 +16,7 @@ type Opts = {
   branch?: string
   fail?: Record<string, { stdout?: string; stderr?: string }>
   store?: Record<string, unknown>
-  /** argv[0] values whose run rejects, as a timed-out or missing command does. */
+  /** argv[0] values, or git verbs as `branch -D`, whose run rejects, as a timed-out or missing command does. */
   hang?: string[]
   tmp?: string
   cwd?: string
@@ -57,6 +57,10 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     commands: [] as string[],
     /** The store's reads throw, as a store that is gone does. */
     storeDown: false,
+    /** Folders that no longer exist: a git -C there fails as git does. */
+    gone: [] as string[],
+    /** The task's branch is already deleted: `git branch --list` names nothing. */
+    branchGone: false,
   }
   w.clock = mock.clock(on, { now: NOW })
   // The store in memory, readable by the test: the ledger is the contract every session reads.
@@ -86,9 +90,13 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
   })
   on('process.run', async ($, e) => {
     w.runs.push([...e.argv])
+    if (e.argv[0] === 'git' && w.gone.includes(e.argv[2] ?? '')) return { value: { exitCode: 128, stdout: '', stderr: `fatal: cannot change to '${e.argv[2]}': No such file or directory\n`, isStdoutTruncated: false, isStderrTruncated: false } }
+    // Every test's repository is /repo; its worktrees share its git folder.
+    if (e.argv[3] === 'branch' && e.argv[4] === '--list') return { value: { exitCode: 0, stdout: w.branchGone ? '' : `  ${e.argv[5]}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv.includes('--git-common-dir')) return { value: { exitCode: 0, stdout: '/repo/.git\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--show-toplevel')) return { value: { exitCode: 0, stdout: `${top}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv[0] === 'codegraph' && e.argv[1] === 'explore' && seedMs) await w.clock.advance(seedMs)
-    if (hang.includes(e.argv[0] ?? '')) throw new Error(`${e.argv[0]}: timed out after 120000 ms`)
+    if (hang.includes(e.argv[0] ?? '') || hang.includes(`${e.argv[3]} ${e.argv[4]}`)) throw new Error(`${e.argv[0]}: timed out after 120000 ms`)
     if (e.argv[0] === 'codegraph') {
       const out = e.argv[1] === 'status' ? (indexed ? `CodeGraph Status\n\nProject: ${top}\n` : 'CodeGraph not initialized\n') : e.argv[1] === 'explore' ? 'SEED: calc.py add()\n' : ''
       return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -650,6 +658,82 @@ test('Discard clears a worktree git no longer lists, so the task can leave the l
   expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].worktree]).toEqual(['done', undefined])
   expect(w.toasts.some(text => text.includes('worktree kept'))).toBe(false)
   await ui.unmount()
+})
+
+// D16: Discard's git runs in the task's own repository (/repo), found from its worktree; a harness task's sender folder
+// is the run's worktree, which is gone after the run's merge.
+const RUN = '/repo/.kiss/worktrees/run'
+const discard = async ($: any, w: ReturnType<typeof world>) => {
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `discard-${ID}` })
+  const t = w.store[`kiss-mini/task/${ID}`]
+  const offered = (await ui.find({ key: `discard-${ID}` })) !== undefined
+  await ui.unmount()
+  return { t, offered }
+}
+
+test('Discard of a harness task whose sender folder is gone removes the worktree and the branch in the task\'s repository', async ($, on) => {
+  const w = world(on, { cwd: RUN })
+  await handoff($, w, false)
+  w.gone.push(RUN)
+  const toasts = w.toasts.length
+  const { t } = await discard($, w)
+  expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
+  expect(git(w)).toContain(`git -C /repo branch -D mini/${ID}`)
+  expect([t.state, t.worktree]).toEqual(['done', undefined])
+  expect(w.toasts.length).toBe(toasts)
+})
+
+test('Discard whose worktree list fails keeps the task open with its worktree, and toasts git\'s words', async ($, on) => {
+  const w = world(on, { fail: { 'worktree remove': { stderr: `fatal: '${WT}' is not a working tree` }, 'worktree list': { stderr: 'fatal: unable to read the worktree list' } } })
+  await ready($, w)
+  const { t, offered } = await discard($, w)
+  expect(w.toasts.at(-1)).toContain('fatal: unable to read the worktree list')
+  expect([t.state, t.worktree, t.branch, offered]).toEqual(['ready', WT, `mini/${ID}`, true])
+  expect(git(w).some(line => line.includes('branch -D'))).toBe(false)
+})
+
+test('Discard whose branch -D fails after the worktree went toasts; the task stays open with its branch and no worktree', async ($, on) => {
+  const w = world(on, { fail: { 'branch -D': { stderr: `error: cannot delete branch 'mini/${ID}'` } } })
+  await ready($, w)
+  const { t, offered } = await discard($, w)
+  expect(w.toasts.at(-1)).toContain(`discard failed: error: cannot delete branch 'mini/${ID}'`)
+  expect([t.state, t.worktree, t.branch, offered]).toEqual(['ready', undefined, `mini/${ID}`, true])
+})
+
+test('a Discard interrupted after the worktree went, with the sender folder gone, finishes on a second press', async ($, on) => {
+  const hang = ['branch -D']
+  const w = world(on, { cwd: RUN, hang })
+  await handoff($, w, false)
+  w.gone.push(RUN)
+  expect((await discard($, w)).t.state).toBe('ready')
+  w.gone.push(WT)
+  hang.length = 0
+  const { t, offered } = await discard($, w)
+  expect(git(w).filter(line => line === `git -C /repo branch -D mini/${ID}`).length).toBe(2)
+  expect([t.state, offered]).toEqual(['done', false])
+})
+
+test('a Discard whose branch is already deleted (an interrupted press deleted it) ends done', async ($, on) => {
+  const w = world(on, { fail: { 'branch -D': { stderr: `error: branch 'mini/${ID}' not found` } } })
+  await ready($, w)
+  w.branchGone = true
+  const toasts = w.toasts.length
+  expect((await discard($, w)).t.state).toBe('done')
+  expect(w.toasts.length).toBe(toasts)
+})
+
+test('Merge of an owner\'s task whose sender folder is gone toasts the missing folder, writes nothing, stays ready', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  w.gone.push('/repo')
+  const before = git(w).length
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: `merge-${ID}` })
+  await ui.unmount()
+  expect(w.toasts.at(-1)).toContain("merge failed: fatal: cannot change to '/repo': No such file or directory")
+  expect(git(w).slice(before).filter(line => !/ rev-parse | diff /.test(line))).toEqual([])
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('ready')
 })
 
 const HANDOFF_BRIEF = [

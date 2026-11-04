@@ -248,11 +248,11 @@ async function refresh($: $) {
   }
 }
 
-/** Host: the ledger forgets ended tasks after 7 days; one that still holds a worktree waits for its Discard. */
+/** Host: the ledger forgets ended tasks after 7 days; one that still holds a worktree or a branch waits for its Discard. */
 async function prune($: $) {
   const now = await $.clock.now()
   for (const t of await tasks($)) {
-    if (ENDED.includes(t.state) && !t.worktree && (t.finished ?? t.started) < now - KEEP_MS) await $.store.delete(TASK + t.id)
+    if (ENDED.includes(t.state) && !holds(t) && (t.finished ?? t.started) < now - KEEP_MS) await $.store.delete(TASK + t.id)
   }
 }
 
@@ -454,10 +454,13 @@ async function started($: $, t: Task) {
 
 const DELIVERY: [Delivery, string][] = [['merge', 'Merge into the base'], ['push', 'Push'], ['pr', 'Draft PR'], ['discard', 'Discard']]
 
-/** Whether the pane offers this delivery: Discard for any code task that still has a worktree, the others when an owner's task
- * is ready (the harness merges its own tasks). */
+/** Whether a code task still holds something to discard: its worktree, or a branch no delivery used. */
+const holds = (t: Task) => !!t.worktree || (t.state !== 'done' && !!t.branch)
+
+/** Whether the pane offers this delivery: Discard for any code task that still holds a worktree or a branch, the others when
+ * an owner's task is ready with its worktree (the harness merges its own tasks). */
 const offers = (t: Task, how: Delivery) =>
-  isCode(t) && !t.busy && (how === 'discard' ? !!t.worktree && t.state !== 'working' : t.state === 'ready' && t.brief === undefined)
+  isCode(t) && !t.busy && (how === 'discard' ? holds(t) && t.state !== 'working' : t.state === 'ready' && t.brief === undefined && !!t.worktree)
 
 /** Owner only: called from a press in the pane, never from a message or a tool. Nothing else merges, pushes or opens a PR. */
 // Presses in this session that are under way: the store's claim covers other sessions, this covers the read before it.
@@ -475,22 +478,34 @@ async function deliver($: $, id: string, how: Delivery) {
 
 async function deliverOnce($: $, id: string, how: Delivery) {
   const t = (await $.store.get(TASK + id)) as Task | undefined
-  if (!t || !offers(t, how) || !t.branch || !t.worktree) return
+  if (!t || !offers(t, how) || !t.branch) return
   await save($, { ...t, busy: how })
+  // What a failure leaves in the ledger: the task as it was, with what this press already did.
+  let left = t
   const failed = async (words: string) => {
-    await save($, t)
+    await save($, left)
     await refresh($)
     $.ui.toast(`kiss-mini ${id}: ${how} failed: ${words.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 400)}`)
   }
   try {
-    const git = (...args: string[]) => $.process.run(['git', '-C', t.cwd, ...args], { timeoutMs: 120_000 })
+    const run = (cwd: string, ...args: string[]) => $.process.run(['git', '-C', cwd, ...args], { timeoutMs: 120_000 })
+    // Discard runs in the task's own repository (D16): the main checkout of its worktree's git folder, else the sender's
+    // folder; kept on the task, so a press after an interrupt finds it with both folders gone.
+    if (how === 'discard' && !t.repo) {
+      const common = t.worktree ? await run(t.worktree, 'rev-parse', '--path-format=absolute', '--git-common-dir') : undefined
+      left = { ...t, repo: common?.exitCode === 0 ? common.stdout.trim().replace(/\/\.git$/, '') : t.cwd }
+      await save($, { ...left, busy: how })
+    }
+    const git = (...args: string[]) => run(how === 'discard' ? left.repo! : t.cwd, ...args)
     let r = { exitCode: 0, stdout: '', stderr: '' }
     let pushed = false
     if (how === 'merge') {
-      const head = (await git('rev-parse', '--abbrev-ref', 'HEAD')).stdout.trim()
+      const head = await git('rev-parse', '--abbrev-ref', 'HEAD')
       const merging = (await git('rev-parse', '-q', '--verify', 'MERGE_HEAD')).exitCode === 0
       const unmerged = (await git('diff', '--name-only', '--diff-filter=U')).stdout.trim()
-      if (head !== t.base) r = { exitCode: 1, stdout: '', stderr: `check out ${t.base} in ${t.cwd} first` }
+      // A sender's folder that is gone (or holds no repository): git's own words name it.
+      if (head.exitCode !== 0) r = head
+      else if (head.stdout.trim() !== t.base) r = { exitCode: 1, stdout: '', stderr: `check out ${t.base} in ${t.cwd} first` }
       else if (merging || unmerged) r = { exitCode: 1, stdout: '', stderr: `a merge is under way in ${t.cwd}: finish or abort it first` }
       // No merge was under way before this one, so a MERGE_HEAD now is this press's own.
       else if ((r = await git('merge', '--no-edit', t.branch)).exitCode !== 0 && (await git('rev-parse', '-q', '--verify', 'MERGE_HEAD')).exitCode === 0) {
@@ -504,14 +519,23 @@ async function deliverOnce($: $, id: string, how: Delivery) {
       }
     }
     if (r.exitCode !== 0) return failed(`${how === 'pr' && pushed ? 'pushed; draft PR failed: ' : ''}${[r.stdout, r.stderr].map(x => x.trim()).filter(Boolean).join('\n')}`)
-    // The delivered work is the branch (or, for a discard, nothing): the worktree goes, whatever it holds.
-    const removed = await git('worktree', 'remove', '--force', t.worktree)
-    if (how === 'discard') await git('branch', '-D', t.branch)
-    // A worktree git no longer lists (its folder deleted, then pruned) is gone too.
-    const gone = removed.exitCode === 0 || !(await git('worktree', 'list', '--porcelain')).stdout.split('\n').includes(`worktree ${t.worktree}`)
-    if (!gone) $.ui.toast(`kiss-mini ${id}: worktree kept at ${t.worktree}: ${removed.stderr.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 200)}`)
-    const { pr, diff, tests, ...rest } = t
-    await save($, { ...rest, state: 'done', delivered: how, ...(gone ? { worktree: undefined } : {}) })
+    // The delivered work is the branch (or, for a discard, nothing): the worktree goes, whatever it holds. A worktree
+    // git no longer lists (its folder deleted, then pruned) is gone too; only a list that worked says so.
+    if (t.worktree) {
+      const removed = await git('worktree', 'remove', '--force', t.worktree)
+      const list = removed.exitCode === 0 ? removed : await git('worktree', 'list', '--porcelain')
+      if (removed.exitCode === 0 || (list.exitCode === 0 && !list.stdout.split('\n').includes(`worktree ${t.worktree}`))) left = { ...left, worktree: undefined }
+      else if (how === 'discard') return failed(list.exitCode === 0 ? `worktree kept at ${t.worktree}: ${removed.stderr}` : list.stderr || list.stdout)
+      else $.ui.toast(`kiss-mini ${id}: worktree kept at ${t.worktree}: ${removed.stderr.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 200)}`)
+    }
+    if (how === 'discard') {
+      const deleted = await git('branch', '-D', t.branch)
+      // A branch an interrupted press already deleted is gone too; only a list that worked says so.
+      const list = deleted.exitCode === 0 ? deleted : await git('branch', '--list', t.branch)
+      if (deleted.exitCode !== 0 && (list.exitCode !== 0 || list.stdout.trim())) return failed(deleted.stderr || deleted.stdout)
+    }
+    const { pr, diff, tests, ...rest } = left
+    await save($, { ...rest, state: 'done', delivered: how })
     await refresh($)
   } catch (err) {
     await failed(String(err))
@@ -778,10 +802,10 @@ export const register: Register = on => {
     const Input = e.surface === 'mobile' ? undefined : ($.ui.resolve(e) as { Input?: any }).Input
     const all = await read($, ledger)
     const ended = all.filter(t => ENDED.includes(t.state)).sort((a, b) => (b.finished ?? 0) - (a.finished ?? 0))
-    // An ended task that still holds a worktree stays in view until its Discard.
+    // An ended task that still holds a worktree or a branch stays in view until its Discard.
     // Waiting for the owner first, then working, ready, watching; then the ended ones, newest first.
     const open = all.filter(t => !ENDED.includes(t.state)).sort((a, b) => ORDER.indexOf(a.state) - ORDER.indexOf(b.state))
-    const list = [...open, ...ended.filter((t, i) => i < SHOW_ENDED || t.worktree)]
+    const list = [...open, ...ended.filter((t, i) => i < SHOW_ENDED || holds(t))]
     const now = await $.clock.now()
     const age = (t: Task) => {
       const s = Math.round(((t.finished ?? now) - t.started) / 1000)
