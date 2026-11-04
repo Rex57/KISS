@@ -290,8 +290,8 @@ def main(argv=None, cg=None, git=None, read=read_file):
             if c:
                 edges[(c["filePath"], e.get("line") or c.get("startLine"))] = (
                     c["name"], m.get("confidence") == 0.4 and m.get("resolvedBy") == "exact-match")
-        # D19: the def (its start line) or the file (0, module code) of each codegraph caller
-        held = {(c["filePath"], 0 if c.get("kind") == "file" else c.get("startLine")) for c in who_cg.values()}
+        # D19: the def (its start line) of each codegraph caller; module code keeps the exact-line rule
+        held = {(c["filePath"], c.get("startLine")) for c in who_cg.values() if c.get("kind") != "file"}
         rows, matched = [], set()
         for f in files:
             body = text(f).splitlines()
@@ -307,7 +307,7 @@ def main(argv=None, cg=None, git=None, read=read_file):
                     matched.add((f, ln))
                     who, guess = edges[(f, ln)]
                     rows.append(("cg guess" if guess else "both", f, ln, who, line[:110]))
-                elif langs.get(f) in PY and (f, max([s[0] for s in spans if s[0] <= ln <= s[1]] or [0])) in held:
+                elif langs.get(f) in PY and (f, max([s[0] for s in spans if s[0] <= ln <= s[1]] or [None])) in held:
                     rows.append(("both", f, ln, enclosing(spans, ln), line[:110]))   # another call in a listed caller
                 else:
                     rows.append(("grep only", f, ln, enclosing(spans, ln) if spans else "-", line[:110]))
@@ -367,7 +367,9 @@ def selftest():
             "fetchIt": [(d_("web/api.ts", "fetchIt", 1, "typescript"), [edge("web/page.ts", "x", 5)])],
             "Serve": [(d_("svc/serve.go", "Serve", 3, "go"), [])],
             "Engine.ack": [(d_("lib/eng.py", "ack", 2, "python", "method"), [])],
-            "helper2": [(d_("pkg/util.py", "helper2", 1, "python"), [])],
+            "helper2": [(d_("pkg/util.py", "helper2", 1, "python"),       # N1: a file caller on the import line only
+                         [({"id": "file:routes.py", "name": "routes.py", "kind": "file", "filePath": "routes.py", "startLine": 1},
+                           {"source": "file:routes.py", "line": 1, "metadata": {"confidence": 0.85, "resolvedBy": "import"}})])],
             "ack": [(d_("lib/eng.py", "ack", 2, "python", "method"), []), (d_("lib/eng.py", "ack", 6, "python", "method"), [])]}
     calls, project = [], {}
 
