@@ -2,7 +2,7 @@
 """The guarded write of kiss-dream (SKILL.md, "Another writer"): every change to a memory folder goes through here.
 
   python3 -I guard.py start MEMDIR            make the private scratch folder (first/, expected/, drafts/); print it
-                                              (LOCK-HELD, exit 3, and no copy when the lock is held)
+                                              (the report table and LOCK-HELD, exit 3, and no copy when the lock is held)
   python3 -I guard.py where MEMDIR            print this run's scratch folder (the newest one for MEMDIR)
   python3 -I guard.py write MEMDIR FILE...    copy drafts/FILE into MEMDIR
   python3 -I guard.py move MEMDIR TRASH FILE...  move MEMDIR/FILE into the TRASH folder
@@ -10,8 +10,8 @@
   python3 -I guard.py finish MEMDIR TRASH     at the end: move this run's scratch folder into the TRASH folder
   python3 -I guard.py --selftest
 
-Before a write or move: LOCK-HELD (exit 3) when MEMDIR/.consolidate-lock is under one hour old and its PID lives;
-CHANGED (exit 4) and the changed files when MEMDIR differs from expected/ (a note this run did not write). Else it
+Before a write or move: the report table (every step not met) and LOCK-HELD (exit 3) when MEMDIR/.consolidate-lock
+is under one hour old and its PID lives; CHANGED (exit 4) and the changed files when MEMDIR differs from expected/ (a note this run did not write). Else it
 writes, updates expected/, prints WRITTEN and compares each written note with its draft (exit 5 on a difference).
 It never writes, touches or removes the lock. The scratch folder is ~/.cache/kiss-dream/<project>-<time>/, mode 700.
 """
@@ -77,6 +77,14 @@ def lock_held(memdir, now=None):
     return True
 
 
+def held(memdir, tail=""):
+    """The lines for a held lock: the report's table (SKILL.md step 6) first, so the report opens with it."""
+    lock = os.path.join(memdir, LOCK)
+    why = "stopped: another consolidation holds %s" % lock
+    return (["| Step | Met | Reason |", "|---|---|---|"] + ["| %d | no | %s |" % (n, why) for n in range(1, 6)]
+            + ["LOCK-HELD: another consolidation holds %s%s" % (lock, tail)])
+
+
 def changed(memdir, expected):
     names = lambda d: {f for f in os.listdir(d) if f != LOCK and os.path.isfile(os.path.join(d, f))}
     have, want = names(memdir), names(expected)
@@ -90,7 +98,7 @@ def guarded(memdir, c, change):
     # shortcut: the lock is checked, not held; a writer that starts during this write is caught only at the next
     # write. Upgrade to taking a lock of our own if Claude Code ever documents one for other writers.
     if lock_held(memdir):
-        return 3, ["LOCK-HELD: another consolidation holds %s" % os.path.join(memdir, LOCK)]
+        return 3, held(memdir)
     diff = changed(memdir, os.path.join(c, "expected"))
     if diff:
         return 4, ["CHANGED: %s" % " ".join(diff)]
@@ -163,8 +171,15 @@ def selftest():
         try:
             open(os.path.join(mem, LOCK), "w").write(str(sleeper.pid))
             code, out = write(mem, c, ["a.md"])
-            assert code == 3 and out[0].startswith("LOCK-HELD"), out
+            # the report's table comes first (SKILL.md step 6), then the LOCK-HELD line
+            assert code == 3 and out[:3] == ["| Step | Met | Reason |", "|---|---|---|",
+                                             "| 1 | no | stopped: another consolidation holds %s |" % os.path.join(mem, LOCK)], out
+            assert len(out) == 8 and out[6].startswith("| 5 | no |") and out[7].startswith("LOCK-HELD"), out
             assert start(mem) is None                      # start refuses under a held lock, before any copy
+            cli = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "start", mem], capture_output=True,
+                                 text=True, env=dict(os.environ))
+            assert cli.returncode == 3 and cli.stdout.splitlines()[0] == "| Step | Met | Reason |", cli
+            assert cli.stdout.splitlines()[-1].startswith("LOCK-HELD") and "nothing copied" in cli.stdout, cli.stdout
             assert open(os.path.join(mem, "a.md")).read() == "old a\n"
             assert move(mem, c, os.path.join(t, "trash"), ["b.md"])[0] == 3 and os.path.isfile(os.path.join(mem, "b.md"))
             # an old lock (over one hour) does not hold
@@ -232,7 +247,7 @@ def main(argv):
     if cmd == "start":
         c = start(memdir)
         if c is None:
-            print("LOCK-HELD: another consolidation holds %s; nothing copied" % os.path.join(memdir, LOCK))
+            print("\n".join(held(memdir, "; nothing copied")))
             sys.exit(3)
         print(c)
         return

@@ -48,17 +48,19 @@ no tracked file; your one write is the list in the git-ignored `.kiss/clean/` (s
    Any caller, route, test, string or doc use: it is not a delete candidate (list it as a merge or rename candidate
    only when that holds). Without CodeGraph: list no delete candidate, and say so. Done when each delete candidate
    shows its callers, impact, cgcallers and word-search results, all empty but its own definition.
-7. **One ranked list.** Join every candidate into one list, sorted by kind first, in this order: (1) bug or
-   security, (2) risky code with no test, (3) load or slow path, (4) delete, merge, split or deepen, (5) `shortcut:`
-   debt. Strength sorts only inside one kind: `Strong`, then `Worth exploring`, then `Speculative`; at equal strength
-   a hot spot first. Before you save, read the kind and strength columns from top to bottom and move each row that
-   is out of that order. Every row gets `Strong`, `Worth exploring` or `Speculative`, a `shortcut:` with a named
-   trigger too. Each row: number, kind, `file:line`, the evidence (the check that found
-   it and its result), the strength, and the build it needs (a harness run for a change across modules or an
-   interface, a `/kiss-mini` task for a small local one). Start the list with one line per skipped part: each skill or tool that step 1 found missing ("ponytail not
-   installed: no audit report, no debt ledger"), and each installed skill of steps 3 to 5 that the run did not call. Save
-   it as `<repo>/.kiss/clean/<YYYY-MM-DD>.md`; when that file exists, add `-2`, `-3` and so on to the name. That
-   folder must be git-ignored: when `git -C "<repo>" check-ignore -q .kiss/clean/x` fails, add the line
+7. **One ranked list.** Join every candidate into one list; the script sorts it, never you: by kind first, in this
+   order: (1) `bug` or `security`, (2) `risky` (code with no test), (3) `load` or `slow`, (4) `delete`, `merge`,
+   `split` or `deepen`, (5) `shortcut` debt; then by strength, `Strong`, `Worth exploring`, `Speculative`; at equal
+   strength a hot spot first. Every row gets one of those kinds and strengths, a `shortcut:` with a named trigger too.
+   Each row: kind, `file:line` (`where`), the evidence (the check that found it and its result), the strength, the
+   build it needs (a harness run for a change across modules or an interface, a `/kiss-mini` task for a small local
+   one) and `hot` (true for a hot spot). The skipped lines start the list: one per skill or tool that step 1 found
+   missing ("ponytail not installed: no audit report, no debt ledger"), and one per installed skill of steps 3 to 5
+   that the run did not call. Write them as JSON to a temp file outside the repo,
+   `{"skipped": [...], "rows": [{"kind", "where", "evidence", "strength", "build", "hot"}]}`, and run
+   `python3 -I "$CC/scripts/rank.py" <that file> <repo>/.kiss/clean/<YYYY-MM-DD>.md`: it numbers the rows in rank
+   order and writes the list. When that file exists it stops (exit 2): add `-2`, `-3` and so on to the name. That
+   folder must be git-ignored, before the script writes: when `git -C "<repo>" check-ignore -q .kiss/clean/x` fails, add the line
    `.kiss/clean/` to the file that `git -C "<repo>" rev-parse --git-path info/exclude` names (never to a tracked
    file), and say so. Show the saved list as it is, with every column. Done when `git -C "<repo>" status --short`
    equals the status step 1 recorded (less a `?? .kiss/` line that the new exclude line hides).

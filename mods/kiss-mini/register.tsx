@@ -44,6 +44,7 @@ async function folder($: $, id: string) {
 
 /** The worker's report: its State line and its Summary (up to the next field), cut to 600 characters. */
 export function parseReport(answer: string, kind?: Task['kind']): { state: State; summary: string } {
+  if (!answer.trim()) return { state: 'failed', summary: 'the worker returned no answer' }
   const state = /^State:\s*(ready|done|failed|waiting for you)\b/im.exec(answer)?.[1]?.toLowerCase() as State | undefined
   const summary = /^Summary:\s*([\s\S]*?)(?=^\w[\w ]*:|\n\n|$(?![\s\S]))/im.exec(answer)?.[1]?.trim() ?? answer.trim()
   // A question answered with no State line is an answer: done. A change with none is not known to be done.

@@ -214,9 +214,10 @@ def feedback_mode(settings, home=HOME, env=None, project=None):
     return now == "1", where
 
 
-def check_feedback(settings):
-    on, where = feedback_mode(settings, env=os.environ, project=os.getcwd())
-    return [("INFO", "device", "feedback mode: %s (%s)" % ("on" if on else "off", where), "")]
+def check_feedback(settings, home=HOME, env=os.environ, project=None):
+    on, where = feedback_mode(settings, home, env, project)
+    hint = "" if on else "; turn it on with /kiss:kiss-doctor feedback on"
+    return [("INFO", "device", "feedback mode: %s (%s)%s" % ("on" if on else "off", where, hint), "")]
 
 
 def set_feedback(settings, on):
@@ -542,11 +543,14 @@ def selftest():
         os.makedirs(home)
         st = os.path.join(home, "cfg", "settings.json")
         assert feedback_mode(st, home) == (False, "set nowhere")
+        off = check_feedback(st, home, env={})[0][2]
+        assert off == "feedback mode: off (set nowhere); turn it on with /kiss:kiss-doctor feedback on", off
         put("fhome/cfg/settings.json", json.dumps({"env": {"KISS_FEEDBACK": "1"}}))
         assert feedback_mode(st, home) == (False, "set for Claude Code only, in Claude Code's settings env (~/cfg/settings.json)"), feedback_mode(st, home)
         os.remove(st)
         put("fhome/.zshrc", "export PATH=x\nexport KISS_FEEDBACK=1\n")
         assert feedback_mode(st, home) == (True, "the shell profile ~/.zshrc"), feedback_mode(st, home)
+        assert check_feedback(st, home, env={})[0][2] == "feedback mode: on (the shell profile ~/.zshrc)"
         original = {"model": "opus", "permissions": {"allow": ["Read"]}, "hooks": {"Stop": []}, "note": "café"}
         put("fhome/cfg/settings.json", json.dumps(original))
         lines = set_feedback(st, False)
@@ -768,7 +772,7 @@ def main(argv):
 def report(agents):
     """The checks: (the report's lines, the number of FAIL lines)."""
     need, marks = required(), markers()
-    rows = check_tools() + check_feedback(settings_path())
+    rows = check_tools() + check_feedback(settings_path(), project=os.getcwd())
     for agent in agents:
         text, files, roots, note = agent_setup(agent)
         rows += check_rule(agent, text, files, marks) + check_skills(agent, roots, need, note, loaded_here(agent))

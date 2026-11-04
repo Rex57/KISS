@@ -1079,3 +1079,13 @@ test('with no codegraph on the machine the task starts with no seed and no error
   expect(Object.keys(w.files).some(f => f.endsWith('seed.md'))).toBe(false)
   expect(w.store[`kiss-mini/task/${ID}`].state).toBe('working')
 })
+
+test('a question whose worker returns no answer ends failed: the worker returned no answer', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: ' \n', durationMs: 1, isAborted: false, turnId: 't1' } as never)
+  expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].report]).toEqual(['failed', 'the worker returned no answer'])
+})
