@@ -6,7 +6,7 @@ When your tool list differs from this page, trust the tool list.
 
 | Agent | Start | Continue the same subagent | Notes |
 |---|---|---|---|
-| Claude Code | `Agent` tool, `subagent_type: "kiss:kiss-implementer"` or `"kiss:kiss-reviewer"` (KISS ships both; the UI shows the name; `"general-purpose"` when your agent list lacks them), the prompt, `model` (the implementer: `opus`, effort `medium`), `run_in_background: true` | `SendMessage` to the agent's id | You are told when it finishes: do not poll |
+| Claude Code | `Agent` tool, `subagent_type: "kiss:kiss-implementer"` or `"kiss:kiss-reviewer"` (KISS ships both; the UI shows the name; `"general-purpose"` when your agent list lacks them), the prompt, `model` (the implementer and the reviewer: `opus`, effort `medium`), `run_in_background: true` | `SendMessage` to the agent's id | You are told when it finishes: do not poll |
 | Codex | `spawn_agent` with the prompt; set the model and the reasoning effort on each spawn | `send_input` to the same agent (`resume_agent` reopens a closed one) | `wait_agent` waits for it; do not close the implementer or the reviewer before the run ends. The tools are on by default (`features.multi_agent`) |
 | Gemini CLI | the built-in `generalist` subagent (a tool of that name, or `@generalist`), with the prompt | not documented: start a new `generalist` with the handoff below | A subagent does one task and reports back |
 | Antigravity | `invoke_subagent` with the prompt | not documented: start a new subagent with the handoff below | |
@@ -20,5 +20,5 @@ writes them after each ticket.
 worker with a new brief). Claude Code: `subagent_type: "kiss:kiss-worker"` (it carries its model). Another agent:
 the start tool above, its prompt the brief.
 
-**Models:** the implementer and the reviewer get your strongest model. The severity pass can run on a smaller one,
-or in the controller itself.
+**Models:** the implementer and the reviewer get your strongest model at medium effort. The reviewer starts no
+subagent of its own. The severity pass runs in the controller itself.

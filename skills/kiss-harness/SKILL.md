@@ -40,8 +40,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    the CI config. Mark each part you could not find.
 2. **Ask the owner only about the gaps**, in rounds, each question with your recommended answer. Ask whether domain
    docs are on or off. Write each answer into the file.
-3. **Runs** go in `<repo>/.kiss/runs/`: add that folder (or all of `.kiss/`) to `.gitignore` or
-   `.git/info/exclude`, as the owner says.
+3. **Runs** go in `<repo>/.kiss/runs/` and their worktrees in `<repo>/.kiss/worktrees/`: add both folders (or all
+   of `.kiss/`) to `.gitignore` or `.git/info/exclude`, as the owner says.
 4. **CodeGraph** indexes the repo: `codegraph status "<repo>"` prints `Project: <repo>`. The global CodeGraph rule
    (`rules/codegraph.md` in the KISS repo) is in your instructions file.
 
@@ -64,12 +64,13 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    `files`, `symbols`, `seeds` (CodeGraph queries), `depends_on`, `risky`. Follow the ticket rules in
    [references/spec-and-tickets.md](references/spec-and-tickets.md): tracer bullets, a refactor first, blocking
    links, a wide refactor in three stages, and an acceptance line that names its seam. A ticket with a time window
-   (freshness, a timeout, staleness) asks for a test that runs the clock past that window. Mark the safety rule, the
-   guard whose failure harms real data, `risky`. Then `tickets.py check R`, and a ponytail pass at **full** level
+   (freshness, a timeout, staleness) asks for a test that runs the clock past that window. Mark a ticket `risky` only
+   when it is a guard whose failure harms real data, or a guard that later tickets build on. Then `tickets.py check R`, and a ponytail pass at **full** level
    (cut each line that no person asked for, and record the cut in `decisions.md`). Then the **tickets gate**: ask
    about the breakdown and show the defaults you took; change it until the owner says yes (that yes also confirms
    the seams), then `tickets.py render R`.
-3. **Worktree** `W` on a new branch from the main branch; `codegraph init -y "W"`; `tickets.py freeze R` (from then
+3. **Worktree** `W = <repo>/.kiss/worktrees/<run>/` (git-ignored; never a session scratch folder, which a session
+   restart can delete) on a new branch from the main branch; `codegraph init -y "W"`; `tickets.py freeze R` (from then
    on `check` refuses any change but `passes`); an empty `R/progress.md`. The time budget is 10 minutes per ticket
    plus 2 hours for the reviews and fix rounds; `prompt.py` computes it.
 4. **Implementer:** `prompt.py implementer R=R W=W BR=<branch> SCR=<scratch folder> MAIN=<main checkout>
@@ -81,16 +82,20 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    empty), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). Open tickets and no
    BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer. After 3 continuations, a
    gate. On BLOCKED: a decision when the block needs a choice, else a gate.
-6. **A risky ticket** is reviewed alone as soon as the implementer names it (step 7 on its commits), before the
-   rest of the build depends on it.
+6. **A risky ticket** is reviewed alone (step 7 on its commits) as soon as the implementer names it, only when it
+   is a guard of real data or later tickets build on its guard; otherwise the final review covers it.
 7. **Review once at the end:** `prompt.py reviewer ... HEAD=<head> APP="<how to start the product, and its test
-   data>"` → a NEW subagent on your strongest model. It uses the product, loads `ponytail-review` for rubric G, and
+   data>"` → a NEW subagent on your strongest model at medium effort. It uses the product, loads `ponytail-review` for rubric G, and
    reports every issue it finds.
-8. **Sort:** `prompt.py severity ... FINDINGS=@<findings file>` (a subagent, or you): fix, owner or log. Each
-   owner finding is a decision.
-9. **Fix rounds:** `prompt.py fix ... ROUND=<n> FINDINGS=@<fix list>` → the SAME implementer; then
-   `prompt.py recheck ... ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha> ANSWER=@<its answer>` → the SAME reviewer.
-   At most 3 rounds; then a gate.
+8. **Sort:** you sort, always (no subagent), by the rules `prompt.py severity ... FINDINGS=@<findings file>` prints:
+   fix, owner or log. A wrong result, a broken command or link, data, security, a guard or an owner rule is always
+   fixed; a low finding with no effect on a user, data or an owner rule goes to the log, which stays in the sort
+   file and is shown at the merge gate. Each owner finding is a decision.
+9. **Fix rounds:** `prompt.py fix ... ROUND=<n> FINDINGS=@<fix list>` → the SAME implementer. Its answer names,
+   per finding, the test that failed before and passes now: check each one from the diff and the test output (run
+   the test). Then `prompt.py recheck ... ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha> ANSWER=@<its answer>` → the SAME
+   reviewer, only when the round fixed a critical, high or reproduced-in-app finding; it rechecks only those in the
+   product. At most 2 fix rounds per review and 3 per run; then a gate.
 10. **Close:** the project's full check once (the facts file names it). Then `ponytail-debt` on the run's changes
     (`git -C W diff <base>..<head>`): the report lists each new `shortcut:` comment with its limit. Then the docs,
     by the facts file's `Docs gate:` line: a command → load the kiss-housekeeping skill and do its Upkeep U1 to U3 (U4 too when
@@ -100,7 +105,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
     run's branch before the merge gate; when git ignores it, say so in the report), a yes starts that First run after the merge gate. Then
     **look back** at the run by [references/retro.md](references/retro.md): list the candidates for the owner, most
     severe first (a mechanical mistake → a proposed check, a judgement call → a facts-file rule); change no product
-    file. Then the **merge gate**. A push, a pull request or any write to a remote is its own gate, always asked;
+    file. Then print one **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless
+    sessions <n>, minutes <used> of <budget>`. Then the **merge gate**, with the log findings. A push, a pull request or any write to a remote is its own gate, always asked;
     when the owner asks for a pull request, `pr` writes its body.
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 11 kiss-harness`
 

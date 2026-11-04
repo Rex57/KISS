@@ -61,8 +61,15 @@ def selftest():
             json.dump([{"id": f"T-{i}"} for i in range(11)], f)
         assert budget(d) == 13800, "11 tickets: 3 h 50 min"
         assert "of a 13800s budget" in fill("implementer", dict(base, R=d, ELAPSED="5"))
-    for step in ("severity", "fix", "recheck"):
-        fill(step, dict(base, HEAD="def", APP="a", ROUND="1", FIX_BASE="a", FIX_HEAD="b", FINDINGS="[]", ANSWER="{}"))
+    loop = {step: fill(step, dict(base, HEAD="def", APP="a", ROUND="1", FIX_BASE="a", FIX_HEAD="b", FINDINGS="[]",
+                                  ANSWER="{}")) for step in ("severity", "fix", "recheck")}
+    assert "failed before" in loop["fix"] and '"test":' in loop["fix"], "A1: each fix names its test"
+    assert "only the findings of severity critical or high" in loop["recheck"], "A1: recheck by severity"
+    assert "reproduced_in_app" in loop["recheck"] and "diff and the test output" in loop["recheck"]
+    sv = loop["severity"]
+    assert "a broken command or link" in sv and "a low finding with no effect" in sv, "A2: the fix bar"
+    assert "merge gate" in sv and "2 fix rounds per review and 3 per run" in sv, "A2: log and round caps"
+    assert "Start no subagent of your own" in rv, "A4"
     print("prompt selftest ok")
 
 

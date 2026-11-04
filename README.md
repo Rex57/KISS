@@ -55,7 +55,7 @@ What KISS adds:
 
 | Skill | What it does |
 |---|---|
-| `kiss-harness` | The questions (decisions recorded in `decisions.md`), the spec, the tickets, then one implementer, one review that uses the product, at most 3 fix rounds, and the owner's merge. Its scripts check the tickets, fill the prompts, seed each ticket with CodeGraph and keep the time budget (10 minutes per ticket, plus 2 hours for reviews and fixes). |
+| `kiss-harness` | The questions (decisions recorded in `decisions.md`), the spec, the tickets, then one implementer, one review that uses the product, at most 2 fix rounds per review and 3 per run, a metrics line, and the owner's merge. Its scripts check the tickets, fill the prompts, seed each ticket with CodeGraph and keep the time budget (10 minutes per ticket, plus 2 hours for reviews and fixes). |
 | `kiss-doctor` | Checks a device for a run: the CodeGraph rule in each agent's global instructions file, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix. `kiss-doctor setup` shows a numbered plan of what is missing, and KISS installs only on your request, from the official sources, after you see each command. |
 | `kiss-mini` | A small side task in a background worker: a code change on its own `mini/<id>` branch, a read-only question, or a watch on a pull request, a CI run or a test command. kiss-harness hands off work outside its tickets to it. On Claude Code a mod answers `/kiss-mini` (`/kiss-mini <task>`, `/kiss-mini --now <task>` to skip the worker's checks, `/kiss-mini ask <question>`, `/kiss-mini watch pr <n>` / `run <id>` / `<test command>`, `/kiss-mini stop <id>`, `/kiss-mini status`, `/kiss-mini` alone opens the pane), a band with the counts, and the delivery buttons (Merge into the base, Push, Draft PR, Discard); only your press delivers. |
 | `kiss-housekeeping` | "Clean up the docs": a First run, on your ask, gives each fact one home, sorts pages by kind (living, log, record, history), builds a map, retires stale pages, fixes old names, moves files without breaking code or tests, installs a docs gate in your tests (`tools/check_docs.py`, your own copy) and proves the result with a routing test. After that, each harness close runs its Upkeep when your facts file names the gate. |
@@ -132,12 +132,18 @@ If a skill is missing, a run still works: KISS follows its own copy of the same 
 2. **Spec and tickets**, by rules adapted from Matt Pocock's `to-spec` and `to-tickets`: user stories, test seams,
    thin slices through every layer, a refactor first, blocking links. Each acceptance line names its seam. You
    approve the tickets and the seams.
-3. **Build:** one implementer, one ticket at a time, with ponytail and `tdd`. Each ticket ends with what it skipped
+3. **Build:** one implementer, one ticket at a time, with ponytail and `tdd`, in a worktree under the git-ignored
+   `.kiss/worktrees/`. Each ticket ends with what it skipped
    and any risk.
 4. **Review:** one reviewer uses the running product, with rubric A to G (`ponytail-review` for risk, load and
-   speed). A severity pass sorts the findings; the same implementer fixes them and the same reviewer checks again,
-   at most 3 rounds.
-5. **Close:** the project's full check, a look back at the run (each mistake becomes a proposed check or a rule, on your yes), the list of new `shortcut:` comments (`ponytail-debt`), the docs Upkeep
+   speed). The controller sorts the findings: a wrong result, a broken command or link, data, security, a guard or
+   a rule of yours is always fixed; a low finding with no effect on a user, data or a rule goes to the log, which
+   you see at the merge gate. The same implementer fixes each one and names the test that failed before and passes
+   now; the controller checks those, and the same reviewer rechecks in the product only critical, high or
+   reproduced findings. At most 2 fix rounds per review and 3 per run, then a gate. A risky ticket gets its own
+   review only when it guards real data or later tickets build on its guard.
+5. **Close:** the project's full check, one metrics line (subagents, fix rounds, rechecks, headless sessions,
+   minutes against the budget), a look back at the run (each mistake becomes a proposed check or a rule, on your yes), the list of new `shortcut:` comments (`ponytail-debt`), the docs Upkeep
    (`kiss-housekeeping`) when `.kiss/project.md` names a docs gate (with no `Docs gate:` line it asks you once
    whether to do a docs First run, and records a no), and the merge gate: one yes, or none when `.kiss/project.md` says `Merge: after a green close`. A push always asks.
 
