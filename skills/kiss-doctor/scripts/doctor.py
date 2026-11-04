@@ -8,7 +8,8 @@ env.KISS_FEEDBACK in Claude Code's user settings.
                                          nothing); AGENT: only those agents on PATH (default: each one on PATH)
   python3 -I doctor.py setup [AGENT ...] --apply all|none|1,3 --plan <id>   run those items of the plan with that id,
                                          one at a time (a changed plan is refused); stop at the first failure;
-                                         then the checks again and the steps by hand. Never sudo, never a shell profile.
+                                         then the checks again (an agent whose items the answer skipped left out)
+                                         and the steps by hand. Never sudo, never a shell profile.
   python3 -I doctor.py --selftest
 
 Each line: OK, INFO, WARN or FAIL, the agent, what was checked, and for a WARN or FAIL the README section with the fix.
@@ -566,7 +567,7 @@ def execute(argv, timeout=TIMEOUT):
 
 def apply(items, answer, runner=execute):
     """Run the items the owner's answer names (all, none, or numbers), in the plan's order, one at a time; stop at
-    the first failure. (lines, ok, the items that ran to the end)."""
+    the first failure. (lines, ok, the items that ran to the end, the items the answer picked)."""
     numbered = {i["n"]: i for i in items if i["n"]}
     words = [w for w in re.split(r"[,\s]+", answer.strip().lower()) if w]
     if words == ["all"] or words == ["none"]:
@@ -575,10 +576,10 @@ def apply(items, answer, runner=execute):
         want = sorted({int(w) for w in words})
     else:
         return [f"refused: {answer!r} is not all, none, or numbers of the plan ({', '.join(map(str, numbered)) or 'none'});"
-                " nothing ran"], False, []
+                " nothing ran"], False, [], []
     sudo = [n for n in want if any(c[0] == "sudo" for c in numbered[n]["run"])]
     if sudo:                                    # plan() never numbers one; this guard keeps it so
-        return [f"refused: item {', '.join(map(str, sudo))} needs sudo: run it yourself; nothing ran"], False, []
+        return [f"refused: item {', '.join(map(str, sudo))} needs sudo: run it yourself; nothing ran"], False, [], []
     out, ran = [], []
     for n in want:
         i, last = numbered[n], []
@@ -588,11 +589,11 @@ def apply(items, answer, runner=execute):
                 rest = [str(m) for m in want if m > n]
                 return out + [f"FAIL {n}. {i['what']} ({i['agent']}): {command(argv)} exited {code}"] + [
                     "   " + line for line in output.splitlines()[-20:]] + (
-                    [f"not run: {', '.join(rest)}"] if rest else []), False, ran
+                    [f"not run: {', '.join(rest)}"] if rest else []), False, ran, [numbered[m] for m in want]
             last = output.splitlines()[-1:]
         out += [f"done {n}. {i['what']} ({i['agent']})"] + ["   " + line for line in last]
         ran.append(i)
-    return out, True, ran
+    return out, True, ran, [numbered[m] for m in want]
 
 
 def setup(system, answer=None, runner=execute, find=None, checks=None, pid=None):
@@ -603,10 +604,15 @@ def setup(system, answer=None, runner=execute, find=None, checks=None, pid=None)
         return plan_lines(system, items), True
     if pid != plan_id(items):
         return [f"refused: the plan changed since you saw it (plan id {plan_id(items)}, not {pid}): show it again; nothing ran"], False
-    lines, ok, ran = apply(items, answer, runner)
+    lines, ok, ran, picked = apply(items, answer, runner)
     failed = any(line.startswith("FAIL ") for line in lines)
     if ran or failed:                                       # the checks run again after a failure too
-        lines += ["", "The checks again:"] + (checks or (lambda: report(system["agents"])[0]))()
+        # An agent with numbered items the owner picked none of is left out (D15); the apply call still names it, as
+        # another agent list would make another plan.
+        skipped = [a for a in system["agents"] if any(i["n"] and i["agent"] == a for i in items) and a not in {i["agent"] for i in picked}]
+        lines += ["", "The checks again:"] + (
+            [f"left out of the checks (you picked none of their items): {', '.join(skipped)}"] if skipped else []) + (
+            checks or (lambda agents: report(agents)[0]))([a for a in system["agents"] if a not in skipped])
     if ran or ok or failed:
         lines += [""] + by_hand(system, items, ran)
     return lines, ok
@@ -896,7 +902,8 @@ def selftest():
             ran.append(" ".join(argv))
             return (1, "npm ERR! 404 not found") if " ".join(argv) in fail else (0, "")
         return go
-    checks = lambda: ["CHECKS AGAIN"]
+    checked = []                                              # the agents each run of the checks covered
+    checks = lambda agents: (checked.append(agents), ["CHECKS AGAIN"])[1]
     go = lambda s, a, r, f: setup(s, a, r, f, checks, pid=plan_id(plan(s, f(s))))   # the id the plan showed
     find = lambda system: known                               # numbered: 1 CodeGraph, 2 cgcallers, 3 index, 4 rule, 5-7 plugins
     lines, ok = go(sysfor(os="linux", pm="apt"), "1,3", runner(), lambda system: dict(known, git={}))
@@ -925,7 +932,7 @@ def selftest():
     assert go(sysfor(), "none", runner(), find)[1] and ran == []
     sudo = [{"n": 1, "what": "git", "agent": "device", "run": [["sudo", "apt", "install", "-y", "git"]], "hand": "",
              "source": "s", "changes": "c", "after": ""}]
-    lines, ok, _ = apply(sudo, "1", runner())                              # a sudo command never runs, even if numbered
+    lines, ok, *_ = apply(sudo, "1", runner())                              # a sudo command never runs, even if numbered
     assert not ok and ran == [] and "sudo" in lines[0], lines
     # F5: a failed item installed nothing: no steps after it, but the checks run again
     text = "\n".join(go(sysfor(), "6", runner(fail={"codex plugin marketplace add DietrichGebert/ponytail"}), find)[0])
@@ -936,6 +943,18 @@ def selftest():
     ran.clear()
     lines, ok = setup(sysfor(), "2", runner(), lambda s: {k: v for k, v in known.items() if k != "codegraph"}, checks, pid=pid)
     assert not ok and ran == [] and "the plan changed" in lines[0], lines
+    # D15: the checks after an install leave out each agent whose numbered items the owner picked none of, in one line
+    for answer, agents, left in (("5", ["claude"], "codex"), ("6", ["codex"], "claude"), ("1", [], "claude, codex"),
+                                 ("all", ["claude", "codex"], None)):
+        checked.clear()
+        lines, ok = go(sysfor(), answer, runner(), find)          # 1-3 device, 4-5 claude, 6-7 codex
+        named = [l for l in lines if l.startswith("left out of the checks")]
+        assert ok and checked == [agents] and named == ([f"left out of the checks (you picked none of their items): {left}"]
+                                                        if left else []), (answer, checked, lines)
+    checked.clear()
+    assert go(sysfor(), "none", runner(), find)[1] and checked == []     # nothing ran: no checks, as before
+    lines, ok = go(sysfor(), "1", runner(), lambda system: {"git": {}, ("claude", "Install ponytail"): {}})
+    assert ok and checked == [["codex"]], (checked, lines)    # codex had no numbered item: it stays in the checks
     # setup AGENT ...: only those agents (an agent the owner skips is not planned or checked); the plan's last line
     # names them, so --apply builds the same plan
     on = ["claude", "codex"]
@@ -1077,7 +1096,7 @@ def selftest():
                 f.write(edited)
             mine, _ = items("claude", cmd, "intro\n@rules/cg.md\n")
             assert [i["what"] for i in mine] == ["replace the CodeGraph section of " + os.path.realpath(put_cg)], mine
-            lines, ok, _ = apply(mine, str(mine[0]["n"]))
+            lines, ok, *_ = apply(mine, str(mine[0]["n"]))
             assert ok and lines[1].startswith("   backup: ") and read(cmd) == "intro\n@rules/cg.md\n", lines
             assert read(put_cg) == "# Me\n\n" + real + "## Mine\nx\n", read(put_cg)
             assert check_rule("claude", with_imports(cmd), [cmd], markers(), real)[0][0] == "OK"
