@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """Print one filled prompt (SKILL.md); the controller gives it to a new subagent or sends it to a running one.
 
-  python3 -I prompt.py <implementer|reviewer|severity|fix|recheck> KEY=VALUE ...
+  python3 -I prompt.py start R KEY=VALUE ...                 write the run's values once to R/run.json
+  python3 -I prompt.py <implementer|reviewer|severity|fix|recheck> R [KEY=VALUE ...]
   python3 -I prompt.py --selftest
 
-Keys are the template's $NAMES: R (run folder), W (worktree), BR (branch), SCR (scratch folder), MAIN (the main
-checkout, never touched), PROJECT (the project facts file), TITLE, BASE, HEAD, SMOKE, APP, ROUND, FIX_BASE,
-FIX_HEAD; FINDINGS=@file and ANSWER=@file read a file. Filled here: HB (the skill folder) and CLOCK (ELAPSED and
-BUDGET, in seconds: "Time: elapsed 340s of a 1200s budget."; empty without ELAPSED). With ELAPSED and no BUDGET,
-the budget is 10 minutes per ticket in R/tickets.json plus 2 hours for the reviews and fix rounds. A key the
-template names and nobody gave is an error.
+start keys: W (worktree), BR (branch), SCR (scratch folder), MAIN (the main checkout, never touched), PROJECT (the
+project facts file), TITLE, BASE, SMOKE, APP. A step takes only the values that change per call: HEAD, ROUND,
+FIX_BASE, FIX_HEAD, ELAPSED (a call value wins over run.json). A step reads its file by a fixed name in R: severity
+review-<ROUND>.md (the reviewer's findings), fix fix-<ROUND>.md (the fix list), recheck answer-<ROUND>.md (the
+implementer's answer); the sort writes sort-<ROUND>.json. Filled here: HB (the skill folder) and CLOCK (ELAPSED and
+BUDGET, in seconds: "Time: elapsed 340s of a 1200s budget."; empty without ELAPSED). With ELAPSED and no BUDGET, the
+budget is 10 minutes per ticket in R/tickets.json plus 2 hours for the reviews and fix rounds. A value the template
+needs that neither run.json nor the call gives is an error that names it.
 """
 import json, os, re, string, sys
 
 HB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 T = os.path.join(HB, "templates")
 PER_TICKET_S, REVIEW_S = 600, 7200
+STEPS = ("implementer", "reviewer", "severity", "fix", "recheck")
+START_KEYS = {"W", "BR", "SCR", "MAIN", "PROJECT", "TITLE", "BASE", "SMOKE", "APP"}
+FILES = {"severity": ("FINDINGS", "review-{}.md"), "fix": ("FINDINGS", "fix-{}.md"), "recheck": ("ANSWER", "answer-{}.md")}
 
 
 def budget(run):
@@ -26,7 +32,7 @@ def budget(run):
 
 def fill(step, keys):
     text = open(os.path.join(T, step + ".md")).read()
-    keys = {k: (open(v[1:]).read().strip() if isinstance(v, str) and v.startswith("@") else v) for k, v in keys.items()}
+    keys = dict(keys)
     keys.setdefault("HB", HB)
     e, b = keys.pop("ELAPSED", None), keys.pop("BUDGET", None)
     if e is not None and b is None and "R" in keys:
@@ -39,38 +45,106 @@ def fill(step, keys):
     return string.Template(text).substitute(keys)
 
 
+def pairs(args):
+    bad = [a for a in args if "=" not in a]
+    if bad:
+        sys.exit(f"not KEY=VALUE: {' '.join(bad)}")
+    return dict(a.split("=", 1) for a in args)
+
+
+def start(R, values):
+    unknown = sorted(set(values) - START_KEYS)
+    if unknown:
+        sys.exit(f"start: unknown keys {', '.join(unknown)} (known: {', '.join(sorted(START_KEYS))})")
+    with open(os.path.join(R, "run.json"), "w") as f:
+        json.dump(values, f, indent=1)
+    return f"wrote {os.path.join(R, 'run.json')}: {', '.join(sorted(values))}"
+
+
+def prompt(step, R, call):
+    """The step's template filled from R/run.json, the call's values and the step's fixed-name file."""
+    path = os.path.join(R, "run.json")
+    if not os.path.isfile(path):
+        sys.exit(f"no {path}: run `prompt.py start {R} KEY=VALUE ...` first")
+    with open(path) as f:
+        keys = dict(json.load(f), **call, R=R)
+    if step in FILES:
+        if "ROUND" not in keys:
+            sys.exit(f"{step}: missing ROUND")
+        name, pattern = FILES[step]
+        p = os.path.join(R, pattern.format(keys["ROUND"]))
+        if not os.path.isfile(p):
+            sys.exit(f"{step}: missing {p}")
+        keys[name] = open(p).read().strip()
+    return fill(step, keys)
+
+
+def main(argv):
+    if argv[1:] == ["--selftest"]:
+        return selftest()
+    if len(argv) < 3 or argv[1] not in ("start",) + STEPS or "=" in argv[2]:
+        sys.exit(__doc__)
+    step, R, values = argv[1], os.path.abspath(argv[2]), pairs(argv[3:])
+    print(start(R, values) if step == "start" else prompt(step, R, values))
+
+
 def selftest():
-    base = dict(R="/r", W="/w", BR="b", SCR="/s", MAIN="/m", PROJECT="/w/.kiss/project.md", TITLE="T", BASE="abc",
-                SMOKE="python3 tests/x.py")
-    out = fill("implementer", dict(base, ELAPSED="340", BUDGET="1200"))
-    assert "Time: elapsed 340s of a 1200s budget." in out and "/w/.kiss/project.md" in out
-    assert os.path.exists(os.path.join(HB, "references", "traps.md"))
-    for step in ("implementer", "reviewer"):   # every agent of a run reads the same traps
-        assert HB + "/references/traps.md" in fill(step, dict(base, HEAD="d", APP="a")), step
+    import contextlib, io, tempfile
+
+    def run(*argv):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["prompt.py", *argv])
+        return buf.getvalue()
+
+    def stops(*argv):
+        try:
+            run(*argv)
+        except SystemExit as x:
+            return str(x)
+        raise AssertionError(f"must stop: {argv}")
+
+    with tempfile.TemporaryDirectory() as R:
+        with open(os.path.join(R, "tickets.json"), "w") as f:
+            json.dump([{"id": f"T-{i}"} for i in range(11)], f)
+        assert budget(R) == 13800, "11 tickets: 3 h 50 min"
+        assert stops("implementer", R).startswith("no "), "a step before start stops"
+        run("start", R, "W=/w", "BR=b", "SCR=/s", "MAIN=/m", "PROJECT=/w/.kiss/project.md", "TITLE=Run 9", "BASE=abc",
+            "SMOKE=python3 tests/x.py", "APP=start it on port 1")
+        assert json.load(open(os.path.join(R, "run.json")))["TITLE"] == "Run 9", "start writes run.json"
+        assert "unknown keys HEAD" in stops("start", R, "HEAD=x"), "a per-call key is not a run value"
+        assert stops("implementer", "W=/w") == __doc__, "the KEY=VALUE-only form is gone"
+        for name, body in (("review-1.md", '{"findings": ["REVIEW-ONE"]}'), ("fix-1.md", "FIX-LIST-ONE"),
+                           ("answer-1.md", "ANSWER-ONE")):
+            with open(os.path.join(R, name), "w") as f:
+                f.write(body)
+        out = run("implementer", R, "ELAPSED=340", "BUDGET=1200")
+        rv = run("reviewer", R, "HEAD=def")
+        loop = {"severity": run("severity", R, "ROUND=1"), "fix": run("fix", R, "ROUND=1", "ELAPSED=5"),
+                "recheck": run("recheck", R, "ROUND=1", "FIX_BASE=a1", "FIX_HEAD=b2")}
+        for step, text in [("implementer", out), ("reviewer", rv)] + list(loop.items()):
+            assert not re.search(r"\$[A-Z_]+", text), (step, "a $NAME is left")
+            assert "Run 9" in text or step == "recheck", (step, "the title from run.json")
+        assert "Time: elapsed 340s of a 1200s budget." in out and "/w/.kiss/project.md" in out
+        assert "of a 13800s budget" in loop["fix"], "the budget from R/tickets.json"
+        assert "REVIEW-ONE" in loop["severity"] and "FIX-LIST-ONE" in loop["fix"] and "ANSWER-ONE" in loop["recheck"]
+        assert "a1..b2" in loop["recheck"] and "abc..def" in rv and "start it on port 1" in rv
+        assert "HEAD" in stops("reviewer", R), "a value missing from both stops with its name"
+        assert "missing ROUND" in stops("fix", R) and "review-2.md" in stops("severity", R, "ROUND=2")
+        sv = loop["severity"]
+        assert os.path.join(R, "sort-1.json") in sv and "End with one message" not in sv, "the sort writes a file and goes on"
+        assert os.path.exists(os.path.join(HB, "references", "traps.md"))
+        for text in (out, rv):   # every agent of a run reads the same traps
+            assert HB + "/references/traps.md" in text
     assert "mattpocock-skills:tdd" in out and "Skipped:" in out and "Risk:" in out
     assert 'codegraph node -p "/w" <name>` for each function the ticket changes' in out and "Never `grep" in out, "B2"
     for rule in ("codegraph node -p", "codegraph callers -p", "cgcallers.py", "codegraph sync -q", "codegraph affected",
                  "Never the full check", "Commit by explicit path"):
         assert out.count(rule) == 1, ("T-5: each rule once", rule)
-    rv = fill("reviewer", dict(base, HEAD="d", APP="a"))
     assert "ponytail:ponytail-review" in rv and "G. Risk, load and speed" in rv and "A|B|C|D|E|F|G" in rv
-    try:
-        fill("reviewer", base)
-        raise AssertionError("a missing key must stop")
-    except SystemExit as x:
-        assert "HEAD" in str(x) and "APP" in str(x)
-    import tempfile
-    with tempfile.TemporaryDirectory() as d:
-        with open(os.path.join(d, "tickets.json"), "w") as f:
-            json.dump([{"id": f"T-{i}"} for i in range(11)], f)
-        assert budget(d) == 13800, "11 tickets: 3 h 50 min"
-        assert "of a 13800s budget" in fill("implementer", dict(base, R=d, ELAPSED="5"))
-    loop = {step: fill(step, dict(base, HEAD="def", APP="a", ROUND="1", FIX_BASE="a", FIX_HEAD="b", FINDINGS="[]",
-                                  ANSWER="{}")) for step in ("severity", "fix", "recheck")}
     assert "failed before" in loop["fix"] and '"test":' in loop["fix"], "A1: each fix names its test"
     assert "only the findings of severity critical or high" in loop["recheck"], "A1: recheck by severity"
     assert "reproduced_in_app" in loop["recheck"] and "diff and the test output" in loop["recheck"]
-    sv = loop["severity"]
     assert "a broken command or link" in sv and "a low finding with no effect" in sv, "A2: the fix bar"
     assert "merge gate" in sv and "2 fix rounds per review and 3 per run" in sv, "A2: log and round caps"
     assert 'A finding of medium or higher severity that fits none of these is a "fix"' in sv, "F8: every finding has a bucket"
@@ -79,7 +153,4 @@ def selftest():
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--selftest"]:
-        selftest()
-    else:
-        print(fill(sys.argv[1], dict(a.split("=", 1) for a in sys.argv[2:])))
+    main(sys.argv)

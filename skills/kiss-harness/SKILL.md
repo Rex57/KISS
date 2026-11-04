@@ -73,9 +73,10 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    restart can delete) on a new branch from the main branch; `codegraph init -y "W"`; `tickets.py freeze R` (from then
    on `check` refuses any change but `passes`); an empty `R/progress.md`. The time budget is 10 minutes per ticket
    plus 2 hours for the reviews and fix rounds; `prompt.py` computes it.
-4. **Implementer:** `prompt.py implementer R=R W=W BR=<branch> SCR=<scratch folder> MAIN=<main checkout>
-   PROJECT=<facts file> TITLE=<title> BASE=<base sha> SMOKE="<a fast end-to-end test>" ELAPSED=0` → start ONE
-   subagent with that text: your strongest model at medium effort, in the background. Give every path
+4. **Implementer:** write the run's values once: `prompt.py start R W=W BR=<branch> SCR=<scratch folder>
+   MAIN=<main checkout> PROJECT=<facts file> TITLE=<title> BASE=<base sha> SMOKE="<a fast end-to-end test>"
+   APP="<how to start the product, and its test data>"` (R/run.json). Then `prompt.py implementer R ELAPSED=0` →
+   start ONE subagent with that text: your strongest model at medium effort, in the background. Give every path
    absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file. It loads
    ponytail and `tdd`, and tests through the confirmed seams.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` and `git -C MAIN status` (both
@@ -84,17 +85,18 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    gate. On BLOCKED: a decision when the block needs a choice, else a gate.
 6. **A risky ticket** is reviewed alone (step 7 on its commits) as soon as the implementer names it, only when it
    is a guard of real data or later tickets build on its guard; otherwise the final review covers it.
-7. **Review once at the end:** `prompt.py reviewer ... HEAD=<head> APP="<how to start the product, and its test
-   data>"` → a NEW subagent on your strongest model at medium effort. It uses the product, loads `ponytail-review` for rubric G, and
-   reports every issue it finds.
-8. **Sort:** you sort, always (no subagent), by the rules `prompt.py severity ... FINDINGS=@<findings file>` prints:
-   fix, owner or log. A wrong result, a broken command or link, data, security, a guard or an owner rule is always
+7. **Review once at the end:** `prompt.py reviewer R HEAD=<head> ELAPSED=<s>` (a risky ticket's review adds
+   `BASE=<the commit before it>`) → a NEW subagent on your strongest model at medium effort. It uses the product, loads `ponytail-review` for rubric G, and
+   reports every issue it finds. Save its last message to `R/review-<n>.md` (n = this round's number, from 1).
+8. **Sort:** you sort, always (no subagent), by the rules `prompt.py severity R ROUND=<n>` prints, into
+   `R/sort-<n>.json`: fix, owner or log; then you go on. A wrong result, a broken command or link, data, security, a guard or an owner rule is always
    fixed; a low finding with no effect on a user, data or an owner rule goes to the log, which stays in the sort
    file and is shown at the merge gate. Each owner finding is a decision.
-9. **Fix rounds:** `prompt.py fix ... ROUND=<n> FINDINGS=@<fix list>` → the SAME implementer. Its answer names,
+9. **Fix rounds:** write the fix list to `R/fix-<n>.md`, then `prompt.py fix R ROUND=<n> ELAPSED=<s>` → the SAME
+   implementer. Its answer names,
    per finding, the test that failed before and passes now: check each one from the diff and the test output (run
-   the test). Then `prompt.py recheck ... ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha> ANSWER=@<its answer>` → the SAME
-   reviewer, only when the round fixed a critical, high or reproduced-in-app finding; it rechecks only those in the
+   the test). Save its answer to `R/answer-<n>.md`, then `prompt.py recheck R ROUND=<n> FIX_BASE=<sha>
+   FIX_HEAD=<sha>` → the SAME reviewer (its findings, if any, become `R/review-<n+1>.md`), only when the round fixed a critical, high or reproduced-in-app finding; it rechecks only those in the
    product. At most 2 fix rounds per review and 3 per run; then a gate.
 10. **Close:** the project's full check once (the facts file names it). Then `ponytail-debt` on the run's changes
     (`git -C W diff <base>..<head>`): the report lists each new `shortcut:` comment with its limit. Then the docs,
