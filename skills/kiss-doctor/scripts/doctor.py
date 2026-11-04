@@ -1025,6 +1025,8 @@ def selftest():
     assert execute([sys.executable, "-c", stdin_is_null])[0] == 0      # a question reads end of input, never waits
     # gaps() and detect() on this KISS folder, with a scratch Codex home that has nothing
     assert all(k in {r["key"] for r in INSTALL} for k in set(required().values())), required()
+    # the real skill tables (the harness's, kiss-code-clean's, kiss-mini's): a table format change cannot drop a skill silently
+    assert {"grilling", "tdd", "ponytail", "ponytail-review", "research"} <= set(required()), sorted(required())
     old_env = {k: os.environ.get(k) for k in ("CODEX_HOME", "PATH", "KISS_BIN", "CLAUDE_CONFIG_DIR")}
     with tempfile.TemporaryDirectory() as fx:
         try:

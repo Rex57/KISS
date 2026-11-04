@@ -14,6 +14,19 @@ the first task: it holds the kinds, the states, the brief, the report and the wo
 On Claude Code with the KISS mod, `/kiss-mini` and the `mcp__kiss__handoff` tool run the same flow through a background
 host, and the `/kiss-mini` pane shows the tasks: use them, not the steps below. These steps are for an agent without it.
 
+## Skills the worker uses when they are installed
+
+| Skill | From | Used in | Without it |
+|---|---|---|---|
+| `ponytail` | ponytail | a code or bug worker, loaded first | the worker's rules in handoff.md |
+| `tdd` | Matt Pocock's skills | a code or bug worker: the test before the change | a test or a command that shows the change works |
+| `diagnosing-bugs` | Matt Pocock's skills | a bug worker: a failure it cannot explain | the worker's own debugging |
+| `research` | Matt Pocock's skills | a question worker: the answer from the sources | the worker reads the sources itself and names them |
+| `pr` | Matt Pocock's skills | a code or bug task's pull request body | a body from the report's summary |
+
+The load order per kind is in the worker's rules of handoff.md. A skill that is not in the worker's skill list is
+skipped, and the worker does what the "Without it" column says.
+
 ## The asks
 
 - `<task>`: a code task (`bug` when it reports a failure). `--base <branch>` names its base; else the checkout's
@@ -21,6 +34,9 @@ host, and the `/kiss-mini` pane shows the tasks: use them, not the steps below. 
 - `ask <question>`: a question task.
 - `watch <pull request | CI run | test command>`: a watch task.
 - `status`: the task list.
+- `stop <id>`: stop that task's worker with your agent's own stop (Claude Code: `TaskStop`, or `claude stop` for a
+  `--bg` worker), then write `State: failed` and `Summary: stopped by the owner` into `T/report.md`. Its worktree
+  stays for the owner's discard.
 - `--now` before any of them: the owner orders the task outright, so its brief says `Checks: skip (owner)`; without
   it, `Checks: run`.
 
@@ -31,7 +47,7 @@ host, and the `/kiss-mini` pane shows the tasks: use them, not the steps below. 
 3. **Brief:** write `T/brief.md` in the reference's format, `Rules:` set to the absolute path of
    `MA/references/handoff.md`. `wc -c` must print at most 1500; else cut it.
 4. **Start the worker** in the background, its prompt the brief:
-   - Claude Code: the `Agent` tool, `subagent_type: "kiss:kiss-worker"`, `run_in_background: true`. When the
+   - Claude Code: the `Agent` tool, `subagent_type: "kiss:kiss-worker"`. When the
      owner wants the task to outlive this session: `claude --bg --name "kiss-mini <id>: <title>" --agent
      kiss:kiss-worker -- "$(cat "<T>/brief.md")"`, run in the worktree (a question: the checkout); at `status`,
      `claude logs "kiss-mini <id>"` gives its report.
