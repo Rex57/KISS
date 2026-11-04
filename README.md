@@ -43,6 +43,11 @@ What KISS adds:
   goes back to the agent that has the context.
 - **Proof in the running product.** The reviewer uses the product (its UI, API or CLI), not only the diff, and
   each ticket has acceptance tests that name their seam.
+- **No missed caller.** Every agent reads the code through CodeGraph first, and each subagent gets CodeGraph's
+  output in its brief. CodeGraph's `callers` misses some calls (a function passed as a value, a call through
+  `getattr`, an import inside a function). So before a delete, rename or signature change, the implementer and the
+  reviewer run `cgcallers`, which shows CodeGraph's callers beside a word search and marks each call that CodeGraph
+  missed.
 - **You decide.** Only a choice that is costly to undo becomes a question (`D<n>`, kept in `decisions.md`). A gate
   (the tickets, the merge, a push) asks for your go with its evidence. Nothing is pushed without you.
 - **Safety in code.** A guard that protects your data is a script with a selftest, not an instruction the model
