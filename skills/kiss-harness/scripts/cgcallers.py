@@ -10,10 +10,11 @@ the definition, its caller lines and a count line. The word search (for the last
 definition's own file and the files that import its module or its package (Python `import` / `from ... import` /
 `importlib.import_module`; JS/TS/Svelte `import ... from` a path that ends in either); for a method, and with --all,
 it reads every indexed file of the language. A hit in a comment, a string or a docstring is not counted, except the
-string 'NAME' given to getattr, hasattr or setattr. For a language with no import filter it reads every indexed file
-of that language and prints a warning. codegraph misses a function passed as a value, a call through getattr with a
-string, a method on an object when two classes define the name, and recursion (KISS rules/codegraph.md, "callers is
-incomplete").
+string 'NAME' given to getattr, hasattr or setattr. For a function (not a method), a hit `X.NAME` counts only when X
+is its module or a name bound to it (`import a.b as X`, `X = import_module(...)`). For a language with no import
+filter it reads every indexed file of that language and prints a warning. codegraph misses a function passed as a
+value, a call through getattr with a string, a method on an object when two classes define the name, and recursion
+(KISS rules/codegraph.md, "callers is incomplete").
 Each caller line is marked:
   [both]       codegraph has an edge on this line and the word search finds the name on it, or (Python) the line is
                in a function codegraph lists as a caller
@@ -133,21 +134,49 @@ def code_only(src, quotes="'\"`"):
 
 
 def word_lines(src, lang, name):
-    """The lines where NAME is a word of code, not of a comment, a string or a docstring; in Python also the
-    string 'NAME' given to getattr, hasattr or setattr (a call CodeGraph cannot see)."""
+    """{line: [receiver, ...]} where NAME is a word of code, not of a comment, a string or a docstring; the receiver
+    is the word before `.NAME` ('?' for an expression), None for a bare NAME. In Python also the string 'NAME' given
+    to getattr, hasattr or setattr (a call CodeGraph cannot see), with no receiver."""
+    found = {}
     if lang in PY:
-        found = set()
+        last = []                               # the two code tokens before this one
         try:
             for t in tokenize.generate_tokens(io.StringIO(src).readline):
-                if t.type == tokenize.NAME and t.string == name or (
-                        t.type == tokenize.STRING and t.string[1:-1] == name and re.search(r"\b(get|set|has)attr\s*\(", t.line)):
-                    found.add(t.start[0])
+                if t.type in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT):
+                    continue
+                if t.type == tokenize.NAME and t.string == name:
+                    dot = len(last) == 2 and last[1].string == "."
+                    found.setdefault(t.start[0], []).append(
+                        (last[0].string if last[0].type == tokenize.NAME else "?") if dot else None)
+                elif t.type == tokenize.STRING and t.string[1:-1] == name and re.search(r"\b(get|set|has)attr\s*\(", t.line):
+                    found.setdefault(t.start[0], []).append(None)
+                last = (last + [t])[-2:]
         except (tokenize.TokenError, SyntaxError):
             pass
-        return sorted(found)
+        return found
     rx = re.compile(r"\b%s\b" % re.escape(name))
-    text = code_only(src, "'\"`" if lang in JS else "\"`")
-    return [i for i, t in enumerate(text.splitlines(), 1) if rx.search(t)]
+    for i, t in enumerate(code_only(src, "'\"`" if lang in JS else "\"`").splitlines(), 1):
+        for m in rx.finditer(t):
+            before = t[:m.start()]
+            dot = re.search(r"(\w*)\s*\??\.\s*$", before) if not before.rstrip().endswith("...") else None
+            found.setdefault(i, []).append((dot.group(1) or "?") if dot else None)
+    return found
+
+
+def aliases(src, lang):
+    """{local name: module} for each module bound to another name: `import a.b as X`, `from a import b as X`,
+    `X = importlib.import_module("a.b")`, JS `import * as X from './b'` and `import X from './b'`."""
+    if lang in JS:
+        return {x: module_of(p) for x, p in re.findall(r"""\bimport\s+(?:\*\s+as\s+)?(\w+)\s+from\s*['"]([^'"]+)['"]""", src)}
+    out = {x: m.split(".")[-1] for x, m in re.findall(r"""(\w+)\s*=\s*[\w.]*import_module\(\s*['"]([\w.]+)['"]""", src)}
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return out
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            out.update({x.asname: x.name.split(".")[-1] for x in n.names if x.asname})
+    return out
 
 
 def run(cmd, cwd):
@@ -204,7 +233,7 @@ def main(argv=None, cg=None, git=None, read=read_file):
         indexed = [(f["path"], f.get("language", "")) for f in json.loads(cg(["files", "-p", W, "-j"]) or "[]")]
     except json.JSONDecodeError:
         indexed = []
-    texts, imports, scans, warned = {}, {}, {}, set()
+    texts, imports, scans, binds, warned = {}, {}, {}, {}, set()
 
     def text(f):
         if f not in texts:
@@ -218,6 +247,11 @@ def main(argv=None, cg=None, git=None, read=read_file):
         if f not in imports:
             imports[f] = imported(text(f), lang)
         return imports[f]
+
+    def bound(f, lang):
+        if f not in binds:
+            binds[f] = aliases(text(f), lang)
+        return binds[f]
 
     def scan(f, lang):                      # (word lines, def spans) of a file, once for every definition
         if f not in scans:
@@ -254,8 +288,11 @@ def main(argv=None, cg=None, git=None, read=read_file):
         for f in files:
             body = text(f).splitlines()
             hits, spans = scan(f, langs.get(f))
-            for ln in hits:
+            for ln, receivers in hits.items():
                 line = body[ln - 1].strip() if ln <= len(body) else ""
+                if dd.get("kind") != "method" and family & (PY | JS) and not a.all and all(
+                        r is not None and r not in mods and bound(f, langs.get(f)).get(r) not in mods for r in receivers):
+                    continue                       # D20: only `X.NAME` on another object: not this function
                 if (f == home and ln == dd["startLine"]) or re.search(r"\b(def|function)\s*\*?\s*%s\b" % n, line):
                     continue                       # this definition, or a namesake's
                 if (f, ln) in edges:
@@ -291,12 +328,14 @@ def selftest():
         "lib/util.py": "def helper():\n    return 1\n",
         "lib/more.py": "def helper():\n    return 2\n",
         "app.py": ("from lib.util import helper\n\ndef go():\n    # helper is called below\n    s = \"helper\"\n"
-                   "    return helper()\n\ndef go2():\n    return helper()\n\ndef go4():\n    helper()\n    return helper()\n"),
+                   "    return helper()\n\ndef go2():\n    return helper()\n\ndef go4():\n    helper()\n    return helper()\n"
+                   "import lib.util as CS\ndef go5(obj):\n    obj.helper()\n    return CS.helper()\n"),
         "other.py": "def elsewhere():\n    return helper()\n",
         "web/api.ts": "export function fetchIt() {}\n",
         "web/page.ts": ("import { fetchIt } from './api'\n// fetchIt in a comment\nconst s = 'fetchIt';\nfetchIt();\n"
                         "function x() { fetchIt(); }\nconst t = `a ${fetchIt()} b`;\n"),
         "web/stray.ts": "fetchIt();\n",
+        "web/star.ts": "import * as api from './api'\napi.fetchIt();\nobj.fetchIt();\n",
         "web/own.ts": "import { fetchIt as f } from './api'\nexport function fetchIt() {}\n",
         "svc/serve.go": "package svc\n\nfunc Serve() {}\n",
         "lib/eng.py": "class Engine:\n    def ack(self):\n        return 1\n\nclass Other:\n    def ack(self):\n        return 2\n",
@@ -359,6 +398,7 @@ def selftest():
         assert "[both     ] app.py:6  go  return helper()" in lines, o                     # an importer's call
         assert "[cg guess ] app.py:9  go2  return helper()" in lines, o                    # a 0.4 exact-match edge
         assert "[both     ] app.py:13  go4  return helper()" in lines, o                   # D19: a 2nd call in a listed caller
+        assert "app.py:16" not in o and "[grep only] app.py:17  go5  return CS.helper()" in lines, o   # D20: receivers
         assert "other.py" not in o, o                                                      # no import: not shown
         assert "app.py:4" not in o and "app.py:5" not in o, o                              # comment and string
         assert o.count("codegraph callers;") == 2, o                                       # a count line per block
@@ -379,7 +419,8 @@ def selftest():
         assert "[both     ] web/page.ts:5  x  function x() { fetchIt(); }" in lines, o
         assert any(l.startswith("[grep only] web/page.ts:6") for l in lines), o            # code inside ${...}
         assert "page.ts:2" not in o and "page.ts:3" not in o and "stray.ts" not in o, o
-        assert "own.ts:2" not in o, o                                                      # a namesake's definition
+        assert "own.ts:2" not in o, o
+        assert "[grep only] web/star.ts:2" in o and "star.ts:3" not in o, o                # D20: JS receivers                                                      # a namesake's definition
         o = out("Serve", git=lambda args: W)                                               # W from git
         assert "warning: no import filter for go: searched every indexed go file" in o, o
         assert "[grep only] svc/main.go:3" in o, o
