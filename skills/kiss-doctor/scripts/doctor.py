@@ -153,26 +153,36 @@ def check_rule(agent, text, files, marks, rule=""):
 
 
 def rule_span(text, marks):
-    """The rule's section in a text, (start, end): from the nearest heading above its first bold lead-in to the next
-    `#` or `##` heading, or the end; start is None when no heading is above. None when the text holds no lead-in."""
-    leads = [text.find("**" + m) for m in marks if "**" + m in text]
-    if not leads:
+    """The rule's section in a text, (start, end): from the nearest heading above its first bold lead-in (the first in
+    the rule's order that the text holds, as section() reads it) to the next `#` or `##` heading, the CODEGRAPH_START
+    line of `codegraph install`'s block, or the end. A line inside a ``` fence is no heading. Under a `# ` heading (the
+    file's title) it starts at the lead-in's line (D23); start is None when no heading is above. None when the text holds
+    no lead-in."""
+    first = next(("**" + m for m in marks if "**" + m in text), None)
+    if first is None:
         return None
-    at = min(leads)
-    heads = list(re.finditer(r"^#{1,6} ", text[:at], re.M))
-    end = re.search(r"^#{1,2} ", text[at:], re.M)
-    return (heads[-1].start() if heads else None), (at + end.start() if end else len(text))
+    at, head, end, fence = text.find(first), None, len(text), False
+    for line in re.finditer(r"^.*$", text, re.M):
+        if line.group().lstrip().startswith("```"):
+            fence = not fence
+        elif not fence and line.start() <= at and re.match(r"#{1,6} ", line.group()):
+            head = line
+        elif not fence and line.start() > at and re.match(r"#{1,2} |\W*CODEGRAPH_START\W*$", line.group()):
+            end = line.start()
+            break
+    start = None if head is None else text.rfind("\n", 0, at) + 1 if head.group().startswith("# ") else head.start()
+    return start, end
 
 
 def rule_file(files, marks, depth):
-    """The first of `files`, or of the files they `@`-import (as with_imports reads them), that holds a bold lead-in."""
+    """The first of `files`, or of the files they `@`-import (as with_imports reads them), that holds the rule's first
+    bold lead-in: the first in the rule's order that any of them holds, as rule_span reads one file."""
+    seen = {}
     for f in files:
-        seen = {}
         with_imports(f, depth, seen)
-        hit = next((p for p in seen if rule_span(read(p), marks)), None)
-        if hit:
-            return hit
-    return None
+    texts = [(p, read(p)) for p in seen]
+    first = next(("**" + m for m in marks if any("**" + m in x for _, x in texts)), None)
+    return next((p for p, x in texts if first and first in x), None)
 
 
 def replace_section(path, rule):
@@ -189,9 +199,11 @@ def replace_section(path, rule):
         why = "none of the rule's lead-ins" if not span else "no heading above the rule"
         return 1, f"{path}: {why}; nothing changed"
     old, tmp = back_up(path), path + ".kiss-new"
+    rest = text[span[1]:]
+    gap = "\n" * max(0, 2 - (len(new) - len(new.rstrip("\n")))) if rest else ""     # one blank line before what follows
     try:
         with open(tmp, "w", encoding="utf-8", newline="") as f:
-            f.write(text[:span[0]] + new + text[span[1]:])
+            f.write(text[:span[0]] + new + gap + rest)
         shutil.copymode(path, tmp)
         os.replace(tmp, path)
     except OSError as e:
@@ -728,11 +740,34 @@ def selftest():
         mid = "# Mine\r\nintro\n\n## CodeGraph — old\n\n**Which index.** a\nmy own line\n**`callers` is incomplete:** older\n\n## Other\nmore\n"
         path = put("r/mid.md", mid)
         code, out = replace(path)
-        assert code == 0 and raw(path) == "# Mine\r\nintro\n\n" + rule + "## Other\nmore\n", (code, out, raw(path))
+        assert code == 0 and raw(path) == "# Mine\r\nintro\n\n" + rule + "\n## Other\nmore\n", (code, out, raw(path))
         assert backups(path) and out == "backup: " + backups(path)[0] and raw(backups(path)[0]) == mid, out
         last = "# Mine\n\n### CodeGraph\n**`callers` is incomplete:** b\n### My note\nmine\n"        # the section is the file's last
         path = put("r/last.md", last)
         assert replace(path)[0] == 0 and read(path) == "# Mine\n\n" + rule, read(path)
+        # Worked examples of where the section starts and ends; the next heading keeps one blank line before it.
+        spans = {
+            # The owner's own bold lead-in word above the rule does not move the section: the rule's first one does.
+            "s1.md": ("# Me\n\n## Workflow\n- Plan first.\n**`callers` is incomplete** in my words.\n\n## CodeGraph\n"
+                      "**Which index.** a\n**`callers` is incomplete:** old\n\n## Last\nz\n",
+                      "# Me\n\n## Workflow\n- Plan first.\n**`callers` is incomplete** in my words.\n\n" + rule + "\n## Last\nz\n"),
+            # codegraph install's block after the rule keeps its CODEGRAPH_START line (its own WARN).
+            "s2.md": ("# Me\n\n## CodeGraph\n**Which index.** a\n**`callers` is incomplete:** old\n\n<!-- CODEGRAPH_START -->\n"
+                      "## CodeGraph\nblock\n<!-- CODEGRAPH_END -->\n",
+                      "# Me\n\n" + rule + "\n<!-- CODEGRAPH_START -->\n## CodeGraph\nblock\n<!-- CODEGRAPH_END -->\n"),
+            # Under the file's # title the section starts at the lead-in's line: the title and the lines above stay.
+            "s3.md": ("# My instructions\n- Always use uv.\n**Which index.** a\n**`callers` is incomplete:** old\n\n## Last\nz\n",
+                      "# My instructions\n- Always use uv.\n" + rule + "\n## Last\nz\n"),
+            # A # line inside a ``` fence is no heading, inside the section or above it.
+            "s5.md": ("# Me\n\n## CodeGraph\n**Which index.** a\n```sh\n# my sync alias\nalias s=sync\n```\n"
+                      "**`callers` is incomplete:** old\n\n## Last\nz\n", "# Me\n\n" + rule + "\n## Last\nz\n"),
+            "s5-above.md": ("# Me\n\n## Tools\n```sh\n# a comment\n```\n**Which index.** a\n\n## Last\nz\n",
+                            "# Me\n\n" + rule + "\n## Last\nz\n"),
+        }
+        for rel, (before, after) in spans.items():
+            path = put("spans/" + rel, before)
+            code, out = replace(path)
+            assert code == 0 and raw(path) == after, (rel, code, out, raw(path))
         bad = {"r/none.md": "# Mine\n**Other.** x\n", "r/nohead.md": "intro\n**Which index.** a\n"}
         for rel, text in bad.items():                            # three kinds of bad input: each a FAIL, nothing changed
             path = put(rel, text)
@@ -1090,17 +1125,18 @@ def selftest():
                 assert mine == [] and (("codex", "rule") in found) == (text == "nothing"), (mine, found)
             mine, _ = items("codex", md, "intro\n" + real.split("\n", 1)[1].replace("Decide once", "Decide"))   # no heading
             assert [(i["n"], i["hand"].startswith("by hand: no heading above")) for i in mine] == [(None, True)], mine
-            # the rule in an @-imported file: that file changes, the importing file does not; the checks then say OK
+            # the rule in an @-imported file: that file changes, the importing file (with the owner's own bold word of a
+            # lead-in) does not; the checks then say OK
             cmd = os.path.join(fx, "ccd", "CLAUDE.md")
             put_cg = os.path.join(fx, "ccd", "rules", "cg.md")
             os.makedirs(os.path.dirname(put_cg))
             with open(put_cg, "w") as f:
                 f.write(edited)
-            mine, _ = items("claude", cmd, "intro\n@rules/cg.md\n")
+            mine, _ = items("claude", cmd, "intro\n**Subagents**: brief them like a peer.\n@rules/cg.md\n")
             assert [i["what"] for i in mine] == ["replace the CodeGraph section of " + os.path.realpath(put_cg)], mine
             lines, ok, *_ = apply(mine, str(mine[0]["n"]))
-            assert ok and lines[1].startswith("   backup: ") and read(cmd) == "intro\n@rules/cg.md\n", lines
-            assert read(put_cg) == "# Me\n\n" + real + "## Mine\nx\n", read(put_cg)
+            assert ok and lines[1].startswith("   backup: ") and read(cmd) == "intro\n**Subagents**: brief them like a peer.\n@rules/cg.md\n", lines
+            assert read(put_cg) == "# Me\n\n" + real + "\n## Mine\nx\n", read(put_cg)
             assert check_rule("claude", with_imports(cmd), [cmd], markers(), real)[0][0] == "OK"
             os.makedirs(os.path.join(fx, "bin"))                       # F3: copied but its folder not on PATH
             with open(os.path.join(fx, "bin", "cgcallers"), "w") as f:
