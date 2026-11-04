@@ -541,8 +541,9 @@ def plan(system, gaps):
 
 
 def plan_id(items):
-    """A short id of the numbered items (number, what, agent, commands): --apply refuses a plan that changed."""
-    return hashlib.sha1(json.dumps([[i["n"], i["what"], i["agent"], i["run"]] for i in items if i["n"]]).encode()).hexdigest()[:8]
+    """A short id of the numbered items (number, what, agent, commands, and the changes line: the lines a replace takes):
+    --apply refuses a plan that changed."""
+    return hashlib.sha1(json.dumps([[i["n"], i["what"], i["agent"], i["run"], i["changes"]] for i in items if i["n"]]).encode()).hexdigest()[:8]
 
 
 def plan_lines(system, items):
@@ -980,6 +981,8 @@ def selftest():
     hand = plan(sysfor(), {("claude", "rule-replace"): {"file": "/h/c.md", "hand": "no heading above the rule in /h/c.md"}})
     assert show(hand) == [("replace the CodeGraph section of /h/c.md", "claude", [], "by hand: no heading above the rule in /h/c.md")]
     assert hand[0]["changes"] == "nothing: setup does not change the file", hand
+    later = plan(sysfor(), {("claude", "rule-replace"): dict(span, file="/h/c.md", until="the end of the file")})
+    assert plan_id(later) != plan_id(plan(sysfor(), {("claude", "rule-replace"): dict(span, file="/h/c.md")})), "the id covers the lines"
     assert hand[0]["n"] is None, hand
     text = "\n".join(plan_lines(sysfor(os="linux", pm="apt"), plan(sysfor(os="linux", pm="apt"), dict(known, git={}))))
     for want in ("1. CodeGraph (device)", "   command: npm install -g @colbymchenry/codegraph",
