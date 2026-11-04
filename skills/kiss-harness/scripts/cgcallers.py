@@ -4,7 +4,7 @@
     python3 -I cgcallers.py NAME [-p W] [-f FILE] [--all]
     python3 -I cgcallers.py --selftest
 
-It syncs W's index first. Then, for each definition of NAME (only the one in FILE with -f, a path or suffix, as
+It stops when W has no index of its own, and syncs W's index first. Then, for each definition of NAME (only the one in FILE with -f, a path or suffix, as
 `codegraph callers -f` does), it prints a block: the definition, its caller lines and a count line. The word search
 reads only that definition's own file and the files that import its module or its package (Python `import` /
 `from ... import` / `importlib.import_module`; JS/TS/Svelte `import ... from` a path that ends in either); for a
@@ -147,7 +147,12 @@ def word_lines(src, lang, name):
 
 
 def run(cmd, cwd):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True).stdout
+    """stdout; on a failure also the exit code and stderr, so the output says why."""
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    except OSError as e:
+        return "exit 127: %s" % e
+    return p.stdout if p.returncode == 0 else "%s\nexit %d: %s" % (p.stdout, p.returncode, p.stderr.strip())
 
 
 def read_file(path):
@@ -171,6 +176,13 @@ def main(argv=None, cg=None, git=None, read=read_file):
     git = git or (lambda args: run(["git"] + args, os.getcwd()))
     W = a.W or git(["rev-parse", "--show-toplevel"]).strip()
     cg = cg or (lambda args: run(["codegraph"] + args, W))
+    status = cg(["status", W])
+    named = re.search(r"Project: (.+)", status)
+    index = "no index" if not named or "Not initialized" in status else named.group(1).strip()
+    if os.path.realpath(index) != os.path.realpath(W):    # a folder inside another checkout reads that one's index
+        print("codegraph: no index of its own in %s: `codegraph status` names %s; run `codegraph init -y \"%s\"` first"
+              % (W, index, W))
+        return 1
     said = [l.strip("│●└┌◇◆ ") for l in cg(["sync", W]).splitlines()]
     said = [l for l in said if l and l not in ("Syncing CodeGraph", "Done", "Scanning files...")]
     print("codegraph sync: %s" % (said[-1] if said else "no output (is codegraph on PATH?)"))
@@ -298,10 +310,12 @@ def selftest():
             "Serve": [(d_("svc/serve.go", "Serve", 3, "go"), [])],
             "helper2": [(d_("pkg/util.py", "helper2", 1, "python"), [])],
             "ack": [(d_("lib/eng.py", "ack", 2, "python", "method"), []), (d_("lib/eng.py", "ack", 6, "python", "method"), [])]}
-    calls = []
+    calls, project = [], {}
 
     def fake_cg(args):
         calls.append(args[0])
+        if args[0] == "status":
+            return "CodeGraph Status\n\nProject: %s\n" % project.get("is", args[1])
         if args[0] == "sync":
             return "┌  Syncing CodeGraph\n│\n●  Already up to date\n│\n└  Done\n"
         if args[0] == "files":
@@ -330,7 +344,7 @@ def selftest():
         o = out("helper", "-p", W)
         lines = o.splitlines()
         assert lines[0] == "codegraph sync: Already up to date", lines[:2]    # the sync result comes first
-        assert calls[0] == "sync", calls
+        assert calls[:2] == ["status", "sync"], calls
         assert sum(l.startswith("definition") for l in lines) == 2, o                      # one block per definition
         assert "[both     ] app.py:6  go  return helper()" in lines, o                     # an importer's call
         assert "[cg guess ] app.py:9  go2  return helper()" in lines, o                    # a 0.4 exact-match edge
@@ -341,6 +355,13 @@ def selftest():
         assert sum(l.startswith("definition") for l in o.splitlines()) == 1 and "lib/more.py" in o, o
         o = out("helper", "-p", W, "-f", "nosuch.py")
         assert o.splitlines()[1] == 'codegraph: no definition of "helper" matches file "nosuch.py" — showing all definitions instead.', o  # F7
+        project["is"] = "/elsewhere/main"                                                  # F8: another checkout's index
+        calls.clear()
+        o = out("helper", "-p", W)
+        assert "sync" not in calls and "definition" not in o, (calls, o)
+        assert o.splitlines()[0].startswith("codegraph: no index of its own in %s: `codegraph status` names /elsewhere/main" % W), o
+        project.clear()
+        assert "exit 3: it broke" in run(["sh", "-c", "echo it broke >&2; exit 3"], W)      # F8: a failed command says why
         o = out("fetchIt", "-p", W)
         lines = o.splitlines()
         assert "[grep only] web/page.ts:4  -  fetchIt();" in lines, o                      # a JS call CodeGraph misses
