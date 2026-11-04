@@ -1060,8 +1060,10 @@ def selftest():
                                                         if left else []), (answer, checked, lines)
     checked.clear()
     assert go(sysfor(), "none", runner(), find)[1] and checked == []     # nothing ran: no checks, as before
-    lines, ok = go(sysfor(), "1", runner(), lambda system: {"git": {}, ("claude", "Install ponytail"): {}})
-    assert ok and checked == [["codex"]], (checked, lines)    # codex had no numbered item: it stays in the checks
+    hand_only = {"git": {}, ("claude", "Install ponytail"): {},
+                 ("codex", "rule-replace"): {"file": "/h/a.md", "hand": "no heading above the rule in /h/a.md"}}
+    lines, ok = go(sysfor(), "1", runner(), lambda system: hand_only)
+    assert ok and checked == [["codex"]], (checked, lines)    # codex had only a step by hand: it stays in the checks
     # setup AGENT ...: only those agents (an agent the owner skips is not planned or checked); the plan's last line
     # names them, so --apply builds the same plan
     on = ["claude", "codex"]
