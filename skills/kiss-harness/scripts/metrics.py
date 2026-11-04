@@ -21,7 +21,7 @@ import glob, json, os, re, sys
 CG_READ = {"query", "explore", "context", "node", "files", "callers", "callees", "impact", "affected"}
 GREPS = {"grep", "egrep", "fgrep", "rg"}
 DOCS = {".md", ".json", ".jsonl", ".txt", ".log", ".yaml", ".yml", ".toml", ".csv"}
-HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)")
+HEREDOC = re.compile(r"(?:^|[\s;&|])<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)")
 LEAD = {"rtk", "do", "then", "else", "time", "xargs", "env", "sudo"}   # words before the command itself
 NA = "tokens: not available on this agent"
 RUN = re.compile(r"/runs/([\w.-]+)")   # a run folder's name in a path
@@ -119,7 +119,7 @@ def no_heredocs(cmd):
 
 def on_docs(w):
     """True when every file a grep names (after its pattern) is a doc or data file."""
-    args = [x.strip("'\"") for x in w[1:] if not x.startswith("-")]
+    args = [x.strip("'\"") for i, x in enumerate(w[1:]) if not x.startswith("-") and w[i] != "-e"]   # -e's word: a pattern
     files = args if "-e" in w else args[1:]
     return bool(files) and all(os.path.splitext(x)[1].lower() in DOCS for x in files)
 
@@ -325,7 +325,10 @@ def selftest():
                       ("grep -n x README.md", (0, 0, 0, 1)), ("grep -c y a.jsonl", (0, 0, 0, 1)),
                       ("grep -rn x src", (0, 1, 0, 0)), ("grep -n x app.py", (0, 1, 0, 0)),
                       ("cat > /s/n.md <<'EOF'\ngrep -rn x src\ncodegraph explore a\nEOF", (0, 0, 0, 0)),
-                      ("python3 - <<EOF | grep ok\ngrep x y\nEOF\ngrep -rn z src", (0, 1, 1, 0))):
+                      ("python3 - <<EOF | grep ok\ngrep x y\nEOF\ngrep -rn z src", (0, 1, 1, 0)),
+                      ("grep -n -e foo README.md", (0, 0, 0, 1)), ("grep -e a -e b x.json y.md", (0, 0, 0, 1)),
+                      ("grep -n -e foo src", (0, 1, 0, 0)),
+                      ("echo $((1<<N))\ngrep -rn x src", (0, 1, 0, 0))):
         assert bash_kinds(cmd) == want, (cmd, bash_kinds(cmd))
     import contextlib, io
     with tempfile.TemporaryDirectory() as t, contextlib.redirect_stdout(io.StringIO()):   # the metrics record
