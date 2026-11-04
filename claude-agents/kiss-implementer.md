@@ -2,6 +2,7 @@
 name: kiss-implementer
 description: The implementer of a KISS harness run. Only the kiss-harness controller starts it, with a filled implementer prompt.
 color: green
+effort: medium
 experimental:
   cacheTtl: 1h
 ---

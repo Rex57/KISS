@@ -30,7 +30,7 @@ once, before step 4.
 | `ponytail-debt` | ponytail | step 10, the list of new `shortcut:` comments | a search of the diff for `shortcut:` |
 
 Claude Code and Codex name them `mattpocock-skills:<name>` and `ponytail:<name>`. Before you use one, check that it
-is in your skill list; a skill that is not there is skipped, and the step does what the "Without it" column says. Write into `R/decisions.md` which of them the run used, with the plugin versions. Matt Pocock's
+is in your skill list; a skill that is not there is skipped, and the step does what the "Without it" column says. Step 3 writes which of them the run uses, with their plugin versions, on the first line of `R/progress.md`. Matt Pocock's
 `code-review` is not part of a run: the reviewer and `ponytail-review` cover it.
 
 ## Before the first run in a project
@@ -69,7 +69,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    the owner says yes, then `tickets.py render R`.
 3. **Worktree** `W = <repo>/.kiss/worktrees/<run>/` (git-ignored; never a session scratch folder, which a session
    restart can delete) on a new branch from the main branch; `codegraph init -y "W"`; `tickets.py freeze R` (from then
-   on `check` refuses any change but `passes`); an empty `R/progress.md`.
+   on `check` refuses any change but `passes`); `R/progress.md` with one line: the skills of the table above that the
+   run uses and their plugin versions (the version folder in each skill's base path).
 4. **Implementer:** write the run's values once: `prompt.py start R W=W BR=<branch> SCR=<scratch folder>
    MAIN=<main checkout> PROJECT=<facts file> TITLE=<title> BASE=<base sha> SMOKE="<a fast end-to-end test>"
    APP="<how to start the product, and its test data>"` (R/run.json). Then `prompt.py implementer R ELAPSED=0` →
@@ -94,9 +95,11 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    to `R/review-<n>.md` (n = this round's number, from 1).
 8. **Sort:** you sort (no subagent) by the rules `prompt.py severity R ROUND=<n>` prints, into `R/sort-<n>.json`,
    then go on. Each owner finding is a decision.
-9. **Fix rounds:** write the fix list to `R/fix-<n>.md`, then `prompt.py fix R ROUND=<n> ELAPSED=<s>` → the SAME
-   implementer. Check each test its answer names from the diff and the test output (run the test). Save the answer
-   to `R/answer-<n>.md`; when the round fixed a critical, high or reproduced-in-app finding, `prompt.py recheck R
+9. **Fix rounds:** write the fix list to `R/fix-<n>.md`; work an owner decision adds after the tickets gate goes in
+   it with the ticket rules of [references/spec-and-tickets.md](references/spec-and-tickets.md) (its failure-path
+   lines, and a message to an agent checked against that agent's standing prompt). Then `prompt.py fix R ROUND=<n>
+   ELAPSED=<s>` → the SAME implementer. Check each test its answer names from the diff and the test output (run the
+   test). Save the answer to `R/answer-<n>.md`; when the round fixed a critical, high or reproduced-in-app finding, `prompt.py recheck R
    ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha>` → the SAME reviewer (its findings, if any, become `R/review-<n+1>.md`).
    Before each one, the context check of step 5: a marked implementer or reviewer is replaced by the handoff.
    At most 2 fix rounds per review and 3 per run; then a gate. At the cap, when only low or medium findings that
@@ -112,7 +115,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
     4. **Look back** by [references/retro.md](references/retro.md): the candidates for the owner, most severe first
        (a mechanical mistake → a proposed check, a judgement call → a facts-file rule); change no product file.
     5. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
-       <used> of <budget>`, given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it prints the full
+       <used> of <budget>` (headless sessions: the `claude -p` or `claude --bg` sessions the run starts for tests;
+       subagents and kiss-mini workers do not count), given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it prints the full
        line (with the tokens per role and the CodeGraph share) and records it in `<repo>/.kiss/runs/metrics.md`, one line
        per run (a rerun of the close replaces the run's line).
     6. The **merge gate**, with the log findings. A push, a pull request or any write to a remote is its own gate;

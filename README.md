@@ -138,7 +138,7 @@ it. KISS's own skills that you start now and then (such as `kiss-doctor`, `kiss-
 
 If a skill is missing, a run still works: KISS follows its own copy of the same rules
 ([`references/spec-and-tickets.md`](skills/kiss-harness/references/spec-and-tickets.md) and its prompts), and
-`decisions.md` records which skills the run used.
+the first line of the run's `progress.md` records which skills the run used.
 
 ## How a run goes
 
