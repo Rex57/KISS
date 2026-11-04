@@ -94,17 +94,18 @@ def waits_for(rows, tid):
 def continue_text(rows, elapsed=None, budget=None, review=None):
     left = open_tickets(rows)
     wait = waits_for(rows, review) if review else set()
-    go = [r for r in left if r["id"] not in wait]
+    go = [r for r in left if r["id"] not in wait and r["id"] != review]
     if not go:
         return ""
     clock = f" Elapsed {elapsed}s / {budget}s." if elapsed is not None and budget is not None else ""
     text = ("continue: open tickets " + ", ".join(f"{r['id']} ({r['title']})" for r in go)
-            + f". {len(rows) - len(left)} of {len(rows)} pass.{clock} Take the next open ticket.")
-    if review:
-        text += f" {review} is under review alone: its fix round comes at your next stop."
-        waiting = [r["id"] for r in left if r["id"] in wait]
-        text += f" Waiting for {review}: {', '.join(waiting)}." if waiting else ""
-    return text
+            + f". {len(rows) - len(left)} of {len(rows)} pass.{clock}")
+    if not review:
+        return text + " Take the next open ticket."
+    waiting = [r["id"] for r in left if r["id"] in wait]
+    return (text + " Build only these, then stop with your final message"
+            + (f"; do not start {', '.join(waiting)} until the review of {review} is done." if waiting else ".")
+            + f" {review} is under review alone: its fix round comes at your next stop.")
 
 
 def render(run, rows):
@@ -138,8 +139,13 @@ def selftest():
     four = [dict(good[0], passes=True, risky=True), dict(good[1], id="T-2"),
             dict(good[1], id="T-3", title="g", depends_on=["T-2"]), dict(good[0], id="T-4", title="h")]
     assert continue_text(four, review="T-1") == (
-        "continue: open tickets T-4 (h). 1 of 4 pass. Take the next open ticket. T-1 is under review alone: its fix "
-        "round comes at your next stop. Waiting for T-1: T-2, T-3."), continue_text(four, review="T-1")
+        "continue: open tickets T-4 (h). 1 of 4 pass. Build only these, then stop with your final message; do not "
+        "start T-2, T-3 until the review of T-1 is done. T-1 is under review alone: its fix round comes at your next "
+        "stop."), continue_text(four, review="T-1")
+    assert continue_text(four, review="T-2") == (                       # an open ticket under review is not to take
+        "continue: open tickets T-4 (h). 1 of 4 pass. Build only these, then stop with your final message; do not "
+        "start T-3 until the review of T-2 is done. T-2 is under review alone: its fix round comes at your next "
+        "stop."), continue_text(four, review="T-2")
     assert continue_text(four[:3], review="T-1") == "", "every open ticket waits for the risky one: no message"
     assert continue_text(four) == "continue: open tickets T-2 (d), T-3 (g), T-4 (h). 1 of 4 pass. Take the next open ticket."
     code = dict(good[0], files=["app/x.py", "README.md"])
