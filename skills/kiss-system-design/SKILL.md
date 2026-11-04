@@ -26,7 +26,10 @@ when no decision is open.
    `mattpocock-skills:domain-modeling` (Claude Code and Codex names; without them, ask in rounds of `D<n>` with your
    recommended answer, and keep a glossary in the brief). Settle the destination: the product, who uses it, the
    problem, what done looks like, the hard limits. Write `brief.md`. Done when the owner says the brief is right.
-3. **The decision map.** Ask breadth-first across the whole product: every open decision you can state exactly now.
+3. **The decision map.** When the repo already has code and a CodeGraph index (`codegraph status "<repo>"` prints
+   `Project: <repo>`), map the parts the idea touches first: `codegraph explore -p "<repo>" "<those parts>"`, and
+   write the modules and interfaces you found into Notes; the decisions and step 5's design start from that code.
+   Ask breadth-first across the whole product: every open decision you can state exactly now.
    Write `map.md` with its parts: Destination, Notes, Decisions so far, Open decisions (each typed `research`,
    `prototype`, `grilling` or `task`, with what blocks it), Not yet clear, Out of scope. Write one file per open
    decision in `decisions/`. A question you cannot state exactly yet goes to Not yet clear; work beyond the

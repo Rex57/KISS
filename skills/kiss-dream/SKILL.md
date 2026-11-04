@@ -46,8 +46,10 @@ Its answer:
   drafts, and run the write again. Step 3 compares with `first/` plus each changed note.
 - `WRITTEN` (exit 0): done; `DIFFERS from its draft` (exit 5): report it.
 
-Skip a step whose store the agent does not have. agentmemory is optional: run step 4 only when
-`curl -s http://localhost:3111/agentmemory/livez` answers.
+Skip a step whose store the agent does not have. agentmemory is optional and never stalls a run: run step 4 only
+when `curl -s --max-time 5 http://localhost:3111/agentmemory/livez` answers, and give every other agentmemory call
+`--max-time 60`. A call that fails or times out skips the rest of step 4: its row in the report says so in one line
+(not met, the call and its error), and the run goes on with step 5.
 
 1. **Inventory** (show it, then go on; no wait): for each memory folder of the repo, the notes; per session
    transcript: date, size, subagent count; the subagent transcripts against `journal.jsonl`; the tool results.
@@ -84,8 +86,9 @@ Skip a step whose store the agent does not have. agentmemory is optional: run st
    not-found answer at its note (with `guard.py write`) and ask that question again with a fresh reader. Then run
    the gate on `M`. Done when every question is found, none is wrong, and the gate on `M` has no FAIL.
 4. **agentmemory (REST):** every call except `/livez` sends
-   `-H "Authorization: Bearer $(cat ~/.agentmemory/secret)"`. Back up `GET /agentmemory/memories` to
-   `~/.agentmemory/backups/memories-<date>-before-<repo>-tidy.json`. Save the revised project memories first:
+   `-H "Authorization: Bearer $(cat ~/.agentmemory/secret)"`. Back up `GET /agentmemory/memories` into the scratch
+   folder first (`curl -o`), and copy it to `~/.agentmemory/backups/memories-<date>-before-<repo>-tidy.json` only
+   when the call succeeded. Save the revised project memories first:
    memories are never edited, so a revision's first line names what it replaces (`SUPERSEDES … (mem_…)`), with
    `project` set and no password (its LLM steps send stored text to an outside model). Then delete the replaced
    ones. Consolidate only with `POST /agentmemory/consolidate-pipeline` `{"tier":"all"}`, never
