@@ -31,8 +31,11 @@ JS_DEF = [re.compile(p, re.M) for p in (
 NOT_NAMES = {"if", "for", "while", "switch", "catch", "function", "return", "constructor", "with"}
 
 
-def git(W, *args):
+def git(W, *args, missing_ok=False):
+    """git's stdout; a failure stops with git's own words (missing_ok: a path absent on one side gives "")."""
     p = subprocess.run(["git", "-C", W] + list(args), capture_output=True, text=True)
+    if p.returncode and not missing_ok:
+        sys.exit("callcheck: git %s failed: %s" % (" ".join(args), p.stderr.strip()))
     return p.stdout if p.returncode == 0 else ""
 
 
@@ -73,8 +76,8 @@ def changes(W, spec):
         new = parts[-1]
         if not old.endswith(PY + JS) or status.startswith("A"):
             continue
-        before = defs(git(W, "show", "%s:%s" % (base, old)), old)
-        after = {} if status.startswith("D") else defs(git(W, "show", "%s:%s" % (head, new)), new)
+        before = defs(git(W, "show", "%s:%s" % (base, old), missing_ok=True), old)
+        after = {} if status.startswith("D") else defs(git(W, "show", "%s:%s" % (head, new), missing_ok=True), new)
         added = {n: s for n, s in after.items() if n not in before}
         for name, sig in before.items():
             if name in after:
@@ -86,9 +89,9 @@ def changes(W, spec):
     return out
 
 
-def run_cgcallers(W, name, path):
-    return subprocess.run([sys.executable, "-I", os.path.join(HERE, "cgcallers.py"), name, "-p", W, "-f", path],
-                          capture_output=True, text=True).stdout
+def run_cgcallers(W, name, path, script=os.path.join(HERE, "cgcallers.py")):
+    p = subprocess.run([sys.executable, "-I", script, name, "-p", W, "-f", path], capture_output=True, text=True)
+    return p.stdout + ("\n[cgcallers failed] exit %d: %s" % (p.returncode, p.stderr.strip()[-500:]) if p.returncode else "")
 
 
 def word_hits(W, name, path):
@@ -182,6 +185,16 @@ def selftest():
             assert "[grep only] d.py" not in out and "e.py" not in out, out           # R13: a namesake's def; R1: no import
             assert "[grep only] f.py:2  return o.ack()" in out and "[grep only] a.py" not in out, out   # a method: any file
             assert out.splitlines()[-1] == "callcheck: 5 names checked (removed, renamed or re-signed), 4 caller lines to read", out
+        try:                                                                          # R2: a bad range stops with git's words
+            check(W, "nosuch..HEAD", fake)
+            raise AssertionError("a bad range must stop")
+        except SystemExit as e:
+            assert "nosuch" in str(e), e
+        boom = os.path.join(W, "boom.py")
+        with open(boom, "w") as fh:
+            fh.write("import sys\nprint('partial')\nsys.exit('Traceback: boom')\n")
+        out = run_cgcallers(W, "x", "a.py", script=boom)                             # R2: a crashed cgcallers is a line to read
+        assert "partial" in out and "[cgcallers failed] exit 1: Traceback: boom" in out, out
     print("callcheck selftest ok")
     return 0
 
