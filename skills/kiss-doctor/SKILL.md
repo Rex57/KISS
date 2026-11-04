@@ -19,7 +19,10 @@ backup, that a new session is needed, the export line for the other agents), and
 by the agents the owner names (`setup claude`), if any: then the plan and the checks cover only those. It finds
 the OS, the shell, the package manager and the agents on PATH, runs the checks, and prints a numbered plan of what
 is missing: each item with its command, its source and what it changes, then the steps only the owner can do (a
-`sudo` command, Antigravity's copy steps, Codex's `/hooks` trust, a new session) and the optional links. Show the
+`sudo` command, Antigravity's copy steps, Codex's `/hooks` trust, a new session) and the optional links. Optional
+items: `pyright` and `typescript-language-server` (only for a language the repo has files of) and CodeGraph's MCP
+server for each agent (through the agent's own `mcp add`; Claude Code also gets the permission `mcp__codegraph__*`;
+Antigravity: a step by hand). Show the
 plan as printed, ask "all, none, or the numbers?", and wait. The owner's answer is the go: run only the call the
 plan's last line names, `python3 -I "$KD/scripts/doctor.py" setup [<agents>] --apply <answer> --plan <id>`, with
 `all`, `none` or the owner's numbers (`1,3`) as the answer and the plan id the plan printed; a plan that changed

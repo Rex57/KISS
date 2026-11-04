@@ -188,6 +188,57 @@ def check_tools():
     return out
 
 
+SERVERS = [("pyright", "pyright-langserver", (".py",)),
+           ("typescript-language-server", "typescript-language-server", (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"))]
+
+
+def servers_wanted(repo):
+    """The language servers cgcallers' LSP pass can use in this repo: one per language it has files of."""
+    exts = set()
+    for d, dirs, files in os.walk(repo) if repo else []:
+        dirs[:] = [x for x in dirs if not x.startswith(".") and x != "node_modules"]
+        exts |= {os.path.splitext(f)[1] for f in files}
+    return [key for key, _, want in SERVERS if exts & set(want)]
+
+
+def check_servers(repo):
+    binary = {key: b for key, b, _ in SERVERS}
+    return [("OK", "device", f"{binary[k]} (cgcallers' LSP pass)", "") if shutil.which(binary[k]) else
+            ("INFO", "device", f"{binary[k]}: not on PATH (optional: cgcallers' LSP pass; kiss-doctor setup)", "")
+            for k in servers_wanted(repo)]
+
+
+def mcp_state(agent):
+    """(server set up?, its tools allowed?) for CodeGraph's MCP server, from the agent's own `mcp list`; None: unknown."""
+    if agent == "antigravity":
+        return None, None
+    if agent == "gemini":                       # its `mcp list` hides user servers in an untrusted folder: read the file
+        try:
+            server = "codegraph" in json.load(open(os.path.join(HOME, ".gemini", "settings.json"))).get("mcpServers", {})
+        except (OSError, ValueError, AttributeError):
+            server = False
+        return server, True
+    server = bool(re.search(r"^\W*codegraph\b", run([CLI[agent], "mcp", "list"]), re.M))
+    if agent != "claude":
+        return server, True
+    try:
+        allowed = "mcp__codegraph__*" in json.load(open(settings_path())).get("permissions", {}).get("allow", [])
+    except (OSError, ValueError, AttributeError):
+        allowed = False
+    return server, allowed
+
+
+def check_mcp(agent):
+    server, allowed = mcp_state(agent)
+    if server is None:
+        return [("INFO", agent, "CodeGraph's MCP server: check it by hand in the agent's MCP settings", "")]
+    if not server:
+        return [("INFO", agent, "CodeGraph's MCP server: not set up (optional; kiss-doctor setup)", "")]
+    return [("OK", agent, "CodeGraph's MCP server", "")] if allowed else [
+        ("WARN", agent, f"CodeGraph's MCP server: its tools are not allowed: add mcp__codegraph__* to permissions.allow in "
+                        f"{settings_path().replace(HOME, '~')}", "")]
+
+
 PROFILES = [".zshenv", ".zprofile", ".zshrc", ".bash_profile", ".bashrc", ".profile"]
 
 
@@ -234,6 +285,18 @@ def check_feedback(settings, home=HOME, env=os.environ, project=None):
 
 def set_feedback(settings, on):
     """Set only env.KISS_FEEDBACK in the settings file, after a backup beside it. Returns the lines to print."""
+    def change(data):
+        if not isinstance(data.get("env"), dict):
+            data["env"] = {}
+        data["env"]["KISS_FEEDBACK"] = "1" if on else "0"
+    backup = edit_settings(settings, change)
+    return ["feedback mode %s in %s%s" % ("on" if on else "off", settings, " (backup: %s)" % backup if backup else ""),
+            "Claude Code: start a new session for it to apply.",
+            "Codex, Gemini CLI, Antigravity: put this line in your shell profile yourself: export KISS_FEEDBACK=%s" % ("1" if on else "0")]
+
+
+def edit_settings(settings, change):
+    """change(data) on a JSON settings file, after a backup beside it; an unreadable file stays untouched. The backup."""
     data = {}
     if os.path.exists(settings):
         try:
@@ -250,15 +313,11 @@ def set_feedback(settings, on):
     else:
         backup = None
         os.makedirs(os.path.dirname(settings), exist_ok=True)
-    if not isinstance(data.get("env"), dict):
-        data["env"] = {}
-    data["env"]["KISS_FEEDBACK"] = "1" if on else "0"
+    change(data)
     with open(settings, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
         f.write("\n")
-    return ["feedback mode %s in %s%s" % ("on" if on else "off", settings, " (backup: %s)" % backup if backup else ""),
-            "Claude Code: start a new session for it to apply.",
-            "Codex, Gemini CLI, Antigravity: put this line in your shell profile yourself: export KISS_FEEDBACK=%s" % ("1" if on else "0")]
+    return backup
 
 
 # The install table: the one home of every command `setup` shows (D6). A command is one string; {name} fills
@@ -286,8 +345,21 @@ INSTALL = [
      "run": ["install -m 755 {kiss}/skills/kiss-harness/scripts/cgcallers.py {bin}/cgcallers"]},
     {"key": "index", "what": "the CodeGraph index of this repo", "source": "https://github.com/colbymchenry/codegraph",
      "changes": "adds {repo}/.codegraph/", "run": ["codegraph init -y {repo}"]},
+    {"key": "pyright", "what": "pyright (optional: cgcallers' LSP pass for Python)", "source": "https://github.com/microsoft/pyright",
+     "changes": "adds pyright-langserver to npm's global folder (npm prefix -g)", "run": ["npm install -g pyright"]},
+    {"key": "typescript-language-server", "what": "typescript-language-server (optional: cgcallers' LSP pass for JS/TS)",
+     "source": "https://github.com/typescript-language-server/typescript-language-server",
+     "changes": "adds typescript-language-server and TypeScript 5 (TypeScript 7 has no tsserver.js) to npm's global folder",
+     "run": ["npm install -g typescript-language-server typescript@5"]},
     {"key": "rule", "what": "the CodeGraph rule", "source": "https://github.com/Rex57/KISS (rules/codegraph.md)",
      "changes": "appends the rule to {file}", "agents": {a: ["cat {kiss}/rules/codegraph.md >> {file}"] for a in CLI}},
+    {"key": "mcp", "what": "CodeGraph's MCP server", "source": "https://github.com/colbymchenry/codegraph",
+     "changes": "adds the MCP server codegraph (codegraph serve --mcp) to {agent}'s user settings (Claude Code: also allows"
+                " its tools, mcp__codegraph__*)",
+     "agents": {"claude": ["claude mcp add --scope user codegraph -- codegraph serve --mcp", "allow mcp__codegraph__* in {settings}"],
+                "codex": ["codex mcp add codegraph -- codegraph serve --mcp"],
+                "gemini": ["gemini mcp add --scope user codegraph codegraph serve --mcp"]},
+     "hand": {"antigravity": "in Antigravity's MCP settings, add a server named codegraph that runs: codegraph serve --mcp"}},
     {"key": "Install KISS", "what": "KISS", "source": "https://github.com/Rex57/KISS", "changes": "adds the KISS plugin to {agent}",
      "agents": {"claude": ["claude plugin marketplace add Rex57/KISS", "claude plugin install kiss@kiss"],
                 "codex": ["codex plugin marketplace add Rex57/KISS", "codex plugin add kiss@kiss"],
@@ -403,6 +475,14 @@ def execute(argv, timeout=TIMEOUT):
             with open(argv[3], "a", encoding="utf-8") as f:
                 f.write(("\n" if old and not old.endswith("\n") else "") + read(argv[1]))
             return 0, ""
+        if argv[0] == "allow" and argv[2:3] == ["in"]:      # one permission rule, added once to Claude Code's settings
+            def change(data):
+                perms = data.setdefault("permissions", {})
+                allow = perms.setdefault("allow", [])
+                if argv[1] not in allow:
+                    allow.append(argv[1])
+            edit_settings(argv[3], change)
+            return 0, ""
         if argv[:3] == ["install", "-m", "755"]:
             os.makedirs(os.path.dirname(argv[4]), exist_ok=True)
             shutil.copyfile(argv[3], argv[4])
@@ -411,7 +491,7 @@ def execute(argv, timeout=TIMEOUT):
         p = subprocess.run([shutil.which(argv[0]) or argv[0]] + argv[1:], capture_output=True, text=True, timeout=timeout,
                            stdin=subprocess.DEVNULL)
         return p.returncode, (p.stdout + p.stderr).strip()
-    except (OSError, subprocess.TimeoutExpired) as e:
+    except (OSError, subprocess.TimeoutExpired, SystemExit) as e:
         return 1, str(e)
 
 
@@ -498,6 +578,8 @@ def gaps(system):
                                      ("cgcallers", not (shutil.which("cgcallers") or os.path.isfile(os.path.join(system["bin"], "cgcallers")))),
                                      ("index", system["repo"] and not os.path.isdir(os.path.join(system["repo"], ".codegraph")))]
            if missing}
+    binary = {key: b for key, b, _ in SERVERS}
+    out.update({k: {} for k in servers_wanted(system["repo"]) if not shutil.which(binary[k])})
     need, marks = required(), markers()
     for agent in system["agents"]:
         text, files, roots, note = agent_setup(agent)
@@ -506,6 +588,8 @@ def gaps(system):
         for level, _, _, fix in check_skills(agent, roots, need, note, loaded_here(agent)):
             if level == "FAIL" and fix.startswith("Install "):
                 out[(agent, fix)] = {}
+        if not mcp_state(agent)[0]:
+            out[(agent, "mcp")] = {"settings": settings_path()}
     return out
 
 
@@ -761,8 +845,39 @@ def selftest():
     assert execute(["no-such-command-kiss"])[0] != 0
     code, out = execute([sys.executable, "-c", "import time; time.sleep(5)"], timeout=1)       # F12: a stall ends as a FAIL
     assert code != 0 and "timed out" in out and TIMEOUT <= 300, (code, out)
-    gemini = [c for r in INSTALL for c in r.get("agents", {}).get("gemini", []) if c.startswith("gemini ")]
+    gemini = [c for r in INSTALL for c in r.get("agents", {}).get("gemini", []) if c.startswith("gemini ") and " mcp " not in c]
     assert len(gemini) == 4 and all(c.endswith(" --consent") for c in gemini), gemini   # no [Y/n] question
+    # T-8: the language servers and CodeGraph's MCP server for each agent, through the agent's own command
+    four = sysfor(agents=["claude", "codex", "gemini", "antigravity"])
+    got = show(plan(four, {"pyright": {}, "typescript-language-server": {}, ("claude", "mcp"): {"settings": "/h/.claude/settings.json"},
+                           ("codex", "mcp"): {}, ("gemini", "mcp"): {}, ("antigravity", "mcp"): {}}))
+    assert got[:2] == [("pyright (optional: cgcallers' LSP pass for Python)", "device", ["npm install -g pyright"], ""),
+                       ("typescript-language-server (optional: cgcallers' LSP pass for JS/TS)", "device",
+                        ["npm install -g typescript-language-server typescript@5"], "")], got
+    assert got[2:] == [
+        ("CodeGraph's MCP server", "claude", ["claude mcp add --scope user codegraph -- codegraph serve --mcp",
+                                              "allow mcp__codegraph__* in /h/.claude/settings.json"], ""),
+        ("CodeGraph's MCP server", "codex", ["codex mcp add codegraph -- codegraph serve --mcp"], ""),
+        ("CodeGraph's MCP server", "gemini", ["gemini mcp add --scope user codegraph codegraph serve --mcp"], ""),
+        ("CodeGraph's MCP server", "antigravity", [], "by hand: in Antigravity's MCP settings, add a server named codegraph"
+                                                      " that runs: codegraph serve --mcp")], got
+    assert not any("codegraph install" in c for r in INSTALL for c in r.get("run", []) + [
+        x for cs in r.get("agents", {}).values() for x in cs]), "never codegraph install (D10)"
+    with tempfile.TemporaryDirectory() as fx:                 # the permission: added once, after a backup
+        st = os.path.join(fx, "settings.json")
+        with open(st, "w") as f:
+            json.dump({"permissions": {"allow": ["Read"]}, "model": "opus"}, f)
+        assert execute(["allow", "mcp__codegraph__*", "in", st]) == (0, "")
+        assert execute(["allow", "mcp__codegraph__*", "in", st]) == (0, "")
+        assert json.load(open(st)) == {"permissions": {"allow": ["Read", "mcp__codegraph__*"]}, "model": "opus"}, read(st)
+        assert len(glob.glob(st + ".kiss-backup-*")) == 2
+        for name, files in (("py", ["a.py"]), ("ts", ["web/b.ts"]), ("docs", ["README.md"])):
+            for f in files:
+                os.makedirs(os.path.dirname(os.path.join(fx, name, f)), exist_ok=True)
+                open(os.path.join(fx, name, f), "w").close()
+        assert servers_wanted(os.path.join(fx, "py")) == ["pyright"]
+        assert servers_wanted(os.path.join(fx, "ts")) == ["typescript-language-server"]
+        assert servers_wanted(os.path.join(fx, "docs")) == [] and servers_wanted(None) == []
     stdin_is_null = "import os,sys; sys.exit(0 if os.fstat(0).st_rdev == os.stat(os.devnull).st_rdev else 3)"
     assert execute([sys.executable, "-c", stdin_is_null])[0] == 0      # a question reads end of input, never waits
     # gaps() and detect() on this KISS folder, with a scratch Codex home that has nothing
@@ -785,6 +900,13 @@ def selftest():
             got = detect()
             assert (got["pm"], got["agents"], got["repo"], got["bin"]) == ("brew", ["codex"], None, os.path.join(fx, "bin")), got
             assert "cgcallers" in gaps(dict(got, agents=[]))
+            repo = os.path.join(fx, "repo")                            # T-8: a server per language the repo has
+            os.makedirs(os.path.join(repo, "web"))
+            open(os.path.join(repo, "a.py"), "w").close()
+            assert "pyright" in gaps(dict(got, agents=[], repo=repo)) and "typescript-language-server" not in gaps(dict(got, agents=[], repo=repo))
+            open(os.path.join(repo, "web", "b.tsx"), "w").close()
+            assert "typescript-language-server" in gaps(dict(got, agents=[], repo=repo))
+            assert not {"pyright", "typescript-language-server"} & set(gaps(dict(got, agents=[], repo=None)))
             os.makedirs(os.path.join(fx, "bin"))                       # F3: copied but its folder not on PATH
             with open(os.path.join(fx, "bin", "cgcallers"), "w") as f:
                 f.write("x")
@@ -825,10 +947,12 @@ def report(agents):
     """The checks: (the report's lines, the number of FAIL lines)."""
     need, marks = required(), markers()
     rule = read(os.path.join(KISS, "rules", "codegraph.md"))
-    rows = check_tools() + check_feedback(settings_path(), project=os.getcwd())
+    repo = run(["git", "rev-parse", "--show-toplevel"]).strip() if shutil.which("git") else ""
+    rows = check_tools() + check_servers(repo) + check_feedback(settings_path(), project=os.getcwd())
     for agent in agents:
         text, files, roots, note = agent_setup(agent)
         rows += check_rule(agent, text, files, marks, rule) + check_skills(agent, roots, need, note, loaded_here(agent))
+        rows += check_mcp(agent)
     out = [f"{level:<5} {agent:<12} {what}" + (f"  [fix: README \"{fix}\"]" if fix else "") for level, agent, what, fix in rows]
     fails, warns, infos = (sum(r[0] == lv for r in rows) for lv in ("FAIL", "WARN", "INFO"))
     return out + [f"\n{fails} FAIL, {warns} WARN, {infos} INFO, {len(rows) - fails - warns - infos} OK ({', '.join(agents)})"], fails

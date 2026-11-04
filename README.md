@@ -92,9 +92,11 @@ KISS installs only on your request, from the official sources, after you see eac
 agents on your PATH, and shows a numbered plan of what is missing, each item with its command, its source and what
 it changes. You answer all, none or the numbers: it installs those, one at a time, stops at the first failure,
 runs the checks again and lists the steps only you can do. It never runs `sudo` and never edits your shell profile:
-it shows those lines for you to run. Name agents to set up only those (`kiss-doctor setup claude`). Or install each
-tool yourself from its link, once per device, then run `kiss-doctor`:
-it checks each one.
+it shows those lines for you to run. Name agents to set up only those (`kiss-doctor setup claude`). The plan also
+offers two optional kinds of item: the language servers for `cgcallers`' LSP pass (only for a language your repo has
+files of), and CodeGraph's MCP server for each agent, added through the agent's own command (Claude Code also gets the
+permission `mcp__codegraph__*`; Antigravity: a step by hand). It never runs `codegraph install`. Or install each tool
+yourself from its link, once per device, then run `kiss-doctor`: it checks each one.
 
 | Tool | Why | Install |
 |---|---|---|
@@ -106,8 +108,9 @@ it checks each one.
 | [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close; `ponytail-audit` and `ponytail-debt`: `kiss-code-clean`'s audit report and debt ledger (`kiss-doctor` does not check `ponytail-audit`) | `kiss-doctor setup`, or see "Install ponytail" below |
 | [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate; `research`: `kiss-system-design`'s research decisions (`kiss-doctor` does not check `research`) | `kiss-doctor setup`, or see "Install Matt Pocock's skills" below |
 | `cgcallers` (in this repo) | CodeGraph's callers plus a word search of the importing files, before a delete or rename | `kiss-doctor setup` (into `~/.local/bin`, or the folder `KISS_BIN` names), or `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (that folder on your `PATH`) |
-| [pyright](https://github.com/microsoft/pyright) (optional) | `cgcallers`' LSP pass for Python | `npm install -g pyright` |
-| [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) (optional) | `cgcallers`' LSP pass for JS/TS (it needs TypeScript 5 or 6: TypeScript 7 has no `tsserver.js`) | `npm install -g typescript-language-server typescript@5` |
+| [pyright](https://github.com/microsoft/pyright) (optional) | `cgcallers`' LSP pass for Python | `kiss-doctor setup` (for a repo with Python files), or `npm install -g pyright` |
+| [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) (optional) | `cgcallers`' LSP pass for JS/TS (it needs TypeScript 5 or 6: TypeScript 7 has no `tsserver.js`) | `kiss-doctor setup` (for a repo with JS/TS files), or `npm install -g typescript-language-server typescript@5` |
+| CodeGraph's MCP server (optional) | CodeGraph's tools in any session of each agent, without KISS | `kiss-doctor setup` (each agent's own `mcp add`: `claude mcp add --scope user codegraph -- codegraph serve --mcp` and the permission `mcp__codegraph__*`; `codex mcp add codegraph -- codegraph serve --mcp`; `gemini mcp add --scope user codegraph codegraph serve --mcp`; Antigravity: by hand in its MCP settings) |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
 | [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-dream` | its README |
 
