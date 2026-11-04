@@ -581,10 +581,10 @@ def selftest():
     assert all("sudo" in i["hand"] and i["n"] is None for i in apt), apt
     none = plan(sysfor(os="linux", pm=None), {"git": {}})                    # no package manager: the download link only
     assert none[0]["run"] == [] and none[0]["n"] is None and "https://git-scm.com/downloads" in none[0]["hand"], none
-    gaps = {"codegraph": {}, "cgcallers": {}, "index": {}, ("claude", "Install ponytail"): {},
+    known = {"codegraph": {}, "cgcallers": {}, "index": {}, ("claude", "Install ponytail"): {},
             ("codex", "Install ponytail"): {}, ("codex", "Install Matt Pocock's skills"): {},
             ("claude", "rule"): {"file": "/h/.claude/CLAUDE.md"}, ("gemini", "Install ponytail"): {}}
-    got = show(plan(sysfor(), gaps))
+    got = show(plan(sysfor(), known))
     assert got == [
         ("CodeGraph", "device", ["npm install -g @colbymchenry/codegraph"], ""),
         ("cgcallers", "device", ["install -m 755 /k/skills/kiss-harness/scripts/cgcallers.py /b/cgcallers"], ""),
@@ -596,7 +596,7 @@ def selftest():
     ], got                                                                    # gemini is not on PATH: not planned
     assert show(plan(sysfor(), {("claude", "Install Matt Pocock's skills"): {}}))[0][2] == [    # his own marketplace
         "claude plugin marketplace add mattpocock/skills", "claude plugin install mattpocock-skills@mattpocock"]
-    items = plan(sysfor(), gaps)
+    items = plan(sysfor(), known)
     assert [i["n"] for i in items] == [1, 2, 3, 4, 5, 6, 7] and all(i["source"] and i["changes"] for i in items), items
     assert "/hooks" in items[5]["after"] and items[4]["after"] == "", items
     assert items[2]["run"] == [["codegraph", "init", "-y", "/r/my app"]]     # a path with a space stays one word
@@ -611,7 +611,7 @@ def selftest():
         ("ponytail", "gemini", ["gemini extensions install https://github.com/DietrichGebert/ponytail"], ""),
         ("ponytail", "antigravity", [], "by hand: follow https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md"),
     ], show(shared)
-    text = "\n".join(plan_lines(sysfor(os="linux", pm="apt"), plan(sysfor(os="linux", pm="apt"), dict(gaps, git={}))))
+    text = "\n".join(plan_lines(sysfor(os="linux", pm="apt"), plan(sysfor(os="linux", pm="apt"), dict(known, git={}))))
     for want in ("1. CodeGraph (device)", "   command: npm install -g @colbymchenry/codegraph",
                  "   source:  https://github.com/colbymchenry/codegraph", "sudo apt install -y git", "needs sudo",
                  "agentmemory: https://github.com/rohitg00/agentmemory", "all, none, or the numbers"):
@@ -625,8 +625,8 @@ def selftest():
             return (1, "npm ERR! 404 not found") if " ".join(argv) in fail else (0, "")
         return go
     checks = lambda: ["CHECKS AGAIN"]
-    find = lambda system: gaps                               # numbered: 1 CodeGraph, 2 cgcallers, 3 index, 4 rule, 5-7 plugins
-    lines, ok = setup(sysfor(os="linux", pm="apt"), "1,3", runner(), lambda system: dict(gaps, git={}), checks)
+    find = lambda system: known                               # numbered: 1 CodeGraph, 2 cgcallers, 3 index, 4 rule, 5-7 plugins
+    lines, ok = setup(sysfor(os="linux", pm="apt"), "1,3", runner(), lambda system: dict(known, git={}), checks)
     assert ok and ran == ["npm install -g @colbymchenry/codegraph", "codegraph init -y /r/my app"], ran
     text = "\n".join(lines)
     assert "CHECKS AGAIN" in text and "sudo apt install -y git" in text and "start a new session" not in text, text
@@ -665,6 +665,29 @@ def selftest():
         exe = os.path.join(fx, "bin", "cgcallers")
         assert execute(["install", "-m", "755", src, exe]) == (0, "") and os.access(exe, os.X_OK) and read(exe) == read(src)
     assert execute(["no-such-command-kiss"])[0] != 0
+    # gaps() and detect() on this KISS folder, with a scratch Codex home that has nothing
+    assert all(k in {r["key"] for r in INSTALL} for k in set(required().values())), required()
+    old_env = {k: os.environ.get(k) for k in ("CODEX_HOME", "PATH", "KISS_BIN")}
+    with tempfile.TemporaryDirectory() as fx:
+        try:
+            os.environ["CODEX_HOME"] = os.path.join(fx, "codex")
+            found = gaps({"agents": ["codex"], "repo": None, "bin": os.path.join(fx, "bin")})
+            assert found[("codex", "rule")] == {"file": os.path.join(fx, "codex", "AGENTS.md")}, found
+            for key in ("Install KISS", "Install ponytail", "Install Matt Pocock's skills"):
+                assert ("codex", key) in found, (key, found)
+            os.makedirs(os.path.join(fx, "path"))
+            for name in ("apt", "brew", "codex"):                 # the first package manager in PMS order wins
+                with open(os.path.join(fx, "path", name), "w") as f:
+                    f.write("#!/bin/sh\n")
+                os.chmod(os.path.join(fx, "path", name), 0o755)
+            os.environ["PATH"] = os.path.join(fx, "path")
+            os.environ["KISS_BIN"] = os.path.join(fx, "bin")
+            got = detect()
+            assert (got["pm"], got["agents"], got["repo"], got["bin"]) == ("brew", ["codex"], None, os.path.join(fx, "bin")), got
+            assert "cgcallers" in gaps(dict(got, agents=[]))
+        finally:
+            for k, v in old_env.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
     print("doctor selftest ok")
 
 
