@@ -60,11 +60,14 @@ const GIT_DELIVERS = /\bgit(?:\s+(?:-C\s*\S+|-c\s+\S+|--?[\w-]+(?:=\S+)?))*\s+(?
 // A git alias that is push or merge under another name.
 const GIT_ALIAS = /\bgit\b[^;&|]*-c\s*['"]?alias\.[\w-]+=[^;&|]*\b(?:push|merge)\b/
 const GH_DELIVERS = /\bgh\s+pr\s+(?:create|merge|ready)\b|\bgh\s+api\b(?=[^;&|]*pulls\/\d+\/merge)|\bgh\s+api\b(?=[^;&|]*pulls)(?=[^;&|]*(?:-X\s*POST|--method[\s=]POST|\s-[fF]\s|--(?:raw-)?field|--input))/
-// Quoted text is not read (a commit message), except where a shell or eval runs it as a command.
-const RUNS_TEXT = /\b(?:(?:bash|sh|zsh)\s+-[a-z]*c|eval)\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
+// Quoted text is not read (a commit message), except where a shell (after its first flag that holds c) or eval runs it
+// as a command, and the $(...) or backtick text inside double quotes.
+const RUNS_TEXT = /\b(?:(?:bash|sh|zsh)(?:\s+-[a-zA-Z]+)*?\s+-[a-zA-Z]*c[a-zA-Z]*|eval)\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
+const RUNS_IN_QUOTES = /\$\(|`/
 const delivers = (command: string) =>
   GIT_DELIVERS.test(command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "''")) ||
   [...command.matchAll(RUNS_TEXT)].some(m => GIT_DELIVERS.test(m[1] ?? m[2] ?? '')) ||
+  [...command.matchAll(/"((?:[^"\\]|\\.)*)"/g)].some(m => RUNS_IN_QUOTES.test(m[1]!) && GIT_DELIVERS.test(m[1]!)) ||
   GIT_ALIAS.test(command) || GH_DELIVERS.test(command)
 // D1, D2: a code or bug worker writes only in its worktree; outside it, git only reads.
 const ONLY_WORKTREE = 'kiss-mini: a worker writes only in its worktree'
@@ -97,7 +100,11 @@ function segments(command: string): string[][] {
       end()
       all.push([])
     } else if (m[5]) end()
-    else word = (word ?? '') + (m[1] ?? m[2]?.replace(/\\(.)/g, '$1') ?? m[3] ?? m[6])
+    else {
+      // $(...) and backtick text inside double quotes runs, before the command that holds the word.
+      if (m[2] && RUNS_IN_QUOTES.test(m[2])) all.splice(all.length - 1, 0, ...segments(m[2]))
+      word = (word ?? '') + (m[1] ?? m[2]?.replace(/\\(.)/g, '$1') ?? m[3] ?? m[6])
+    }
   }
   end()
   return all
@@ -110,9 +117,15 @@ function gitOutside(command: string, dir: string | undefined, wt: string | undef
       const w = seg[i]!
       const set = /^(GIT_DIR|GIT_WORK_TREE)=(.*)$/s.exec(w)
       if (set) env[set[1]!] = resolve(dir, set[2]!)
-      else if (w === 'cd' || w === 'pushd') dir = resolve(dir, seg.slice(i + 1).find(a => !/^-[LPe@]+$/.test(a)) ?? '~')
-      else if (/^(?:bash|sh|zsh)$/.test(w) && /^-[a-z]*c[a-z]*$/.test(seg[i + 1] ?? '') && gitOutside(seg[i + 2] ?? '', dir, wt, { ...env })) return true
-      else if (w === 'eval' && gitOutside(seg.slice(i + 1).join(' '), dir, wt, { ...env })) return true
+      else if (w === 'cd' || w === 'pushd') {
+        // -- and the flags are no folder; cd - (the host's folder, after the mod's cd) and pushd +N leave it unknown.
+        const to = seg.slice(i + 1).find(a => !/^(?:-[LPe@]+|--)$/.test(a)) ?? '~'
+        dir = /^[-+]/.test(to) ? undefined : resolve(dir, to)
+      } else if (/(?:^|\/)(?:bash|sh|zsh)$/.test(w)) {
+        // The text after the shell's first flag that holds c (bash -e -c, /bin/sh -xc) runs.
+        const c = seg.findIndex((a, k) => k > i && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a))
+        if (c > 0 && gitOutside(seg[c + 1] ?? '', dir, wt, { ...env })) return true
+      } else if (w === 'eval' && gitOutside(seg.slice(i + 1).join(' '), dir, wt, { ...env })) return true
       else if (w === 'git' || w.endsWith('/git')) {
         const folders = Object.keys(env).map(k => env[k])
         let here = dir
@@ -778,8 +791,10 @@ export const register: Register = on => {
 
   // Host: a code or bug worker's git writes and file writes stay in its worktree; its git reads may look outside. It
   // runs before the push guard, so a command that does both gets one deny that names both rules.
-  // shortcut: symlinks are not followed, and Bash writes other than git (sed -i, >) are not caught; upgrade: run the
-  // worker in a sandbox that allows writes only in its worktree.
+  // shortcut: symlinks are not followed; Bash writes other than git (sed -i, >), git run by a script, xargs or env -C,
+  // and a git output path other than --output (format-patch -o) are not caught; a cd in eval text does not carry to
+  // the commands after it, and one in a subshell does; upgrade: run the worker in a sandbox that allows writes only in
+  // its worktree.
   on('tool.call', { tool: ['Bash', 'Edit', 'Write', 'NotebookEdit'] }, async ($, e, next) => {
     const a = e as unknown as Record<string, unknown>
     if (e.agentId === undefined || !(await isHost($))) return next(e)

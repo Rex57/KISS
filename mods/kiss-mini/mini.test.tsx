@@ -474,7 +474,8 @@ test('the host refuses a worker\'s git push, git merge and gh pr; other commands
   for (const command of [`git push -u origin mini/${ID}`, 'git -C /repo merge main', 'git -c x=y push', 'gh pr create --draft', 'gh pr merge 12', 'cd x && git push',
     'git --no-pager push origin x', 'git -C/x push', 'gh api -X POST repos/o/r/pulls -f head=x -f base=main',
     'bash -c "git push origin x"', "sh -c 'cd x && git push'", 'eval "git push"', 'git subtree push --prefix d origin b',
-    'git -c alias.p=push p origin x', 'bash -lc "git push origin x"', 'gh api -X PUT repos/o/r/pulls/12/merge']) {
+    'git -c alias.p=push p origin x', 'bash -lc "git push origin x"', 'gh api -X PUT repos/o/r/pulls/12/merge',
+    "bash -e -c 'git push origin x'", "/bin/bash -x -c 'git push'", 'echo "$(git push origin x)"']) {
     const r = await $.tool.call({ tool: 'Bash', command, agentId: 'w1' } as never)
     expect(JSON.stringify(r)).toContain('press in the /kiss-mini pane')
   }
@@ -507,7 +508,15 @@ test('a code worker\'s git command that writes outside its worktree is denied: -
     'git --work-tree=/repo stash', 'pushd /repo; git rebase main', "bash -c 'git -C /repo merge x'",
     // A quoted folder is still the folder; each -C starts from the one before; --git-dir with its value apart; eval runs its text.
     'git -C "/srv/other repo" commit -m x', `git -C ${WT} -C ../.. reset --hard`, 'git --git-dir /repo/.git commit -m x',
-    'eval "cd /repo && git commit -m x"', 'git -C ~/repo commit -m x']) {
+    'eval "cd /repo && git commit -m x"', 'git -C ~/repo commit -m x',
+    // Each -C starts from the one before: sub of /repo is outside, sub of the worktree is not.
+    'git -C /repo -C sub commit -m x',
+    // cd's -- and flags are no folder; cd - goes back to the host's folder, which the mod's cd left.
+    'cd -- /repo && git commit -m x', 'pushd -- /repo; git reset --hard', 'cd -P -- /repo && git checkout main', 'cd - && git commit -m x',
+    // A shell by its path, and the text after its first flag that holds c.
+    "/bin/bash -c 'git -C /repo commit -m x'", "bash -e -c 'git -C /repo commit -m x'", 'sh -x -c "cd /repo && git reset --hard"',
+    // $(...) and backtick text inside double quotes runs.
+    'echo "$(git -C /repo commit -m x)"', 'msg="$(cd /repo && git reset --hard)"', 'echo "`git -C /repo commit -m x`"']) {
     expect(JSON.stringify(await call($, 'Bash', { command })), command).toContain(ONLY)
   }
   expect(ran).toEqual([])
@@ -517,7 +526,7 @@ test('a code worker\'s git commands inside its worktree, and its git reads anywh
   const { ran } = await worker($, on)
   const allowed = ['git commit -m "see /some/other/path"', "git commit -m 'git -C /repo reset'", 'git -C sub commit -m x',
     `git -C ${WT}/sub commit -m x`, `cd ${WT}/sub && git add calc.py`, 'git -C /repo log', 'git -C /repo status', 'git -C /repo diff',
-    'GIT_DIR=/repo/.git git show HEAD']
+    'GIT_DIR=/repo/.git git show HEAD', 'cd -- sub && git add calc.py', 'echo "$(git -C /repo log -1)"', 'git commit -m "fix: $(date)"']
   for (const command of allowed) await call($, 'Bash', { command })
   expect(ran).toEqual(allowed.map(c => `Bash cd '${WT}' && ${c}`))
 })
