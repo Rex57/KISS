@@ -207,7 +207,12 @@ const ROOT = decodeURIComponent(new URL('../..', (import.meta as { url: string }
 // The brief names the plugin root (its Rules line): a test of the 1,500 limit pins the paths to an installed KISS's
 // root length, so it checks brief(), not the folder this repo is checked out in.
 const INSTALLED = '/Users/someone/.claude/plugins/cache/kiss/kiss/2.0.2'
-const pin = (path: string) => ROOT.length > INSTALLED.length ? path.slice(0, path.length - (ROOT.length - INSTALLED.length)) : path + 'x'.repeat(INSTALLED.length - ROOT.length)
+// The cwd and the root each appear once in a brief: a cwd of the length that keeps their sum fixed gives the same brief.
+function pin(path: string) {
+  const n = path.length + INSTALLED.length - ROOT.length
+  if (n < 8) throw new Error(`the checkout's path (${ROOT.length} characters) is too long for this test's cwd`)
+  return n <= path.length ? path.slice(0, n) : path + 'x'.repeat(n - path.length)
+}
 async function hostStart($: any, w: ReturnType<typeof world>) {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
@@ -546,7 +551,7 @@ test('an ended task that still holds a worktree stays in the pane past the last 
 test('with real-length paths a long task text still gives a brief of at most 1,500 characters', async ($, on) => {
   // Made-up paths as long as a real temp folder and a real session's scratch folder.
   const tmp = '/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/'
-  const cwd = pin('/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo')
+  const cwd = pin('/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo-0123456789abcdefghij')
   const w = world(on, { tmp, cwd })
   await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'kiss:kiss-mini', args: `fix ${'the long bug text '.repeat(30)}`.trim() } as never)
@@ -1053,17 +1058,18 @@ test('when the paths leave under 200 characters for the task text, its first 200
 })
 
 test('in an indexed repo a code task\'s brief names W, the CodeGraph commands with -p and the seed file, within 1,500 characters', async ($, on) => {
-  const tmp = '/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/'
-  const cwd = pin('/Users/someone/Projects/a-notes-app-with-a-long-folder-name')
+  // A long cwd, so pin() has room to shorten it for a long checkout path; Linux's /tmp/ keeps the brief's budget.
+  const tmp = '/tmp/'
+  const cwd = pin('/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/notes-app-with-a-long-name-0123456789abcdefghijklmnopqrstuvwxyz-0123456789abcdefghij')
   const w = world(on, { tmp, cwd, indexed: true })
   await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'kiss:kiss-mini', args: `fix ${'the long bug text '.repeat(30)}`.trim() } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
-  const dir = `/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/kiss-mini/${ID}`
+  const dir = `/tmp/kiss-mini/${ID}`
   const prompt = w.spawned[0]?.prompt ?? ''
   expect(prompt.length).toBeLessThanOrEqual(1500)
   expect(prompt).toContain(`Worktree: ${dir}/wt\nTask folder: ${dir}\n`)
-  expect(prompt).toContain('CodeGraph: codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder')
+  expect(prompt).toContain('CodeGraph (never cd first): codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder')
   // The worker starts in W, so "$PWD" in the line is W.
   expect(w.spawned[0]?.cwd).toBe(`${dir}/wt`)
   expect(w.files[`${dir}/seed.md`]).toBe('SEED: calc.py add()\n')

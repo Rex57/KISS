@@ -80,9 +80,9 @@ function briefLines(t: Task, text: string, rules: string, dir: string, seed = fa
   const where = [...(isCode(t)
     ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`]
     : [`Checkout: ${t.cwd} (read only)    Task folder: ${dir}`]),
-  // $PWD is W: the worker starts in its worktree (a question: its checkout). Two full paths here would cost the task
-  // text 150 characters at real-length paths.
-  ...(seed ? ['CodeGraph: codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder'] : [])]
+  // $PWD is W: the worker starts in its worktree (a question: its checkout); after a cd into the Checkout, -p "$PWD"
+  // would query the base branch's index. Two full paths here would cost the task text 150 characters.
+  ...(seed ? ['CodeGraph (never cd first): codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder'] : [])]
   // The report's first line and the progress tool are in the brief itself: a worker may not open the Rules file.
   const rule = 'Report: your final message starts "State: done|ready|failed|waiting for you", then "Summary:". Call mcp__kiss__progress (step, total) as you start each step.'
   if (t.brief !== undefined) {

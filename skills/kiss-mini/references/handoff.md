@@ -19,7 +19,7 @@ Kind: code | bug | question | watch
 Checkout: <absolute path>    Base: <branch>    Branch: mini/<id>    Worktree: <absolute path>
 Task folder: <T>             Return: harness | owner    Checks: run | skip (owner)
 Rules: <the absolute path of this file>
-CodeGraph: codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder
+CodeGraph (never cd first): codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder
 Summary: <one line: what must happen>
 Current behaviour: <what happens now>
 Expected behaviour: <what happens after the work>
@@ -32,7 +32,8 @@ Suggested skills: <the skills for this kind, from the table below>
 
 A question task leaves out `Base`, `Branch` and `Worktree`. The `CodeGraph` line is there only when the checkout
 has a CodeGraph index. `W`, the worker's starting folder (`$PWD`), is the worktree (a question: the checkout); the
-mod indexes it, and `T/seed.md` holds `codegraph explore -p "W"` on the task's words. Read code with `codegraph explore|node|callers -p "W"` (one
+mod indexes it, and `T/seed.md` holds `codegraph explore -p "W"` on the task's words. Run the commands from that folder: after a
+`cd` into the Checkout, `-p "$PWD"` reads the base branch's index, with no warning. Read code with `codegraph explore|node|callers -p "W"` (one
 function: `codegraph node -p "W" <name>`, never grep plus `sed -n`), and run `codegraph sync -q "W"` after edits. Point to specs, issues, commits and logs by path or
 URL; do not copy them in. No secrets: no keys, passwords or personal data. Count the characters before the send.
 
