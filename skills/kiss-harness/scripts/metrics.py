@@ -18,6 +18,7 @@ import glob, json, os, re, sys
 CG_READ = {"query", "explore", "context", "node", "files", "callers", "callees", "impact", "affected"}
 GREPS = {"grep", "egrep", "fgrep", "rg"}
 NA = "tokens: not available on this agent"
+RUN = re.compile(r"/runs/([\w.-]+)")   # a run folder's name in a path
 BOUND = 350_000   # context tokens; past it, the controller starts a new agent at the next round boundary
 
 
@@ -39,13 +40,16 @@ def role(agent_file):
 
 
 def subagents(R):
-    """[(file, role)] of each subagent whose prompt names R."""
-    hit = names(R)
+    """[(file, role)] of each subagent whose prompt names R as the first run folder it names (a later run's
+    reviewer may name an older run as an input)."""
+    hit, run = names(R), RUN.search(R)
     out = []
     for f in glob.glob(os.path.join(config(), "projects", "*", "*", "subagents", "**", "agent-*.jsonl"), recursive=True):
         with open(f, errors="replace") as fh:
-            if hit(fh.readline()):
-                out.append((f, role(f)))
+            line = fh.readline()
+        first = RUN.search(line)
+        if hit(line) and (not run or not first or first.group(1) == run.group(1)):
+            out.append((f, role(f)))
     return out
 
 
@@ -192,6 +196,9 @@ def selftest():
             user("You are the implementer. R = /x/runs/r7-old"), user(f"later it reads {R}"),
             said("m4", 9000, 9000, 0, 0, tools=[("Grep", None)])],
             "kiss:kiss-implementer")
+        put(os.path.join(S, "subagents", "agent-a4.jsonl"), [               # its own run first, R later: left out
+            user(f"You review /x/runs/r8; one input is {R}/review-1.md"), said("m10", 5000, 5000, 0, 0)],
+            "kiss:kiss-reviewer")
         put(S + ".jsonl", [said("m0", 7000, 7000, 0, 0), user(f"start the run in {R}"),   # m0: before R
                            said("m5", 600, 1, 500, 4000, tools=[("Grep", None)])])
         # worked example: output 1200+800, 1400, 600 = 4000; input 2010+3005+3100+4501 = 12616, reads 9000 = 71%;
