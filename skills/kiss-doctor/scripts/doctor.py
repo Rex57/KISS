@@ -277,21 +277,21 @@ INSTALL = [
     {"key": "Install KISS", "what": "KISS", "source": "https://github.com/Rex57/KISS", "changes": "adds the KISS plugin to {agent}",
      "agents": {"claude": ["claude plugin marketplace add Rex57/KISS", "claude plugin install kiss@kiss"],
                 "codex": ["codex plugin marketplace add Rex57/KISS", "codex plugin add kiss@kiss"],
-                "gemini": ["gemini extensions install https://github.com/Rex57/KISS"]},
+                "gemini": ["gemini extensions install https://github.com/Rex57/KISS --consent"]},
      "hand": {"antigravity": "git clone https://github.com/Rex57/KISS.git, then agy plugin install ./KISS"}},
     {"key": "Install ponytail", "what": "ponytail", "source": "https://github.com/DietrichGebert/ponytail",
      "changes": "adds the ponytail plugin to {agent}",
      "agents": {"claude": ["claude plugin marketplace add DietrichGebert/ponytail", "claude plugin install ponytail@ponytail"],
                 "codex": ["codex plugin marketplace add DietrichGebert/ponytail", "codex plugin add ponytail@ponytail"],
-                "gemini": ["gemini extensions install https://github.com/DietrichGebert/ponytail"]},
+                "gemini": ["gemini extensions install https://github.com/DietrichGebert/ponytail --consent"]},
      "hand": {"antigravity": "follow https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md"},
      "after": {"codex": "in Codex, open /hooks, trust ponytail's two hooks, and start a new thread"}},
     {"key": "Install Matt Pocock's skills", "what": "Matt Pocock's skills", "source": "https://github.com/mattpocock/skills",
      "changes": "adds Matt Pocock's skills to {agent}",
      "agents": {"claude": ["claude plugin marketplace add mattpocock/skills", "claude plugin install mattpocock-skills@mattpocock"],
                 "codex": ["codex plugin marketplace add mattpocock/skills", "codex plugin add mattpocock-skills@mattpocock"],
-                "gemini": ["gemini skills install https://github.com/mattpocock/skills.git --path skills/engineering",
-                           "gemini skills install https://github.com/mattpocock/skills.git --path skills/productivity"]},
+                "gemini": ["gemini skills install https://github.com/mattpocock/skills.git --path skills/engineering --consent",
+                           "gemini skills install https://github.com/mattpocock/skills.git --path skills/productivity --consent"]},
      "hand": {"antigravity": "copy the eight skill folders KISS uses (README \"Install Matt Pocock's skills\") from a clone of"
                              " https://github.com/mattpocock/skills.git into ~/.gemini/config/skills/"}},
 ]
@@ -378,7 +378,8 @@ def execute(argv):
             shutil.copyfile(argv[3], argv[4])
             os.chmod(argv[4], 0o755)
             return 0, ""
-        p = subprocess.run([shutil.which(argv[0]) or argv[0]] + argv[1:], capture_output=True, text=True, timeout=900)
+        p = subprocess.run([shutil.which(argv[0]) or argv[0]] + argv[1:], capture_output=True, text=True, timeout=900,
+                           stdin=subprocess.DEVNULL)
         return p.returncode, (p.stdout + p.stderr).strip()
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, str(e)
@@ -608,7 +609,7 @@ def selftest():
     assert show(shared) == [
         ("the CodeGraph rule", "gemini", ["cat /k/rules/codegraph.md >> /h/.gemini/GEMINI.md"], ""),   # one file, appended once
         ("KISS", "antigravity", [], "by hand: git clone https://github.com/Rex57/KISS.git, then agy plugin install ./KISS"),
-        ("ponytail", "gemini", ["gemini extensions install https://github.com/DietrichGebert/ponytail"], ""),
+        ("ponytail", "gemini", ["gemini extensions install https://github.com/DietrichGebert/ponytail --consent"], ""),
         ("ponytail", "antigravity", [], "by hand: follow https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md"),
     ], show(shared)
     text = "\n".join(plan_lines(sysfor(os="linux", pm="apt"), plan(sysfor(os="linux", pm="apt"), dict(known, git={}))))
@@ -665,6 +666,10 @@ def selftest():
         exe = os.path.join(fx, "bin", "cgcallers")
         assert execute(["install", "-m", "755", src, exe]) == (0, "") and os.access(exe, os.X_OK) and read(exe) == read(src)
     assert execute(["no-such-command-kiss"])[0] != 0
+    gemini = [c for r in INSTALL for c in r.get("agents", {}).get("gemini", []) if c.startswith("gemini ")]
+    assert len(gemini) == 4 and all(c.endswith(" --consent") for c in gemini), gemini   # no [Y/n] question
+    stdin_is_null = "import os,sys; sys.exit(0 if os.fstat(0).st_rdev == os.stat(os.devnull).st_rdev else 3)"
+    assert execute([sys.executable, "-c", stdin_is_null])[0] == 0      # a question reads end of input, never waits
     # gaps() and detect() on this KISS folder, with a scratch Codex home that has nothing
     assert all(k in {r["key"] for r in INSTALL} for k in set(required().values())), required()
     old_env = {k: os.environ.get(k) for k in ("CODEX_HOME", "PATH", "KISS_BIN")}
