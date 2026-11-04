@@ -73,12 +73,14 @@ const TEXT_MIN = 200
 const isCode = (t: Task) => t.kind === 'code' || t.kind === 'bug'
 
 /** The brief; `text` is the part that may be cut: the owner's task text, or a hand-off's own brief. */
-function briefLines(t: Task, text: string, rules: string, dir: string, short = false) {
+function briefLines(t: Task, text: string, rules: string, dir: string, seed = false, short = false) {
   // Short: the lines that only say "not given" go first, before any of the task's own text.
   const given = (line: string) => !(short && line.endsWith(NOT_GIVEN))
-  const where = isCode(t)
+  const where = [...(isCode(t)
     ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`]
-    : [`Checkout: ${t.cwd} (read only)    Task folder: ${dir}`]
+    : [`Checkout: ${t.cwd} (read only)    Task folder: ${dir}`]),
+  // Kept short: with long paths each character of it comes off the task text (handoff.md spells it out).
+  ...(seed ? [`codegraph (W: ${t.worktree ? 'Worktree' : 'Checkout'}): explore|node|callers -p "W", sync -q "W"; seed: T/seed.md`] : [])]
   // The report's first line and the progress tool are in the brief itself: a worker may not open the Rules file.
   const rule = 'Report: your final message starts "State: done|ready|failed|waiting for you", then "Summary:". Call mcp__kiss__progress (step, total) as you start each step.'
   if (t.brief !== undefined) {
@@ -112,18 +114,31 @@ function briefLines(t: Task, text: string, rules: string, dir: string, short = f
 }
 
 /** The brief in handoff.md's format, at most 1,500 characters: a text that does not fit is cut, its whole text is in the task folder. */
-function brief(t: Task, rules: string, dir: string): { text: string; whole: string; isCut: boolean } {
+function brief(t: Task, rules: string, dir: string, seed = false): { text: string; whole: string; isCut: boolean } {
   const whole = t.brief ?? t.title
-  const full = briefLines(t, whole, rules, dir)
+  const full = briefLines(t, whole, rules, dir, seed)
   if (full.length <= BRIEF_MAX) return { text: full, whole, isCut: false }
-  const short = briefLines(t, whole, rules, dir, true)
+  const short = briefLines(t, whole, rules, dir, seed, true)
   if (short.length <= BRIEF_MAX) return { text: short, whole, isCut: false }
   const more = `... (whole text: ${dir}/task.md)`
   // At least the first 200 characters of the task's own text stay in the brief.
   // shortcut: a brief can pass 1,500 characters when the paths alone leave less than 200 characters for the task text;
   // upgrade: shorten the paths in the brief, for example to names relative to the task folder.
-  const room = Math.max(TEXT_MIN, BRIEF_MAX - briefLines(t, '', rules, dir, true).length - more.length)
-  return { text: briefLines(t, whole.slice(0, room) + more, rules, dir, true), whole, isCut: true }
+  const room = Math.max(TEXT_MIN, BRIEF_MAX - briefLines(t, '', rules, dir, seed, true).length - more.length)
+  return { text: briefLines(t, whole.slice(0, room) + more, rules, dir, seed, true), whole, isCut: true }
+}
+
+/** Host: when the checkout has a CodeGraph index, indexes the worker's worktree and saves `codegraph explore` on the task's words as T/seed.md. */
+async function seedFile($: $, t: Task, dir: string): Promise<boolean> {
+  const w = t.worktree ?? t.cwd
+  // A missing or slow codegraph is no seed, never a failed task.
+  const cg = (...argv: string[]) => $.process.run(['codegraph', ...argv], { cwd: w, timeoutMs: 600_000 }).catch(() => undefined)
+  if (!(await cg('status', t.cwd))?.stdout.includes(`Project: ${t.cwd}\n`)) return false
+  if (w !== t.cwd && (await cg('init', '-y', w))?.exitCode !== 0) return false
+  const r = await cg('explore', '-p', w, t.title.slice(0, 200))
+  if (r?.exitCode !== 0 || !r.stdout.trim()) return false
+  await $.fs.write(`${dir}/seed.md`, r.stdout)
+  return true
 }
 
 /** The report as the sender reads it: the report format's lines, the summary cut to 600, the log in the task folder. */
@@ -300,7 +315,7 @@ async function run($: $, id: string) {
   }
   const rules = `${$.plugin.root}/skills/kiss-mini/references/handoff.md`
   const dir = await folder($, id)
-  const b = brief(t, rules, dir)
+  const b = brief(t, rules, dir, await seedFile($, t, dir))
   if (b.isCut) await $.fs.write(`${dir}/task.md`, b.whole)
   const r = await $.agent.spawn({
     subagentType: 'kiss:kiss-worker',

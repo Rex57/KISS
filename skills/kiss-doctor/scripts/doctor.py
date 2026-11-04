@@ -484,6 +484,10 @@ def gaps(system):
 
 def selftest():
     import tempfile
+    # The rule KISS ships is the short rule (B3): these eight lead-ins are the markers.
+    assert markers() == ["Installer trap", "Which index", "Every call names `W`", "Keep it fresh",
+                         "CodeGraph first, for every code question and before every edit",
+                         "grep, find or Read only for", "`callers` is incomplete", "Subagents"], markers()
     with tempfile.TemporaryDirectory() as t:
         def put(rel, text):
             path = os.path.join(t, rel)

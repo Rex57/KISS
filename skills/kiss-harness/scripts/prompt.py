@@ -48,6 +48,7 @@ def selftest():
     for step in ("implementer", "reviewer"):   # every agent of a run reads the same traps
         assert HB + "/references/traps.md" in fill(step, dict(base, HEAD="d", APP="a")), step
     assert "mattpocock-skills:tdd" in out and "Skipped:" in out and "Risk:" in out
+    assert 'codegraph node -p "/w" <name>` for each function the ticket changes' in out and "never `grep" in out, "B2"
     rv = fill("reviewer", dict(base, HEAD="d", APP="a"))
     assert "ponytail:ponytail-review" in rv and "G. Risk, load and speed" in rv and "A|B|C|D|E|F|G" in rv
     try:

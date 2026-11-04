@@ -19,6 +19,7 @@ Kind: code | bug | question | watch
 Checkout: <absolute path>    Base: <branch>    Branch: mini/<id>    Worktree: <absolute path>
 Task folder: <T>             Return: harness | owner    Checks: run | skip (owner)
 Rules: <the absolute path of this file>
+codegraph (W: Worktree | Checkout): explore|node|callers -p "W", sync -q "W"; seed: T/seed.md
 Summary: <one line: what must happen>
 Current behaviour: <what happens now>
 Expected behaviour: <what happens after the work>
@@ -29,7 +30,10 @@ Out of scope: <what the worker leaves alone>
 Suggested skills: <the skills for this kind, from the table below>
 ```
 
-A question task leaves out `Base`, `Branch` and `Worktree`. Point to specs, issues, commits and logs by path or
+A question task leaves out `Base`, `Branch` and `Worktree`. The `codegraph` line is there only when the checkout
+has a CodeGraph index: `W` is the worktree (a question: the checkout), which the mod indexes, and `T/seed.md` holds
+`codegraph explore -p "W"` on the task's words. Read code with `codegraph explore|node|callers -p "W"` (one
+function: `codegraph node -p "W" <name>`, never grep plus `sed -n`), and run `codegraph sync -q "W"` after edits. Point to specs, issues, commits and logs by path or
 URL; do not copy them in. No secrets: no keys, passwords or personal data. Count the characters before the send.
 
 ## The report

@@ -22,8 +22,10 @@ type Opts = {
   cwd?: string
   /** What `claude plugin list --json` answers: the installed plugins. */
   plugins?: { id: string; enabled: boolean; installPath: string; readFromFolder?: string }[]
+  /** The checkout has a CodeGraph index: `codegraph status <it>` names it as its project. */
+  indexed?: boolean
 }
-function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [] }: Opts = {}) {
+function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false }: Opts = {}) {
   const w = {
     session: 's1',
     branch,
@@ -76,6 +78,10 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
   on('process.run', ($, e) => {
     w.runs.push([...e.argv])
     if (hang.includes(e.argv[0] ?? '')) throw new Error(`${e.argv[0]}: timed out after 120000 ms`)
+    if (e.argv[0] === 'codegraph') {
+      const out = e.argv[1] === 'status' ? (indexed ? `CodeGraph Status\n\nProject: ${e.argv[2]}\n` : 'CodeGraph not initialized\n') : e.argv[1] === 'explore' ? 'SEED: calc.py add()\n' : ''
+      return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv[0] === 'gh' && e.argv[2] === 'view') {
       w.ghAt.push(w.clock.now())
       return { value: { exitCode: 0, stdout: `${e.argv[1] === 'pr' ? w.gh.pr : w.gh.run}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -1034,4 +1040,42 @@ test('when the paths leave under 200 characters for the task text, its first 200
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   expect(w.spawned[0]?.prompt).toContain(text.slice(0, 200))
   expect(w.spawned[0]?.prompt).not.toContain(text.slice(0, 201))
+})
+
+test('in an indexed repo a code task\'s brief names W, the CodeGraph commands with -p and the seed file, within 1,500 characters', async ($, on) => {
+  const tmp = '/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/'
+  const cwd = '/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo'
+  const w = world(on, { tmp, cwd, indexed: true })
+  await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: `fix ${'the long bug text '.repeat(30)}`.trim() } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  const dir = `/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/kiss-mini/${ID}`
+  const prompt = w.spawned[0]?.prompt ?? ''
+  expect(prompt.length).toBeLessThanOrEqual(1500)
+  expect(prompt).toContain(`Worktree: ${dir}/wt`)
+  expect(prompt).toContain('codegraph (W: Worktree): explore|node|callers -p "W", sync -q "W"; seed: T/seed.md')
+  expect(w.files[`${dir}/seed.md`]).toBe('SEED: calc.py add()\n')
+  // The new worktree gets its own index before the seed reads it.
+  const cg = w.runs.filter(a => a[0] === 'codegraph').map(a => a.slice(0, 4).join(' '))
+  expect(cg).toEqual([`codegraph status ${cwd}`, `codegraph init -y ${dir}/wt`, `codegraph explore -p ${dir}/wt`])
+})
+
+test('a repo with no index gets no seed and no CodeGraph line; the task still starts', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(w.spawned[0]?.prompt).not.toContain('codegraph')
+  expect(Object.keys(w.files).some(f => f.endsWith('seed.md'))).toBe(false)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('working')
+})
+
+test('with no codegraph on the machine the task starts with no seed and no error', async ($, on) => {
+  const w = world(on, { hang: ['codegraph'] })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(w.spawned).toHaveLength(1)
+  expect(Object.keys(w.files).some(f => f.endsWith('seed.md'))).toBe(false)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('working')
 })
