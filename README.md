@@ -157,8 +157,6 @@ claude plugin marketplace add Rex57/KISS
 claude plugin install kiss@kiss
 ```
 
-In a session, one step (Claude Code 2.1.275 or later): `/plugin install kiss --marketplace Rex57/KISS`.
-
 **Codex** (the CLI; the IDE extension has no plugins)
 
 ```bash
