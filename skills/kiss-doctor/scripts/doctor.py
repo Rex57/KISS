@@ -30,11 +30,14 @@ def read(path):
 
 
 def required(kiss=KISS):
-    """{skill: README section with its install}: KISS's own skills and the harness's table of external ones."""
+    """{skill: README section with its install}: KISS's own skills and the external ones of each KISS skill's table."""
     out = {d: "Install KISS" for d in sorted(os.listdir(os.path.join(kiss, "skills")))}
-    table = read(os.path.join(kiss, "skills", "kiss-harness", "SKILL.md"))
-    for name, source in re.findall(r"^\| `([a-z0-9-]+)` \| ([^|]+?) \|", table, re.M):
-        out[name] = "Install " + source
+    for d in sorted(out):
+        path = os.path.join(kiss, "skills", d, "SKILL.md")
+        text = read(path) if os.path.isfile(path) else ""
+        for table in re.findall(r"^\| Skill \| From \|.*\n\|[-| ]+\|\n((?:\|.*\n?)*)", text, re.M):
+            for name, source in re.findall(r"^\| `([a-z0-9-]+)` \| ([^|]+?) \|", table, re.M):
+                out.setdefault(name, "Install " + source)
     return out
 
 
@@ -613,11 +616,14 @@ def selftest():
             return path
         put("kiss/rules/codegraph.md", "## CodeGraph\n\n**Which index.** a\n**`callers` is incomplete:** b\n")
         put("kiss/skills/kiss-harness/SKILL.md", "| Skill | From |\n|---|---|\n| `tdd` | Matt Pocock's skills | x |\n| `ponytail` | ponytail | y |\n")
-        put("kiss/skills/kiss-doctor/SKILL.md", "---\nname: kiss-doctor\n---\n")
+        put("kiss/skills/kiss-doctor/SKILL.md", "---\nname: kiss-doctor\n---\n| Key | Means |\n|---|---|\n| `ok` | not a skill |\n")
+        put("kiss/skills/kiss-code-clean/SKILL.md", "intro\n\n| Skill | From | Used in | Without it |\n|---|---|---|---|\n"
+            "| `ponytail-audit` | ponytail | step 3 | x |\n| `codebase-design` | Matt Pocock's skills | step 5 | y |\n\nmore\n")
         kiss = os.path.join(t, "kiss")
         need = required(kiss)
-        assert need == {"kiss-doctor": "Install KISS", "kiss-harness": "Install KISS", "tdd": "Install Matt Pocock's skills",
-                        "ponytail": "Install ponytail"}, need
+        assert need == {"kiss-code-clean": "Install KISS", "kiss-doctor": "Install KISS", "kiss-harness": "Install KISS",
+                        "tdd": "Install Matt Pocock's skills", "ponytail": "Install ponytail",
+                        "ponytail-audit": "Install ponytail", "codebase-design": "Install Matt Pocock's skills"}, need
         marks = markers(kiss)
         assert marks == ["Which index", "`callers` is incomplete"], marks
         # the rule: in an imported file, an edited copy, none at all, and the installer's block
@@ -643,7 +649,8 @@ def selftest():
         put("b/skills/engineering/tdd/SKILL.md", "---\nname: tdd\n---\n")
         put("a/skills/.hidden/kiss-doctor/SKILL.md", "---\nname: kiss-doctor\n---\n")
         one = {r[2].split()[1].rstrip(":"): r[0] for r in check_skills("claude", [("a", os.path.join(t, "a"))], need)}
-        assert one == {"kiss-doctor": "FAIL", "kiss-harness": "FAIL", "tdd": "OK", "ponytail": "FAIL"}, one
+        assert one == {"kiss-code-clean": "FAIL", "kiss-doctor": "FAIL", "kiss-harness": "FAIL", "tdd": "OK", "ponytail": "FAIL",
+                       "ponytail-audit": "FAIL", "codebase-design": "FAIL"}, one
         assert [r[3] for r in check_skills("claude", [("a", os.path.join(t, "a"))], need) if "user-only" in r[2]] == ["User-only skills"]
         # a KISS skill the session loaded from the script's own folder but not installed: INFO with the reason
         here = {r[2].split()[1].rstrip(":"): r for r in check_skills("claude", [("a", os.path.join(t, "a"))], need, here={"kiss-harness": put("h/kiss-harness/SKILL.md", "---\nname: kiss-harness\n---\n")})}

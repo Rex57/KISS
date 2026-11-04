@@ -16,8 +16,18 @@ the input that breaks it. You never run the repo's code, its tests, its scripts 
 `python app.py`, no `npm test`, no import of its modules): a run can change its data. You delete no file and change
 no tracked file; your one write is the list in the git-ignored `.kiss/clean/` (step 7).
 
+## Skills it uses when they are installed
+
+| Skill | From | Used in | Without it |
+|---|---|---|---|
+| `ponytail-audit` | ponytail | step 3, the audit | the entry points and the hot spots read by you |
+| `ponytail-debt` | ponytail | step 4, the debt | `git grep -n "shortcut:"` |
+| `codebase-design` | Matt Pocock's skills | step 5, the architecture: its words and its deepening check | the rules in [references/architecture.md](references/architecture.md) alone |
+
+## Steps
+
 1. **Check the tools.** Record `git -C "<repo>" status --short` as it is now: step 7 compares with it. In your skill
-   list: `ponytail-audit` and `ponytail-debt` (ponytail), `codebase-design` (Matt Pocock's skills); Claude Code and
+   list: the skills of the table above; Claude Code and
    Codex name them `ponytail:ponytail-audit`, `ponytail:ponytail-debt` and `mattpocock-skills:codebase-design`. Each
    one your list shows is called with the Skill tool, by that full name, in its step (3, 4, 5): a missing CodeGraph
    or a small repo skips none of them, and reading the code yourself is no substitute. On the shell:

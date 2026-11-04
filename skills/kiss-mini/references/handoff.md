@@ -64,8 +64,8 @@ skill when it is installed: a draft pull request takes it as its body.
 
    | Kind | Skills |
    |---|---|
-   | bug | `diagnosing-bugs`, then `tdd` |
-   | code | `tdd`, `ponytail`, CodeGraph |
+   | bug | first load `ponytail`, then `diagnosing-bugs`, then `tdd` |
+   | code | first load `ponytail`, then `tdd`, CodeGraph |
    | question | `research` |
    | a pull request body | `pr` |
 

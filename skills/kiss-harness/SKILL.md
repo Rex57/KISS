@@ -64,8 +64,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    links, a wide refactor in three stages, an acceptance line that names its seam, and the failure-path lines. A ticket with a time window
    (freshness, a timeout, staleness) asks for a test that runs the clock past that window. Mark a ticket `risky` only
    when it is a guard whose failure harms real data, or a guard that later tickets build on. Then `tickets.py check
-   R`, and a ponytail pass at **full** level (cut each line that no person asked for, and record the cut in
-   `decisions.md`). Then the **tickets gate**: ask about the breakdown and show the defaults you took; change it until
+   R`, and a ponytail pass at **full** level: call the Skill tool with `ponytail` at full level for the cut; without
+   it, the rule as stated here: cut each line that no person asked for, and record the cut in `decisions.md`. Then the **tickets gate**: ask about the breakdown and show the defaults you took; change it until
    the owner says yes, then `tickets.py render R`.
 3. **Worktree** `W = <repo>/.kiss/worktrees/<run>/` (git-ignored; never a session scratch folder, which a session
    restart can delete) on a new branch from the main branch; `codegraph init -y "W"`; `tickets.py freeze R` (from then

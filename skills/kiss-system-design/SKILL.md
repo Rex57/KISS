@@ -53,7 +53,9 @@ when no decision is open.
 5. **The system design document.** When no decision is open, write it into the project's docs (where a new page
    goes by the docs map, else `docs/design/<name>.md`) with these sections: Context, Goals and non-goals, Modules
    and interfaces (in `mattpocock-skills:codebase-design`'s words: module, interface, seam, depth; call that skill
-   first), Data, Rejected options (each with its reason, and its decision named by title), Security, Privacy, Observability. When
+   first), Data, Rejected options (each with its reason, and its decision named by title), Security, Privacy, Observability. Then a
+   ponytail pass at full level on Modules and interfaces (load the `ponytail` skill when it is installed): cut each
+   module, interface or option that no goal needs, and list each cut in Rejected options. When
    the project has a docs gate (`Docs gate:` in `.kiss/project.md`), give the page its status line and link it from
    the docs map, so kiss-housekeeping keeps it true. Name each decision by its title and copy its reason into the page; never link into `.kiss/design/`
    (it is git-ignored: a clone and a docs gate cannot see it). Done when every section is filled and the owner says yes.
