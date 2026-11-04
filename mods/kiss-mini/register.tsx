@@ -97,6 +97,8 @@ function delivers(raw: string) {
 const ONLY_WORKTREE = 'kiss-mini: a worker writes only in its worktree'
 const GIT_READS = ['status', 'log', 'diff', 'show', 'rev-parse', 'rev-list', 'ls-files', 'cat-file', 'blame', 'grep', 'merge-base', 'describe']
 const FILE_TOOLS = ['Edit', 'Write', 'NotebookEdit']
+/** macOS's `/private/var|tmp` spelling (git's) read as `/var|tmp`. */
+const unprivate = (p: string) => p.replace(/^\/private(?=\/(?:var|tmp)(?:\/|$))/, '')
 /** `p` from the folder `base`, with `.` and `..` resolved and `/private/var|tmp` read as `/var|tmp`; undefined when `~`
  * or a variable other than $PWD leaves it unknown. */
 function resolve(base: string | undefined, p: string): string | undefined {
@@ -107,7 +109,7 @@ function resolve(base: string | undefined, p: string): string | undefined {
     if (part === '..') parts.pop()
     else if (part && part !== '.') parts.push(part)
   }
-  return `/${parts.join('/')}`.replace(/^\/private(?=\/(?:var|tmp)(?:\/|$))/, '')
+  return unprivate(`/${parts.join('/')}`)
 }
 const inside = (p: string | undefined, wt: string | undefined) => !!p && !!wt && (p === wt || p.startsWith(`${wt}/`))
 /** A shell command's words, cut into segments at each operator (; & | ( ) a backtick, a new line); quoted text is part
@@ -590,7 +592,8 @@ async function deliverOnce($: $, id: string, how: Delivery) {
     if (t.worktree) {
       const removed = await git('worktree', 'remove', '--force', t.worktree)
       const list = removed.exitCode === 0 ? removed : await git('worktree', 'list', '--porcelain')
-      if (removed.exitCode === 0 || (list.exitCode === 0 && !list.stdout.split('\n').includes(`worktree ${t.worktree}`))) left = { ...left, worktree: undefined }
+      const listed = list.stdout.split('\n').some(l => l.startsWith('worktree ') && unprivate(l.slice(9)) === unprivate(t.worktree!))
+      if (removed.exitCode === 0 || (list.exitCode === 0 && !listed)) left = { ...left, worktree: undefined }
       else if (how === 'discard') return failed(list.exitCode === 0 ? `worktree kept at ${t.worktree}: ${removed.stderr}` : list.stderr || list.stdout)
       else $.ui.toast(`kiss-mini ${id}: worktree kept at ${t.worktree}: ${removed.stderr.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 200)}`)
     }

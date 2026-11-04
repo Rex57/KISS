@@ -61,6 +61,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     gone: [] as string[],
     /** The task's branch is already deleted: `git branch --list` names nothing. */
     branchGone: false,
+    /** What `git worktree list --porcelain` prints. */
+    worktrees: '',
   }
   w.clock = mock.clock(on, { now: NOW })
   // The store in memory, readable by the test: the ledger is the contract every session reads.
@@ -118,6 +120,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     const bad = fail[`${e.argv[3]} ${e.argv[4]}`] ?? fail[e.argv[3] ?? ''] ?? fail[e.argv[0] ?? '']
     if (bad && e.argv[3] === 'merge') w.merging = true
     if (bad) return { value: { exitCode: 1, stdout: bad.stdout ?? '', stderr: bad.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv[3] === 'worktree' && e.argv[4] === 'list') return { value: { exitCode: 0, stdout: w.worktrees, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.join(' ') === 'claude plugin list --json') return { value: { exitCode: 0, stdout: JSON.stringify(plugins), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const out = e.argv.includes('--abbrev-ref') ? `${w.branch}\n` : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -754,6 +757,28 @@ test('a harness task merged into its base while its sender folder is gone ends d
   await w.clock.advance(60_000)
   expect(w.store[`kiss-mini/task/${ID}`].state).toBe('done')
   expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
+})
+
+test('Discard keeps a /var worktree that git lists by its /private/var spelling: the task stays open with it, a toast', async ($, on) => {
+  const w = world(on, { tmp: '/var/kiss/', fail: { 'worktree remove': { stderr: 'fatal: cannot remove a locked working tree' } } })
+  await ready($, w)
+  const wt = `/var/kiss/kiss-mini/${ID}/wt`
+  w.worktrees = `worktree /repo\nHEAD abc\nbranch refs/heads/main\n\nworktree /private${wt}\nHEAD def\nlocked\n`
+  const { t, offered } = await discard($, w)
+  expect([t.state, t.worktree, offered]).toEqual(['ready', wt, true])
+  expect(w.toasts.at(-1)).toContain(`worktree kept at ${wt}`)
+  expect(git(w).some(line => line.includes('branch -D'))).toBe(false)
+})
+
+test('Discard whose worktree folder is gone before the first press works in the sender\'s folder', async ($, on) => {
+  // The worktree's git folder cannot be asked, so the task's repository is its sender's folder.
+  const w = world(on, { cwd: '/srv/app', fail: { 'worktree remove': { stderr: `fatal: '${WT}' is not a working tree` } } })
+  await ready($, w)
+  w.gone.push(WT)
+  const { t } = await discard($, w)
+  expect(git(w)).toContain('git -C /srv/app worktree list --porcelain')
+  expect(git(w)).toContain(`git -C /srv/app branch -D mini/${ID}`)
+  expect(t.state).toBe('done')
 })
 
 test('Discard whose worktree list fails keeps the task open with its worktree, and toasts git\'s words', async ($, on) => {
