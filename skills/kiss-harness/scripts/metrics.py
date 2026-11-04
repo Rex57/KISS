@@ -72,6 +72,20 @@ def messages(path, start=None):
                 yield m
 
 
+def other_run(path, R):
+    """True when the session names another run folder after its first line that names R."""
+    hit, run = names(R), RUN.search(R)
+    if not run:
+        return False
+    seen = False
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            if seen and any(n != run.group(1) for n in RUN.findall(line)):
+                return True
+            seen = seen or bool(hit(line))
+    return False
+
+
 def bash_kinds(cmd):
     """(codegraph, search, piped grep) counts of one Bash command."""
     cg = search = piped = 0
@@ -111,10 +125,12 @@ def tokens(R):
             for b in m.get("content") or []:
                 if isinstance(b, dict) and b.get("type") == "tool_use":
                     tools[b.get("id")] = b
+    carries = False
     for session in {f.split(os.sep + "subagents" + os.sep)[0] + ".jsonl" for f, _ in subs}:
         if os.path.isfile(session):
             for m in messages(session, names(R)):
                 usage.setdefault(m["id"], ("controller", m.get("usage") or {}))
+            carries = carries or other_run(session, R)
     out = {"implementer": 0, "reviewers": 0, "controller": 0}
     inp = reads = hour = 0
     for r, u in usage.values():
@@ -134,7 +150,8 @@ def tokens(R):
             cg, search, piped = cg + c, search + s, piped + p
     share = f"{cg / (cg + search):.2f}" if cg + search else "n/a"
     return (f"Tokens: output {k(sum(out.values()))} (implementer {k(out['implementer'])}, reviewers "
-            f"{k(out['reviewers'])}, controller {k(out['controller'])}), input {k(inp)} "
+            f"{k(out['reviewers'])}, controller {k(out['controller'])}"
+            f"{' (the session also carries another run)' if carries else ''}), input {k(inp)} "
             f"({round(100 * reads / inp) if inp else 0}% cache reads), 1-hour cache writes {k(hour)}; CodeGraph share "
             f"{share} (CodeGraph {cg}, search {search}, {piped} more greps after a pipe)")
 
@@ -209,6 +226,9 @@ def selftest():
         got = tokens(R)
         assert got == want, got
         assert tokens(R + "/") == want, "a trailing slash names the same run"
+        with open(S + ".jsonl", "a") as f:                                   # the session goes on with run r8
+            f.write(json.dumps(user("now the next run, in /x/runs/r8")) + "\n")
+        assert tokens(R) == want.replace("controller 1k", "controller 1k (the session also carries another run)"), tokens(R)
         assert tokens("/x/runs/none") == NA
         assert context("/x/runs/none") == NA
         put(os.path.join(S, "subagents", "agent-a5.jsonl"), [
