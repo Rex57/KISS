@@ -204,8 +204,9 @@ class Lsp:
 
     def __init__(self, argv, W):
         self.p = subprocess.Popen(argv, cwd=W, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        self.q, self.n, self.checked = queue.Queue(), 0, set()
+        self.q, self.n, self.checked, self.out = queue.Queue(), 0, set(), queue.Queue()
         threading.Thread(target=self.read, daemon=True).start()
+        threading.Thread(target=self.write, daemon=True).start()   # a server that stops reading never blocks us
 
     def read(self):
         f = self.p.stdout
@@ -224,13 +225,18 @@ class Lsp:
             except ValueError:
                 pass
 
+    def write(self):
+        while True:
+            data = self.out.get()
+            try:
+                self.p.stdin.write(data)
+                self.p.stdin.flush()
+            except (OSError, ValueError):
+                return
+
     def send(self, msg):
         body = json.dumps(dict(msg, jsonrpc="2.0")).encode()
-        try:
-            self.p.stdin.write(b"Content-Length: %d\r\n\r\n" % len(body) + body)
-            self.p.stdin.flush()
-        except OSError:
-            pass
+        self.out.put(b"Content-Length: %d\r\n\r\n" % len(body) + body)
 
     def ask(self, method, params, deadline, clock):
         self.n += 1
@@ -243,6 +249,8 @@ class Lsp:
             try:
                 m = self.q.get(timeout=0.05)
             except queue.Empty:
+                if self.p.poll() is not None and self.q.empty():
+                    raise OSError("exited with code %d" % self.p.returncode)
                 continue
             if m.get("method") == "textDocument/publishDiagnostics":
                 self.checked.add((m.get("params") or {}).get("uri"))
@@ -526,6 +534,7 @@ def selftest():
         "svc/serve.go": "package svc\n\nfunc Serve() {}\n",
         "lib/eng.py": "class Engine:\n    def ack(self):\n        return 1\n\nclass Other:\n    def ack(self):\n        return 2\n",
         "user.py": "def go3(e):\n    return e.ack()\n",
+        "big.py": "def bigfn():\n    return 1\n" + "# a line that fills the pipe to the server\n" * 3000,
         "pkg/__init__.py": "from .util import helper2\n",
         "pkg/util.py": "def helper2():\n    return 1\n",
         "routes.py": "from pkg import helper2\nROUTES = [(\"GET\", helper2)]\nf = getattr(pkg, 'helper2', None)\n",
@@ -545,6 +554,7 @@ def selftest():
             "fetchIt": [(d_("web/api.ts", "fetchIt", 1, "typescript"), [edge("web/page.ts", "x", 5)])],
             "Serve": [(d_("svc/serve.go", "Serve", 3, "go"), [])],
             "Engine.ack": [(d_("lib/eng.py", "ack", 2, "python", "method"), [])],
+            "bigfn": [(d_("big.py", "bigfn", 1, "python"), [])],
             "helper2": [(d_("pkg/util.py", "helper2", 1, "python"),       # N1: a file caller on the import line only
                          [({"id": "file:routes.py", "name": "routes.py", "kind": "file", "filePath": "routes.py", "startLine": 1},
                            {"source": "file:routes.py", "line": 1, "metadata": {"confidence": 0.85, "resolvedBy": "import"}})])],
@@ -634,9 +644,24 @@ def selftest():
         assert "[lsp      ] app.py:17  go5  return CS.helper()" in lines, o                # a grep line the server confirms
         assert "LSP pass skipped" not in o and "timed out" not in o, o
         lsp["python"] = [sys.executable, "-c", "import time; time.sleep(30)"]           # a server that never answers
-        ticks = iter(range(0, 10 ** 6, 31))                                              # each look at the clock: 31 s
-        o = out("helper", "-p", W, "-f", "lib/util.py", clock=lambda: next(ticks))
+        reads = []
+        tick = lambda: reads.append(31 * len(reads)) or reads[-1]                       # each look at the clock: 31 s on
+        o = out("helper", "-p", W, "-f", "lib/util.py", clock=tick)
         assert o.rstrip().endswith("LSP: timed out") and "[both     ] app.py:6  go" in o, o
+        assert LSP_LIMIT <= max(reads) < LSP_LIMIT + 31, reads                          # R5: it stops at the limit, not later
+        lsp["python"] = [sys.executable, "-c", "import sys; sys.exit(1)"]                # R4: a server that exits at once
+        reads.clear()
+        o = out("helper", "-p", W, "-f", "lib/util.py", clock=tick)
+        assert "failed: exited with code 1" in o.splitlines()[-1] and max(reads) < LSP_LIMIT, (o, reads)
+        busy = FAKE_LSP.replace("    m = read()\n", "    m = read()\n    if root:\n        time.sleep(30)\n").replace(
+            "import json, sys", "import json, sys, time")                                # R3: answers once, then reads nothing
+        lsp["python"] = [sys.executable, "-c", busy, "[]"]
+        reads.clear()
+        done = []
+        t = threading.Thread(target=lambda: done.append(out("bigfn", "-p", W, clock=tick)), daemon=True)
+        t.start()
+        t.join(20)
+        assert done and done[0].rstrip().endswith("LSP: timed out"), "R3: a full pipe to the server blocked the pass"
     assert code_only("a('x // y') // z\n/* q\n */ b(\"c\")") == "a('      ')     \n    \n    b(\" \")"
     print("cgcallers selftest ok")
     return 0
