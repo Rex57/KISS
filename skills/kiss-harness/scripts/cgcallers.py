@@ -4,14 +4,17 @@
     python3 -I cgcallers.py NAME [-p W] [-f FILE] [--all]
     python3 -I cgcallers.py --selftest
 
-It stops when W has no index of its own, and syncs W's index first. Then, for each definition of NAME (only the one in FILE with -f, a path or suffix, as
-`codegraph callers -f` does), it prints a block: the definition, its caller lines and a count line. The word search
-reads only that definition's own file and the files that import its module or its package (Python `import` /
-`from ... import` / `importlib.import_module`; JS/TS/Svelte `import ... from` a path that ends in either); for a
-method, and with --all, it reads every indexed file of the language. A hit in a comment, a string or a docstring is
-not counted. For a language with no import filter it reads every indexed file of that language and prints a warning. codegraph misses a function passed as a value, a call through getattr
-with a string, a method on an object when two classes define the name, and recursion (KISS rules/codegraph.md,
-"callers is incomplete"). Each caller line is marked:
+It stops when W has no index of its own, and syncs W's index first. Then, for each definition of NAME (a bare name
+or Class.method; only the one in FILE with -f, a path or suffix, as `codegraph callers -f` does), it prints a block:
+the definition, its caller lines and a count line. The word search (for the last part of NAME) reads only that
+definition's own file and the files that import its module or its package (Python `import` / `from ... import` /
+`importlib.import_module`; JS/TS/Svelte `import ... from` a path that ends in either); for a method, and with --all,
+it reads every indexed file of the language. A hit in a comment, a string or a docstring is not counted, except the
+string 'NAME' given to getattr, hasattr or setattr. For a language with no import filter it reads every indexed file
+of that language and prints a warning. codegraph misses a function passed as a value, a call through getattr with a
+string, a method on an object when two classes define the name, and recursion (KISS rules/codegraph.md, "callers is
+incomplete").
+Each caller line is marked:
   [both]       codegraph has an edge on this line and the word search finds the name on it
   [grep only]  the name on a line with no codegraph edge: a caller codegraph missed, an import, or a namesake: read it
   [cg only]    a codegraph edge on a line the word search does not find (an alias such as `F.name`)
@@ -220,7 +223,7 @@ def main(argv=None, cg=None, git=None, read=read_file):
             scans[f] = (word_lines(text(f), lang, word), def_spans(text(f)) if lang in PY else [])
         return scans[f]
 
-    word = a.name
+    word = a.name.rsplit(".", 1)[-1]           # Class.method: codegraph takes it whole, the code has the method word
     n = re.escape(word)
     for d in defs:
         dd = d["definition"]
@@ -308,6 +311,7 @@ def selftest():
                        (d_("lib/more.py", "helper", 1, "python"), [])],
             "fetchIt": [(d_("web/api.ts", "fetchIt", 1, "typescript"), [edge("web/page.ts", "x", 5)])],
             "Serve": [(d_("svc/serve.go", "Serve", 3, "go"), [])],
+            "Engine.ack": [(d_("lib/eng.py", "ack", 2, "python", "method"), [])],
             "helper2": [(d_("pkg/util.py", "helper2", 1, "python"), [])],
             "ack": [(d_("lib/eng.py", "ack", 2, "python", "method"), []), (d_("lib/eng.py", "ack", 6, "python", "method"), [])]}
     calls, project = [], {}
@@ -374,6 +378,8 @@ def selftest():
         assert "[grep only] svc/main.go:3" in o, o
         o = out("ack", "-p", W)
         assert o.count("[grep only] user.py:2  go3  return e.ack()") == 2, o              # F1: a method's caller needs no import
+        o = out("Engine.ack", "-p", W)
+        assert "[grep only] user.py:2  go3  return e.ack()" in o and "lib/eng.py:6" not in o, o   # F9: Class.method
         o = out("helper2", "-p", W)
         assert "[grep only] routes.py:3  -  f = getattr(pkg, 'helper2', None)" in o, o   # F3: getattr with a string
         assert "[grep only] routes.py:2  -  ROUTES" in o and "[grep only] lazy.py:3  -  m.helper2()" in o, o   # F2: via the package

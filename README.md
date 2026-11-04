@@ -47,9 +47,9 @@ What KISS adds:
   output in its brief. CodeGraph's `callers` misses some calls (a function passed as a value, a call through
   `getattr`, an import inside a function). So before a delete, rename or signature change, the implementer and the
   reviewer run `cgcallers`. It syncs the index, shows each definition of the name in its own block, and puts
-  CodeGraph's callers beside a word search of the files that import the function's module (comments and strings
-  left out). It marks each call that CodeGraph missed (`[grep only]`) and each edge CodeGraph only guessed from the
-  name (`[cg guess]`).
+  CodeGraph's callers beside a word search of the files that import the function's module or package (every file
+  for a method; comments and strings left out, but not a name given to `getattr` as a string). It marks each call
+  that CodeGraph missed (`[grep only]`) and each edge CodeGraph only guessed from the name (`[cg guess]`).
 - **You decide.** Only a choice that is costly to undo becomes a question (`D<n>`, kept in `decisions.md`). A gate
   (the tickets, the merge, a push) asks for your go with its evidence. Nothing is pushed without you.
 - **Safety in code.** A guard that protects your data is a script with a selftest, not an instruction the model
