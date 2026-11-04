@@ -5,7 +5,8 @@ env.KISS_FEEDBACK in Claude Code's user settings.
   python3 -I doctor.py [AGENT ...]    AGENT: claude, codex, gemini, antigravity (default: each one whose CLI is on PATH)
   python3 -I doctor.py feedback on|off   set env.KISS_FEEDBACK in Claude Code's user settings ("1" or "0"), with a backup
   python3 -I doctor.py setup             the numbered plan of what is missing, from the install table (installs nothing)
-  python3 -I doctor.py setup --apply all|none|1,3   run those plan items, one at a time; stop at the first failure;
+  python3 -I doctor.py setup --apply all|none|1,3 --plan <id>   run those items of the plan with that id, one at a
+                                         time (a changed plan is refused); stop at the first failure;
                                          then the checks again and the steps by hand. Never sudo, never a shell profile.
   python3 -I doctor.py --selftest
 
@@ -15,7 +16,7 @@ Exit 1 when a line is FAIL.
 The required skills come from the table in kiss-harness/SKILL.md, the rule's markers from the bold lead-ins of
 rules/codegraph.md, so neither list is kept here.
 """
-import glob, json, os, platform, re, shlex, shutil, subprocess, sys, time
+import glob, hashlib, json, os, platform, re, shlex, shutil, subprocess, sys, time
 
 KISS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 HOME = os.path.expanduser("~")
@@ -333,6 +334,11 @@ def plan(system, gaps):
     return out
 
 
+def plan_id(items):
+    """A short id of the numbered items (number, what, agent, commands): --apply refuses a plan that changed."""
+    return hashlib.sha1(json.dumps([[i["n"], i["what"], i["agent"], i["run"]] for i in items if i["n"]]).encode()).hexdigest()[:8]
+
+
 def plan_lines(system, items):
     agents = ", ".join(system["agents"]) or "none on PATH"
     out = [f"KISS setup on {system['os']} ({system['shell'] or 'unknown shell'}), package manager: {system['pm'] or 'none'},"
@@ -345,7 +351,8 @@ def plan_lines(system, items):
         out.append("Nothing to install.")
     out += by_hand(system, items, [i for i in items if i["n"]])
     if any(i["n"] for i in items):
-        out.append("Answer all, none, or the numbers to install (for example 1,3).")
+        out += [f"plan id: {plan_id(items)}",
+                f"Answer all, none, or the numbers to install (for example 1,3); then: setup --apply <answer> --plan {plan_id(items)}"]
     return out
 
 
@@ -424,11 +431,14 @@ def apply(items, answer, runner=execute):
     return out, True, ran
 
 
-def setup(system, answer=None, runner=execute, find=None, checks=None):
-    """`setup` prints the plan; `setup --apply <answer>` runs it, then the checks again and the steps by hand."""
+def setup(system, answer=None, runner=execute, find=None, checks=None, pid=None):
+    """`setup` prints the plan; `setup --apply <answer> --plan <id>` runs it, then the checks again and the steps by
+    hand. The id must be the plan's own, so a number names the item the owner saw."""
     items = plan(system, (find or gaps)(system))
     if answer is None:
         return plan_lines(system, items), True
+    if pid != plan_id(items):
+        return [f"refused: the plan changed since you saw it (plan id {plan_id(items)}, not {pid}): show it again; nothing ran"], False
     lines, ok, ran = apply(items, answer, runner)
     failed = any(line.startswith("FAIL ") for line in lines)
     if ran or failed:                                       # the checks run again after a failure too
@@ -639,18 +649,19 @@ def selftest():
             return (1, "npm ERR! 404 not found") if " ".join(argv) in fail else (0, "")
         return go
     checks = lambda: ["CHECKS AGAIN"]
+    go = lambda s, a, r, f: setup(s, a, r, f, checks, pid=plan_id(plan(s, f(s))))   # the id the plan showed
     find = lambda system: known                               # numbered: 1 CodeGraph, 2 cgcallers, 3 index, 4 rule, 5-7 plugins
-    lines, ok = setup(sysfor(os="linux", pm="apt"), "1,3", runner(), lambda system: dict(known, git={}), checks)
+    lines, ok = go(sysfor(os="linux", pm="apt"), "1,3", runner(), lambda system: dict(known, git={}))
     assert ok and ran == ["npm install -g @colbymchenry/codegraph", "codegraph init -y /r/my app"], ran
     text = "\n".join(lines)
     assert "CHECKS AGAIN" in text and "sudo apt install -y git" in text and "start a new session" not in text, text
     ran.clear()
-    lines, ok = setup(sysfor(), "6, 5,5", runner(), find, checks)     # the plan's order, each once; the /hooks step after
+    lines, ok = go(sysfor(), "6, 5,5", runner(), find)     # the plan's order, each once; the /hooks step after
     assert ok and ran == ["claude plugin marketplace add DietrichGebert/ponytail", "claude plugin install ponytail@ponytail",
                           "codex plugin marketplace add DietrichGebert/ponytail", "codex plugin add ponytail@ponytail"], ran
     assert "/hooks" in "\n".join(lines) and "start a new session" in "\n".join(lines), lines
     ran.clear()
-    lines, ok = setup(sysfor(), "all", runner(fail={"codegraph init -y /r/my app"}), find, checks)
+    lines, ok = go(sysfor(), "all", runner(fail={"codegraph init -y /r/my app"}), find)
     text = "\n".join(lines)
     assert not ok and ran == ["npm install -g @colbymchenry/codegraph",
                               "install -m 755 /k/skills/kiss-harness/scripts/cgcallers.py /b/cgcallers",
@@ -660,17 +671,23 @@ def selftest():
         assert want in text, (want, text)
     for answer in ("8", "0", "1,x", "rm -rf /", "", "²", "٣"):   # outside the plan: refused, nothing runs (F6)
         ran.clear()
-        lines, ok = setup(sysfor(), answer, runner(), find, checks)
+        lines, ok = go(sysfor(), answer, runner(), find)
         assert not ok and ran == [] and "refused" in lines[0] and "CHECKS AGAIN" not in lines, (answer, lines)
     ran.clear()
-    assert setup(sysfor(), "none", runner(), find, checks)[1] and ran == []
+    assert go(sysfor(), "none", runner(), find)[1] and ran == []
     sudo = [{"n": 1, "what": "git", "agent": "device", "run": [["sudo", "apt", "install", "-y", "git"]], "hand": "",
              "source": "s", "changes": "c", "after": ""}]
     lines, ok, _ = apply(sudo, "1", runner())                              # a sudo command never runs, even if numbered
     assert not ok and ran == [] and "sudo" in lines[0], lines
     # F5: a failed item installed nothing: no steps after it, but the checks run again
-    text = "\n".join(setup(sysfor(), "6", runner(fail={"codex plugin marketplace add DietrichGebert/ponytail"}), find, checks)[0])
+    text = "\n".join(go(sysfor(), "6", runner(fail={"codex plugin marketplace add DietrichGebert/ponytail"}), find)[0])
     assert "CHECKS AGAIN" in text and "/hooks" not in text and "start a new session" not in text, text
+    # F2: the plan changed since the owner saw it (CodeGraph installed by hand): refused, nothing runs
+    pid = plan_id(plan(sysfor(), known))
+    assert f"--plan {pid}" in "\n".join(plan_lines(sysfor(), plan(sysfor(), known)))
+    ran.clear()
+    lines, ok = setup(sysfor(), "2", runner(), lambda s: {k: v for k, v in known.items() if k != "codegraph"}, checks, pid=pid)
+    assert not ok and ran == [] and "the plan changed" in lines[0], lines
     # the two file commands run in Python: the rule appended once, cgcallers copied executable
     with tempfile.TemporaryDirectory() as fx:
         dst, src = os.path.join(fx, "home", "CLAUDE.md"), os.path.join(fx, "rule.md")
@@ -730,9 +747,9 @@ def main(argv):
         print("\n".join(set_feedback(settings_path(), argv[2] == "on")))
         return
     if argv[1:2] == ["setup"]:
-        if argv[2:] and (argv[2] != "--apply" or len(argv) != 4):
-            sys.exit("usage: doctor.py setup [--apply all|none|<numbers>]")
-        lines, ok = setup(detect(), argv[3] if argv[2:] else None)
+        if argv[2:] and (len(argv) != 6 or argv[2] != "--apply" or argv[4] != "--plan"):
+            sys.exit("usage: doctor.py setup [--apply all|none|<numbers> --plan <id>]")
+        lines, ok = setup(detect(), argv[3] if argv[2:] else None, pid=argv[5] if argv[2:] else None)
         print("\n".join(lines))
         sys.exit(0 if ok else 1)
     agents = argv[1:] or [a for a, cli in CLI.items() if shutil.which(cli)]
