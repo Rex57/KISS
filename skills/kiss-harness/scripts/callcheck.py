@@ -92,9 +92,13 @@ def run_cgcallers(W, name, path):
 
 
 def word_hits(W, name, path):
-    """The code lines that still name a function no definition holds: cgcallers' word search over git's files."""
+    """The code lines that still name a function no definition holds, by cgcallers' own rules: the word search in
+    its file and the files that import its module (any file for a method), with no namesake's def line."""
     word, ext = name.rsplit(".", 1)[-1], (PY if path.endswith(PY) else JS)
     lang = "python" if ext == PY else "typescript"
+    mod, pkg = cgcallers.module_of(path), os.path.basename(os.path.dirname(path))
+    wanted = {"mod:" + mod, "name:" + mod, "imp:" + pkg, "from:%s:%s" % (pkg, word)}
+    method = "." in name
     rows = []
     for f in git(W, "ls-files").splitlines():
         if f.endswith(ext):
@@ -102,9 +106,13 @@ def word_hits(W, name, path):
                 src = cgcallers.read_file(os.path.join(W, f))
             except OSError:
                 continue
+            if f != path and not method and not wanted & cgcallers.imported(src, lang):
+                continue
             body = src.splitlines()
             for ln in cgcallers.word_lines(src, lang, word):
-                rows.append("[grep only] %s:%d  %s" % (f, ln, body[ln - 1].strip()[:110]))
+                line = body[ln - 1].strip()
+                if not re.search(r"\b(def|function)\s*\*?\s*%s\b" % re.escape(word), line):
+                    rows.append("[grep only] %s:%d  %s" % (f, ln, line[:110]))
     return rows
 
 
@@ -114,7 +122,7 @@ def check(W, spec, callers=run_cgcallers):
     for kind, name, path, note in found:
         lines.append("\n== %s: %s (%s)%s" % (kind, name, path, " " + note if note else ""))
         text = callers(W, name, path)
-        if kind != "signature" and "no definition named" in text:
+        if kind != "signature" and ("no definition named" in text or "matches file" in text):   # none left in this file
             text += "\n".join(["word search (no definition holds %s any more):" % name] + word_hits(W, name, path))
         lines.append(text.rstrip())
     to_read = sum(l.startswith("[") for t in lines for l in t.splitlines())
@@ -130,16 +138,21 @@ def selftest():
         g("config", "user.name", "t")
         g("config", "user.email", "t@t")
         files = {"a.py": "def gone():\n    return 1\n\n\ndef old_name(x):\n    return x\n\n\ndef resigned(a):\n    return a\n\n\n"
-                         "def same():\n    return 0\n",
+                         "def same():\n    return 0\n\n\nclass K:\n    def ack(self):\n        return 1\n\n\n"
+                         "class L:\n    def ack(self):\n        return 2\n",
+                 "f.py": "def g(o):\n    return o.ack()\n",
                  "b.py": "from a import gone, same\n\n\ndef use():\n    return gone() + same()  # gone\n",
-                 "c.ts": "export function gone2(n: number) {\n  return n\n}\n"}
+                 "c.ts": "export function gone2(n: number) {\n  return n\n}\n",
+                 "d.py": "def gone():\n    return 2\n",                         # a namesake: its def is no caller
+                 "e.py": "def other():\n    return gone()\n"}                    # no import of a: not this function's
         for f, body in files.items():
             with open(os.path.join(W, f), "w") as fh:
                 fh.write(body)
         g("add", ".")
         g("commit", "-qm", "one")
         with open(os.path.join(W, "a.py"), "w") as fh:
-            fh.write("def new_name(x):\n    return x\n\n\ndef resigned(a, b):\n    return a\n\n\ndef same():\n    return 0\n")
+            fh.write("def new_name(x):\n    return x\n\n\ndef resigned(a, b):\n    return a\n\n\ndef same():\n    return 0\n\n\n"
+                     "class L:\n    def ack(self):\n        return 2\n")
         with open(os.path.join(W, "c.ts"), "w") as fh:
             fh.write("export const keep = 1\n")
         g("add", ".")
@@ -147,7 +160,10 @@ def selftest():
 
         def fake(W_, name, path):
             asked.append((name, path))
-            return ("codegraph: no definition named %s" % name if name in ("gone", "gone2", "old_name")
+            if name in ("gone", "K.ack"):       # a namesake left: codegraph shows the other definitions instead
+                return ('codegraph: no definition of "%s" matches file "a.py" — showing all definitions instead.\n'
+                        "definition  d.py:1  function gone" % name)
+            return ("codegraph: no definition named %s" % name if name in ("gone2", "old_name")
                     else "definition  %s:1  function %s\n[both     ] x.py:9  f  %s()" % (path, name, name))
 
         for spec in ("--cached", None):
@@ -156,13 +172,16 @@ def selftest():
                 spec = "HEAD~1..HEAD"
             asked.clear()
             out = check(W, spec, fake)
-            assert sorted(asked) == [("gone", "a.py"), ("gone2", "c.ts"), ("old_name", "a.py"), ("resigned", "a.py")], asked
+            assert sorted(asked) == [("K.ack", "a.py"), ("gone", "a.py"), ("gone2", "c.ts"), ("old_name", "a.py"),
+                                     ("resigned", "a.py")], asked
             assert "== removed: gone (a.py)" in out and "== renamed: old_name (a.py) to new_name" in out, out
             assert "== signature: resigned (a.py) (a) -> (a, b)" in out and "== removed: gone2 (c.ts)" in out, out
             assert "same" not in [n for n, p in asked], asked                      # an unchanged function: no block
             assert "[grep only] b.py:5  return gone() + same()  # gone" in out, out  # a caller of a removed function
             assert "b.py:1" in out, out                                               # its import line
-            assert out.splitlines()[-1] == "callcheck: 4 names checked (removed, renamed or re-signed), 3 caller lines to read", out
+            assert "[grep only] d.py" not in out and "e.py" not in out, out           # R13: a namesake's def; R1: no import
+            assert "[grep only] f.py:2  return o.ack()" in out and "[grep only] a.py" not in out, out   # a method: any file
+            assert out.splitlines()[-1] == "callcheck: 5 names checked (removed, renamed or re-signed), 4 caller lines to read", out
     print("callcheck selftest ok")
     return 0
 
