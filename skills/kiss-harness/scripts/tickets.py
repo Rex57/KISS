@@ -151,6 +151,20 @@ def selftest():
     code = dict(good[0], files=["app/x.py", "README.md"])
     assert warnings([code]) == ["WARN T-1: lists code files and no symbols: its seed holds no node or callers"]
     assert warnings([dict(code, symbols=["f"])]) == [] and warnings([dict(good[0], files=["README.md", "a.json"])]) == []
+    import tempfile
+    with tempfile.TemporaryDirectory() as run:
+        with open(os.path.join(run, "tickets.json"), "w") as f:
+            json.dump(four, f)
+        for bad in (["--review=T-1"], ["--review", "T-9"], ["--review"]):    # refused, never ignored
+            try:
+                main(["tickets.py", "continue", run, *bad])
+                raise AssertionError(f"must stop: {bad}")
+            except SystemExit as x:
+                assert x.code and x.code != 0, (bad, x.code)
+        try:
+            main(["tickets.py", "continue", run, "--review=T-1"])
+        except SystemExit as x:
+            assert x.code == __doc__, "--review=ID: the usage text"
     print("tickets selftest ok")
 
 
@@ -177,6 +191,8 @@ def main(argv):
         print("\n".join(f"{r['id']}\t{r['title']}" for r in open_tickets(rows)))
     elif cmd == "continue":
         review = None
+        if any(a.startswith("--review=") for a in argv):
+            sys.exit(__doc__)
         if "--review" in argv:
             i = argv.index("--review")
             review, argv = "".join(argv[i + 1:i + 2]), argv[:i] + argv[i + 2:]
