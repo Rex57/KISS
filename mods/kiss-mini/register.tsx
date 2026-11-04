@@ -111,7 +111,7 @@ function briefLines(t: Task, text: string, rules: string, dir: string, seed = fa
     `- One commit on ${t.branch}; nothing pushed or merged.`,
     '- The full text ends with a "## Pull request body" section.',
     'Out of scope: anything the first line does not ask for.',
-    'Suggested skills: tdd, ponytail, CodeGraph; pr for the pull request body',
+    'Suggested skills: ponytail first, tdd, CodeGraph; pr for the pull request body',
   ].filter(given).join('\n')
 }
 

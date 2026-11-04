@@ -1078,6 +1078,15 @@ test('in an indexed repo a code task\'s brief names W, the CodeGraph commands wi
   expect(cg).toEqual([`codegraph status ${cwd}`, `codegraph init -y ${dir}/wt`, `codegraph explore -p ${dir}/wt`])
 })
 
+test('a code task\'s brief names ponytail first, as handoff.md\'s skill rows do', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(w.spawned[0]?.prompt).toContain(
+    'Suggested skills: ponytail first, tdd, CodeGraph; pr for the pull request body')
+})
+
 test('a repo with no index gets no seed and no CodeGraph line; the task still starts', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
