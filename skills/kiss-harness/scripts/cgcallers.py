@@ -15,7 +15,8 @@ of that language and prints a warning. codegraph misses a function passed as a v
 string, a method on an object when two classes define the name, and recursion (KISS rules/codegraph.md, "callers is
 incomplete").
 Each caller line is marked:
-  [both]       codegraph has an edge on this line and the word search finds the name on it
+  [both]       codegraph has an edge on this line and the word search finds the name on it, or (Python) the line is
+               in a function codegraph lists as a caller
   [grep only]  the name on a line with no codegraph edge: a caller codegraph missed, an import, or a namesake: read it
   [cg only]    a codegraph edge on a line the word search does not find (an alias such as `F.name`)
   [cg guess]   a codegraph edge with confidence 0.4 resolved by exact name match: a guess from the name only
@@ -247,6 +248,8 @@ def main(argv=None, cg=None, git=None, read=read_file):
             if c:
                 edges[(c["filePath"], e.get("line") or c.get("startLine"))] = (
                     c["name"], m.get("confidence") == 0.4 and m.get("resolvedBy") == "exact-match")
+        # D19: the def (its start line) or the file (0, module code) of each codegraph caller
+        held = {(c["filePath"], 0 if c.get("kind") == "file" else c.get("startLine")) for c in who_cg.values()}
         rows, matched = [], set()
         for f in files:
             body = text(f).splitlines()
@@ -259,6 +262,8 @@ def main(argv=None, cg=None, git=None, read=read_file):
                     matched.add((f, ln))
                     who, guess = edges[(f, ln)]
                     rows.append(("cg guess" if guess else "both", f, ln, who, line[:110]))
+                elif langs.get(f) in PY and (f, max([s[0] for s in spans if s[0] <= ln <= s[1]] or [0])) in held:
+                    rows.append(("both", f, ln, enclosing(spans, ln), line[:110]))   # another call in a listed caller
                 else:
                     rows.append(("grep only", f, ln, enclosing(spans, ln) if spans else "-", line[:110]))
         for (f, ln), (who, guess) in edges.items():
@@ -286,7 +291,7 @@ def selftest():
         "lib/util.py": "def helper():\n    return 1\n",
         "lib/more.py": "def helper():\n    return 2\n",
         "app.py": ("from lib.util import helper\n\ndef go():\n    # helper is called below\n    s = \"helper\"\n"
-                   "    return helper()\n\ndef go2():\n    return helper()\n"),
+                   "    return helper()\n\ndef go2():\n    return helper()\n\ndef go4():\n    helper()\n    return helper()\n"),
         "other.py": "def elsewhere():\n    return helper()\n",
         "web/api.ts": "export function fetchIt() {}\n",
         "web/page.ts": ("import { fetchIt } from './api'\n// fetchIt in a comment\nconst s = 'fetchIt';\nfetchIt();\n"
@@ -304,10 +309,11 @@ def selftest():
     }
     lang = {".py": "python", ".ts": "typescript", ".go": "go"}
     d_ = lambda f, n, line, lg, kind="function": {"name": n, "kind": kind, "filePath": f, "startLine": line, "id": "def:" + f, "language": lg}
-    edge = lambda f, who, line, conf=0.9: ({"id": "c:%s:%s" % (f, who), "name": who, "kind": "function", "filePath": f, "startLine": 1},
+    edge = lambda f, who, line, conf=0.9, start=1: ({"id": "c:%s:%s" % (f, who), "name": who, "kind": "function", "filePath": f,
+                                                     "startLine": start},
                                            {"source": "c:%s:%s" % (f, who), "line": line,
                                             "metadata": {"confidence": conf, "resolvedBy": "exact-match"}})
-    defs = {"helper": [(d_("lib/util.py", "helper", 1, "python"), [edge("app.py", "go", 6)] + [edge("app.py", "go2", 9, 0.4)]),
+    defs = {"helper": [(d_("lib/util.py", "helper", 1, "python"), [edge("app.py", "go", 6), edge("app.py", "go2", 9, 0.4), edge("app.py", "go4", 12, 0.9, 11)]),
                        (d_("lib/more.py", "helper", 1, "python"), [])],
             "fetchIt": [(d_("web/api.ts", "fetchIt", 1, "typescript"), [edge("web/page.ts", "x", 5)])],
             "Serve": [(d_("svc/serve.go", "Serve", 3, "go"), [])],
@@ -352,6 +358,7 @@ def selftest():
         assert sum(l.startswith("definition") for l in lines) == 2, o                      # one block per definition
         assert "[both     ] app.py:6  go  return helper()" in lines, o                     # an importer's call
         assert "[cg guess ] app.py:9  go2  return helper()" in lines, o                    # a 0.4 exact-match edge
+        assert "[both     ] app.py:13  go4  return helper()" in lines, o                   # D19: a 2nd call in a listed caller
         assert "other.py" not in o, o                                                      # no import: not shown
         assert "app.py:4" not in o and "app.py:5" not in o, o                              # comment and string
         assert o.count("codegraph callers;") == 2, o                                       # a count line per block
