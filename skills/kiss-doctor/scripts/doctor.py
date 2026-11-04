@@ -408,8 +408,8 @@ def back_up(path):
         n += 1
         out = "%s-%d" % (stamp, n)
     shutil.copy2(path, out)
-    with open(out, "rb") as f:                          # on disk before the caller changes the original
-        os.fsync(f.fileno())
+    with open(out, "rb+") as f:                         # on disk before the caller changes the original (Windows: a
+        os.fsync(f.fileno())                            # handle with write access, or its FlushFileBuffers fails)
     return out
 
 
@@ -835,6 +835,18 @@ def selftest():
         finally:
             os.replace = real
         assert code and raw(path) == mid == raw(backups(path)[0]) and backups(path)[0] in out, (code, out)
+        if os.name == "posix":                                   # Windows: FlushFileBuffers needs a handle with write access
+            import fcntl
+            def strict_fsync(fd, real=os.fsync):
+                if fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDONLY:
+                    raise OSError(9, "fsync on a read-only handle")
+                real(fd)
+            win, os.fsync = put("win/w.md", mid), strict_fsync
+            try:
+                code, out = replace(win)
+            finally:
+                os.fsync = strict_fsync.__defaults__[0]
+            assert code == 0 and raw(backups(win)[0]) == mid, (code, out)
         left = put("left/s10.md", mid)                           # a folder at the temp path: its cleanup fails too
         os.mkdir(left + ".kiss-new")
         code, out = replace(left)
