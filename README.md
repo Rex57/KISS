@@ -157,8 +157,10 @@ If a skill is missing, a run still works: KISS follows its own copy of the same 
    a rule of yours is always fixed; a low finding with no effect on a user, data or a rule goes to the log, which
    you see at the merge gate. The same implementer fixes each one and names the test that failed before and passes
    now; the controller checks those, and the same reviewer rechecks in the product only critical, high or
-   reproduced findings. At most 2 fix rounds per review and 3 per run, then a gate. A risky ticket gets its own
-   review only when it guards real data or later tickets build on its guard.
+   reproduced findings. At most 2 fix rounds per review and 3 per run, then a gate (none when only low or medium
+   findings that touch no guard, data or rule of yours are left: the merge gate offers them as one `/kiss-mini`
+   task). A risky ticket gets its own review only when it guards real data or later tickets build on its guard;
+   meanwhile the implementer builds the tickets that do not depend on it.
 5. **Close:** the project's full check, one metrics line (subagents, fix rounds, rechecks, headless sessions,
    minutes against the budget, and on Claude Code the tokens per role and the CodeGraph share), a look back at the run (each mistake becomes a proposed check or a rule, on your yes), the list of new `shortcut:` comments (`ponytail-debt`), the docs Upkeep
    (`kiss-housekeeping`) when `.kiss/project.md` names a docs gate (with no `Docs gate:` line it asks you once

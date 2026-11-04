@@ -6,7 +6,9 @@
   python3 -I tickets.py freeze RUN       copy tickets.json to tickets.orig.json at the build start
   python3 -I tickets.py render RUN       write issues/<ID>.md, the text briefs.py seeds
   python3 -I tickets.py open RUN         the open tickets, one per line
-  python3 -I tickets.py continue RUN [ELAPSED BUDGET]   the controller's message, or nothing when all pass
+  python3 -I tickets.py continue RUN [ELAPSED BUDGET] [--review ID]   the controller's message, or nothing when all
+                                         pass; with --review (a risky ticket under review alone), only the open
+                                         tickets that do not depend on it, or nothing when all of them do
   python3 -I tickets.py --selftest
 
 One ticket: {"id", "title", "spec", "acceptance": [...], "passes": false} and, optional, "files", "symbols",
@@ -79,13 +81,30 @@ def open_tickets(rows):
     return [r for r in rows if not r["passes"]]
 
 
-def continue_text(rows, elapsed=None, budget=None):
+def waits_for(rows, tid):
+    """The ids of the tickets that depend on tid, directly or through another ticket."""
+    deps = {r["id"]: set(r.get("depends_on") or []) for r in rows}
+    out, grew = set(), True
+    while grew:
+        more = {i for i, d in deps.items() if d & (out | {tid})} - out
+        out, grew = out | more, bool(more)
+    return out
+
+
+def continue_text(rows, elapsed=None, budget=None, review=None):
     left = open_tickets(rows)
-    if not left:
+    wait = waits_for(rows, review) if review else set()
+    go = [r for r in left if r["id"] not in wait]
+    if not go:
         return ""
     clock = f" Elapsed {elapsed}s / {budget}s." if elapsed is not None and budget is not None else ""
-    return ("continue: open tickets " + ", ".join(f"{r['id']} ({r['title']})" for r in left)
+    text = ("continue: open tickets " + ", ".join(f"{r['id']} ({r['title']})" for r in go)
             + f". {len(rows) - len(left)} of {len(rows)} pass.{clock} Take the next open ticket.")
+    if review:
+        text += f" {review} is under review alone: its fix round comes at your next stop."
+        waiting = [r["id"] for r in left if r["id"] in wait]
+        text += f" Waiting for {review}: {', '.join(waiting)}." if waiting else ""
+    return text
 
 
 def render(run, rows):
@@ -116,6 +135,13 @@ def selftest():
     assert any("added, removed" in p for p in problems([good[0]], good))
     assert continue_text(done, 340, 1200).startswith("continue: open tickets T-2 (d). 1 of 2 pass. Elapsed 340s / 1200s.")
     assert continue_text([dict(r, passes=True) for r in good]) == ""
+    four = [dict(good[0], passes=True, risky=True), dict(good[1], id="T-2"),
+            dict(good[1], id="T-3", title="g", depends_on=["T-2"]), dict(good[0], id="T-4", title="h")]
+    assert continue_text(four, review="T-1") == (
+        "continue: open tickets T-4 (h). 1 of 4 pass. Take the next open ticket. T-1 is under review alone: its fix "
+        "round comes at your next stop. Waiting for T-1: T-2, T-3."), continue_text(four, review="T-1")
+    assert continue_text(four[:3], review="T-1") == "", "every open ticket waits for the risky one: no message"
+    assert continue_text(four) == "continue: open tickets T-2 (d), T-3 (g), T-4 (h). 1 of 4 pass. Take the next open ticket."
     code = dict(good[0], files=["app/x.py", "README.md"])
     assert warnings([code]) == ["WARN T-1: lists code files and no symbols: its seed holds no node or callers"]
     assert warnings([dict(code, symbols=["f"])]) == [] and warnings([dict(good[0], files=["README.md", "a.json"])]) == []
@@ -144,8 +170,14 @@ def main(argv):
     elif cmd == "open":
         print("\n".join(f"{r['id']}\t{r['title']}" for r in open_tickets(rows)))
     elif cmd == "continue":
+        review = None
+        if "--review" in argv:
+            i = argv.index("--review")
+            review, argv = "".join(argv[i + 1:i + 2]), argv[:i] + argv[i + 2:]
+            if review not in {r["id"] for r in rows}:
+                sys.exit(f"--review {review!r}: not a ticket id")
         e, b = (int(argv[3]), int(argv[4])) if len(argv) > 4 else (None, None)
-        print(continue_text(rows, e, b))
+        print(continue_text(rows, e, b, review))
     else:
         sys.exit(__doc__)
 

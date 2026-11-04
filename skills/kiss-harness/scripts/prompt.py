@@ -149,6 +149,8 @@ def selftest():
     assert "reproduced_in_app" in loop["recheck"] and "diff and the test output" in loop["recheck"]
     assert "a broken command or link" in sv and "a low finding with no effect" in sv, "A2: the fix bar"
     assert "merge gate" in sv and "2 fix rounds per review and 3 per run" in sv, "A2: log and round caps"
+    assert ("only low or medium findings that touch no guard, data or owner rule are left, there is no gate" in sv
+            and "offers them as one kiss-mini task" in sv and "any other finding left asks a gate" in sv), "D10"
     assert 'A finding of medium or higher severity that fits none of these is a "fix"' in sv, "F8: every finding has a bucket"
     assert "Start no subagent of your own" in rv, "A4"
     fx, rc = loop["fix"], loop["recheck"]

@@ -83,7 +83,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    [references/agents.md](references/agents.md) instead, and the round goes to the new one. After 3 continuations, a
    gate. On BLOCKED: a decision when the block needs a choice, else a gate.
 6. **A risky ticket** is reviewed alone (step 7 on its commits) as soon as the implementer names it; otherwise the
-   final review covers it.
+   final review covers it. Start the solo reviewer, and at once send the implementer `tickets.py continue R <elapsed>
+   <budget> --review <ID>`: only the open tickets that do not depend on the risky one. When it prints nothing (each
+   open ticket waits for it), send no message. The solo review's fix round goes to the implementer at its next stop.
 7. **Review once at the end:** `prompt.py reviewer R HEAD=<head> ELAPSED=<s>` (a risky ticket's review adds
    `BASE=<the commit before it>`) → a NEW subagent on your strongest model at medium effort. Save its last message
    to `R/review-<n>.md` (n = this round's number, from 1).
@@ -94,7 +96,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    to `R/answer-<n>.md`; when the round fixed a critical, high or reproduced-in-app finding, `prompt.py recheck R
    ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha>` → the SAME reviewer (its findings, if any, become `R/review-<n+1>.md`).
    Before each one, the context check of step 5: a marked implementer or reviewer is replaced by the handoff.
-   At most 2 fix rounds per review and 3 per run; then a gate.
+   At most 2 fix rounds per review and 3 per run; then a gate. At the cap, when only low or medium findings that
+   touch no guard, data or owner rule are left: no gate; run the close, and the merge gate offers them as one
+   kiss-mini task. Any other finding left asks a gate.
 10. **Close**, in this order:
     1. The project's full check, once (the facts file names it).
     2. `ponytail-debt` on `git -C W diff <base>..<head>`: each new `shortcut:` comment with its limit.

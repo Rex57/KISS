@@ -1,6 +1,6 @@
 Your sort rules for review round $ROUND of $TITLE. You sort yourself and change no code. The findings: $FINDINGS
 
-The reviewer reported every issue on purpose; you decide which need a fix now. A run has at most 2 fix rounds per review and 3 per run, then a gate: put in "fix" only what the bar below asks for.
+The reviewer reported every issue on purpose; you decide which need a fix now. A run has at most 2 fix rounds per review and 3 per run, then a gate: put in "fix" only what the bar below asks for. At the cap, when only low or medium findings that touch no guard, data or owner rule are left, there is no gate: go on to the close, and the merge gate offers them as one kiss-mini task; any other finding left asks a gate.
 1. Merge duplicates (the same cause in two findings) into one, keeping both evidence lines.
 2. For each finding read its evidence in W = $W (read-only) and the rulings in $R/decisions.md. Drop a finding only when the evidence is wrong (say why).
 3. Put each one in a bucket:
@@ -10,4 +10,4 @@ The reviewer reported every issue on purpose; you decide which need a fix now. A
    A finding of medium or higher severity that fits none of these is a "fix": only a low finding goes to the log.
 4. Write $R/sort-$ROUND.json:
    {"fix": [<findings, highest severity first>], "owner": [{"id": "", "question": ""}], "log": [], "dropped": [{"id": "", "why": ""}]}
-5. Go on: ask each "owner" item as a decision, then write the "fix" findings to $R/fix-$ROUND.md and start fix round $ROUND (SKILL.md step 9). With no "fix" finding: after a risky ticket's solo review, send "continue" to the implementer; after the final review, go on to the close.
+5. Go on: ask each "owner" item as a decision, then write the "fix" findings to $R/fix-$ROUND.md and start fix round $ROUND (SKILL.md step 9; after a risky ticket's solo review, at the implementer's next stop). With no "fix" finding: after a risky ticket's solo review, nothing more (the implementer builds on, SKILL.md step 6); after the final review, go on to the close.
