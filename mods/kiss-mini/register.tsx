@@ -80,8 +80,9 @@ function briefLines(t: Task, text: string, rules: string, dir: string, seed = fa
   const where = [...(isCode(t)
     ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`]
     : [`Checkout: ${t.cwd} (read only)    Task folder: ${dir}`]),
-  // Kept short: with long paths each character of it comes off the task text (handoff.md spells it out).
-  ...(seed ? [`codegraph (W: ${t.worktree ? 'Worktree' : 'Checkout'}): explore|node|callers -p "W", sync -q "W"; seed: T/seed.md`] : [])]
+  // $PWD is W: the worker starts in its worktree (a question: its checkout). Two full paths here would cost the task
+  // text 150 characters at real-length paths.
+  ...(seed ? ['CodeGraph: codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder'] : [])]
   // The report's first line and the progress tool are in the brief itself: a worker may not open the Rules file.
   const rule = 'Report: your final message starts "State: done|ready|failed|waiting for you", then "Summary:". Call mcp__kiss__progress (step, total) as you start each step.'
   if (t.brief !== undefined) {
@@ -131,11 +132,13 @@ function brief(t: Task, rules: string, dir: string, seed = false): { text: strin
 
 /** Host: when the checkout has a CodeGraph index, indexes the worker's worktree and saves `codegraph explore` on the task's words as T/seed.md. */
 async function seedFile($: $, t: Task, dir: string): Promise<boolean> {
-  const w = t.worktree ?? t.cwd
+  // The index sits at the repo's root, also when the task started in a subfolder.
+  const top = (await $.process.run(['git', '-C', t.cwd, 'rev-parse', '--show-toplevel']).catch(() => undefined))?.stdout.trim() || t.cwd
+  const w = t.worktree ?? top
   // A missing or slow codegraph is no seed, never a failed task.
   const cg = (...argv: string[]) => $.process.run(['codegraph', ...argv], { cwd: w, timeoutMs: 600_000 }).catch(() => undefined)
-  if (!(await cg('status', t.cwd))?.stdout.includes(`Project: ${t.cwd}\n`)) return false
-  if (w !== t.cwd && (await cg('init', '-y', w))?.exitCode !== 0) return false
+  if (!(await cg('status', top))?.stdout.includes(`Project: ${top}\n`)) return false
+  if (w !== top && (await cg('init', '-y', w))?.exitCode !== 0) return false
   const r = await cg('explore', '-p', w, t.title.slice(0, 200))
   if (r?.exitCode !== 0 || !r.stdout.trim()) return false
   await $.fs.write(`${dir}/seed.md`, r.stdout)
@@ -236,7 +239,9 @@ async function tick($: $) {
     if (isCode(t) && t.state === 'ready' && t.host === me && t.branch && t.worktree && !t.busy && (t.ahead ?? 0) > 0 &&
       (await $.process.run(['git', '-C', t.cwd, 'merge-base', '--is-ancestor', t.branch, t.base!])).exitCode === 0) {
       // A worktree with changes nobody committed is never forced away.
-      const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.trim()
+      // The index the seed made (`?? .codegraph/`) is no change of the worker's.
+      const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.split('\n')
+        .filter(l => l.trim() && l.trim() !== '?? .codegraph/').join('\n')
       if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
       else await $.process.run(['git', '-C', t.cwd, 'worktree', 'remove', '--force', t.worktree])
       await save($, { ...t, state: 'done', delivered: 'merge', ...(dirty ? {} : { worktree: undefined }) })
@@ -317,6 +322,10 @@ async function run($: $, id: string) {
   const rules = `${$.plugin.root}/skills/kiss-mini/references/handoff.md`
   const dir = await folder($, id)
   const b = brief(t, rules, dir, await seedFile($, t, dir))
+  // The 30 minutes start at the spawn: a slow seed is the host's time, not the worker's. A stop meanwhile stands.
+  const seeded = (await $.store.get(TASK + id)) as Task
+  if (seeded.stopped || seeded.state !== 'working') return
+  await save($, { ...seeded, claimed: await $.clock.now() })
   if (b.isCut) await $.fs.write(`${dir}/task.md`, b.whole)
   const r = await $.agent.spawn({
     subagentType: 'kiss:kiss-worker',

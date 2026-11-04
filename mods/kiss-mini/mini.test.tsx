@@ -24,8 +24,12 @@ type Opts = {
   plugins?: { id: string; enabled: boolean; installPath: string; readFromFolder?: string }[]
   /** The checkout has a CodeGraph index: `codegraph status <it>` names it as its project. */
   indexed?: boolean
+  /** The repo's root, as `git rev-parse --show-toplevel` answers it (default: cwd). */
+  top?: string
+  /** How long `codegraph explore` (the seed) takes, on the mock clock. */
+  seedMs?: number
 }
-function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false }: Opts = {}) {
+function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, top = cwd, seedMs = 0 }: Opts = {}) {
   const w = {
     session: 's1',
     branch,
@@ -75,11 +79,13 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     w.spawned.push({ prompt: call.prompt, subagentType: call.subagent_type, cwd: call.cwd })
     return { model: 'sonnet', agentId: `w${w.spawned.length}` }
   })
-  on('process.run', ($, e) => {
+  on('process.run', async ($, e) => {
     w.runs.push([...e.argv])
+    if (e.argv.includes('--show-toplevel')) return { value: { exitCode: 0, stdout: `${top}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv[0] === 'codegraph' && e.argv[1] === 'explore' && seedMs) await w.clock.advance(seedMs)
     if (hang.includes(e.argv[0] ?? '')) throw new Error(`${e.argv[0]}: timed out after 120000 ms`)
     if (e.argv[0] === 'codegraph') {
-      const out = e.argv[1] === 'status' ? (indexed ? `CodeGraph Status\n\nProject: ${e.argv[2]}\n` : 'CodeGraph not initialized\n') : e.argv[1] === 'explore' ? 'SEED: calc.py add()\n' : ''
+      const out = e.argv[1] === 'status' ? (indexed ? `CodeGraph Status\n\nProject: ${top}\n` : 'CodeGraph not initialized\n') : e.argv[1] === 'explore' ? 'SEED: calc.py add()\n' : ''
       return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (e.argv[0] === 'gh' && e.argv[2] === 'view') {
@@ -198,6 +204,10 @@ test('when the send to the host is refused, the mod starts a new host and the ta
 const CACHED = '/u/.claude/plugins/cache/kiss/kiss/2.0.0'
 // The plugin under test is this repo: its root is two folders up from this file.
 const ROOT = decodeURIComponent(new URL('../..', (import.meta as { url: string }).url).pathname).replace(/\/$/, '')
+// The brief names the plugin root (its Rules line): a test of the 1,500 limit pins the paths to an installed KISS's
+// root length, so it checks brief(), not the folder this repo is checked out in.
+const INSTALLED = '/Users/someone/.claude/plugins/cache/kiss/kiss/2.0.2'
+const pin = (path: string) => ROOT.length > INSTALLED.length ? path.slice(0, path.length - (ROOT.length - INSTALLED.length)) : path + 'x'.repeat(INSTALLED.length - ROOT.length)
 async function hostStart($: any, w: ReturnType<typeof world>) {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
@@ -536,7 +546,7 @@ test('an ended task that still holds a worktree stays in the pane past the last 
 test('with real-length paths a long task text still gives a brief of at most 1,500 characters', async ($, on) => {
   // Made-up paths as long as a real temp folder and a real session's scratch folder.
   const tmp = '/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/'
-  const cwd = '/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo'
+  const cwd = pin('/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo')
   const w = world(on, { tmp, cwd })
   await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'kiss:kiss-mini', args: `fix ${'the long bug text '.repeat(30)}`.trim() } as never)
@@ -1020,7 +1030,7 @@ test('/kiss-mini --now skips the three checks; a plain /kiss-mini runs them', as
 
 test('with real-length paths a 400-character task keeps its first 200 characters in a brief of at most 1,500', async ($, on) => {
   const tmp = '/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/'
-  const cwd = '/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo-with-a-long-name'
+  const cwd = pin('/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo-with-a-long-name')
   const w = world(on, { tmp, cwd })
   const text = `fix ${'the parser drops the last field '.repeat(12)}`.trim().slice(0, 400)
   await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
@@ -1044,7 +1054,7 @@ test('when the paths leave under 200 characters for the task text, its first 200
 
 test('in an indexed repo a code task\'s brief names W, the CodeGraph commands with -p and the seed file, within 1,500 characters', async ($, on) => {
   const tmp = '/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/'
-  const cwd = '/home/someone/.cache/agent-501/-home-someone-Projects-Repo-SOMEAPP-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/scratchpad/run1/repo'
+  const cwd = pin('/Users/someone/Projects/a-notes-app-with-a-long-folder-name')
   const w = world(on, { tmp, cwd, indexed: true })
   await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'kiss:kiss-mini', args: `fix ${'the long bug text '.repeat(30)}`.trim() } as never)
@@ -1052,8 +1062,10 @@ test('in an indexed repo a code task\'s brief names W, the CodeGraph commands wi
   const dir = `/var/folders/x_/abcdefghijklmnopqrstuvwxyz01/T/kiss-mini/${ID}`
   const prompt = w.spawned[0]?.prompt ?? ''
   expect(prompt.length).toBeLessThanOrEqual(1500)
-  expect(prompt).toContain(`Worktree: ${dir}/wt`)
-  expect(prompt).toContain('codegraph (W: Worktree): explore|node|callers -p "W", sync -q "W"; seed: T/seed.md')
+  expect(prompt).toContain(`Worktree: ${dir}/wt\nTask folder: ${dir}\n`)
+  expect(prompt).toContain('CodeGraph: codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder')
+  // The worker starts in W, so "$PWD" in the line is W.
+  expect(w.spawned[0]?.cwd).toBe(`${dir}/wt`)
   expect(w.files[`${dir}/seed.md`]).toBe('SEED: calc.py add()\n')
   // The new worktree gets its own index before the seed reads it.
   const cg = w.runs.filter(a => a[0] === 'codegraph').map(a => a.slice(0, 4).join(' '))
@@ -1088,4 +1100,32 @@ test('a question whose worker returns no answer ends failed: the worker returned
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
   await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: ' \n', durationMs: 1, isAborted: false, turnId: 't1' } as never)
   expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].report]).toEqual(['failed', 'the worker returned no answer'])
+})
+
+test('a slow seed does not count toward the 30 minutes of a code task', async ($, on) => {
+  const w = world(on, { indexed: true, seedMs: 20 * 60_000 })
+  tools(on)
+  await working($, w)
+  await w.clock.advance(15 * 60_000)
+  expect(await status($)).toContain(`${ID} code working`)
+  await w.clock.advance(16 * 60_000)
+  expect(await status($)).toContain(`${ID} code failed: fix add so it returns the sum - timed out after 30 minutes`)
+})
+
+test('a merged task whose worktree holds only the new .codegraph/ index ends done and its worktree goes', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  w.merged = true
+  w.dirty = '?? .codegraph/\n'
+  await w.clock.advance(60_000)
+  expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
+  expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].worktree]).toEqual(['done', undefined])
+})
+
+test('a task started in a subfolder of an indexed repo still gets its seed', async ($, on) => {
+  const w = world(on, { cwd: '/repo/pkg', top: '/repo', indexed: true })
+  await $.session.start({ cwd: '/repo/pkg', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(w.files[`/tmp/kiss-mini/${ID}/seed.md`]).toBe('SEED: calc.py add()\n')
 })
