@@ -178,6 +178,8 @@ def main(argv=None, cg=None, git=None, read=read_file):
         found = json.loads(cg(["callers", "-p", W, "-j", "-l", "2000"] + (["-f", a.file] if a.file else []) + [a.name]) or "{}")
     except json.JSONDecodeError:
         found = {}
+    if found.get("filteredOut"):
+        print("codegraph: %s" % found.get("note", "-f %s matches no definition: showing all of them" % a.file))
     defs = found.get("definitions") or []
     if not defs:
         print("codegraph: no definition named %s in %s (check the name, the index: codegraph status \"%s\")" % (a.name, W, W))
@@ -307,6 +309,9 @@ def selftest():
         name, only = args[-1], (args[args.index("-f") + 1] if "-f" in args else None)
         out = [{"definition": dd, "callers": [c for c, e in es], "edges": [e for c, e in es]}
                for dd, es in defs.get(name, []) if not only or dd["filePath"].endswith(only)]
+        if only and not out:                # codegraph's answer when -f matches no definition
+            return json.dumps({"definitions": json.loads(fake_cg(args[:-3] + args[-1:]))["definitions"], "filteredOut": True,
+                               "note": 'no definition of "%s" matches file "%s" — showing all definitions instead.' % (name, only)})
         return json.dumps({"definitions": out})
 
     with tempfile.TemporaryDirectory() as W:
@@ -334,6 +339,8 @@ def selftest():
         assert o.count("codegraph callers;") == 2, o                                       # a count line per block
         o = out("helper", "-p", W, "-f", "lib/more.py")
         assert sum(l.startswith("definition") for l in o.splitlines()) == 1 and "lib/more.py" in o, o
+        o = out("helper", "-p", W, "-f", "nosuch.py")
+        assert o.splitlines()[1] == 'codegraph: no definition of "helper" matches file "nosuch.py" — showing all definitions instead.', o  # F7
         o = out("fetchIt", "-p", W)
         lines = o.splitlines()
         assert "[grep only] web/page.ts:4  -  fetchIt();" in lines, o                      # a JS call CodeGraph misses
