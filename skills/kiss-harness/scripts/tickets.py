@@ -122,7 +122,6 @@ def render(run, rows):
             body += ["", "## Symbols (hints)", ""] + [f"- `{s}`" for s in r["symbols"]]
         with open(os.path.join(run, "issues", r["id"] + ".md"), "w") as f:
             f.write("\n".join(body) + "\n")
-        r.setdefault("seeds", [])
 
 
 def selftest():
@@ -172,12 +171,24 @@ def selftest():
             main(["tickets.py", "continue", run, "--review=T-1"])
         except SystemExit as x:
             assert x.code == __doc__, "--review=ID: the usage text"
+        render(run, [dict(good[0], files=["a.py"], symbols=["f"], seeds=["q"])])     # the issue file, as before
+        assert open(os.path.join(run, "issues", "T-1.md")).read() == (
+            "# T-1: a\n\nb\n\n## Acceptance (the definition of done)\n\n- c\n\n## Files (hints)\n\n- `a.py`\n\n"
+            "## Symbols (hints)\n\n- `f`\n"), open(os.path.join(run, "issues", "T-1.md")).read()
+    for argv in (["tickets.py"], ["tickets.py", "check"], ["tickets.py", "nope", "/no/such/run"]):   # the usage, no traceback
+        try:
+            main(argv)
+            raise AssertionError(f"must stop: {argv}")
+        except SystemExit as x:
+            assert x.code == __doc__, (argv, x.code)
     print("tickets selftest ok")
 
 
 def main(argv):
     if argv[1:] == ["--selftest"]:
         return selftest()
+    if len(argv) < 3 or argv[1] not in ("check", "freeze", "render", "open", "continue"):
+        sys.exit(__doc__)
     cmd, run = argv[1], argv[2]
     rows = load(run)
     if cmd == "check":

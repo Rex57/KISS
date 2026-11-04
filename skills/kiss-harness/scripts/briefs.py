@@ -65,8 +65,11 @@ def seed(W, t, indexed, run=run):
         if exists(W, name, run):
             for args in (["node", "-p", W, name], ["callers", "-p", W, "--limit", str(CALLERS_LIMIT), name]):
                 parts.append(f"### `codegraph {' '.join(args[:2])} \"{W}\" {' '.join(args[3:])}`\n{run('codegraph', *args).stdout}")
-    for q in t.get("seeds") or []:
-        out = run("codegraph", "explore", "-p", W, q).stdout
+    queries = t.get("seeds") or []
+    # Several queries share one query's size of seed: fewer files each (D10); one keeps CodeGraph's default.
+    size = ["--max-files", str(max(3, 12 // len(queries)))] if len(queries) > 1 else []
+    for q in queries:
+        out = run("codegraph", "explore", "-p", W, *size, q).stdout
         if not empty(out):
             parts.append(f'### `codegraph explore -p "{W}" "{q}"`\n{out}')
     if not parts and files:
@@ -144,6 +147,15 @@ def selftest():
         assert [l for l in b1.splitlines() if "seed-T-1.md" in l] == [f"Read `{R}/briefs/seed-T-1.md` now."], b1
         for rule in ("codegraph", "cgcallers", "Commit", "Tests during the work", "sync"):
             assert rule not in b1, (rule, b1)                 # the rules live in the implementer prompt only
+    calls = []
+    def counting(*a, timeout=120):
+        calls.append(a)
+        return fake(*a, timeout=timeout)
+    for n, flag in ((2, ["--max-files", "6"]), (3, ["--max-files", "4"]), (5, ["--max-files", "3"]), (1, [])):
+        calls.clear()                                         # n queries share one query's size: max(3, 12 // n) files each
+        seed(W, {"seeds": ["q%d" % i for i in range(n)]}, [".py"], counting)
+        got = [list(a[4:-1]) for a in calls if a[1] == "explore"]
+        assert got == [flag] * n, (n, got)
     print("briefs selftest ok")
 
 
