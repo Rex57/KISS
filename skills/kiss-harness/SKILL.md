@@ -56,8 +56,10 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    `domain-modeling`. When the run adds or changes a module's interface or a seam, call the Skill tool with
    `mattpocock-skills:codebase-design` before you write the spec, and use its words and its deepening check. A
    decision the owner must try first (a state model, a UI) gets a throwaway `prototype` (scratch folder, or a branch
-   never merged). The **test seams** are one decision `D<n>`: each seam with what it catches and misses, asked once.
-   Then write `R/spec.md` from `templates/spec.md` by the spec rules in that file.
+   never merged). A decision that rests on a runtime fact of an early-access API (where a spawned agent's shell
+   starts, what a hook sees) gets your live spike of that fact in a scratch folder, before the tickets gate: a fact
+   is yours to check, not the owner's to try. The **test seams** are one decision `D<n>`: each seam with what it
+   catches and misses, asked once. Then write `R/spec.md` from `templates/spec.md` by the spec rules in that file.
 2. **Tickets** in `R/tickets.json`: a list of `{id, title, spec, acceptance: [...], passes: false}`, and optional
    `files`, `symbols`, `seeds` (CodeGraph queries), `depends_on`, `risky`. Follow the ticket rules in
    [references/spec-and-tickets.md](references/spec-and-tickets.md): tracer bullets, a refactor first, blocking
