@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The run's feature list, RUN/tickets.json (SKILL.md, step 2).
 
-  python3 -I tickets.py check RUN        the shape; after `freeze`, also: only `passes` changed
+  python3 -I tickets.py check RUN        the shape; after `freeze`, also: only `passes` changed; a WARN (exit 0)
+                                         for a ticket that lists code files and no symbols
   python3 -I tickets.py freeze RUN       copy tickets.json to tickets.orig.json at the build start
   python3 -I tickets.py render RUN       write issues/<ID>.md, the text briefs.py seeds
   python3 -I tickets.py open RUN         the open tickets, one per line
@@ -16,6 +17,9 @@ import json, os, re, sys
 
 ID = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
 OPTIONAL = {"files": list, "symbols": list, "seeds": list, "depends_on": list, "risky": bool}
+# shortcut: a fixed list of code file types (check runs without W's index); add a type when a project needs it
+CODE = {".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".svelte", ".vue", ".go", ".rs", ".java", ".kt", ".swift",
+        ".rb", ".php", ".c", ".h", ".cc", ".cpp", ".cs", ".sh"}
 
 
 def load(run, name="tickets.json"):
@@ -65,6 +69,12 @@ def problems(rows, orig=None):
     return out
 
 
+def warnings(rows):
+    """A code ticket with no symbols gets a seed with no node or callers: warn, never fail."""
+    return [f"WARN {r['id']}: lists code files and no symbols: its seed holds no node or callers" for r in rows
+            if not r.get("symbols") and any(os.path.splitext(f)[1] in CODE for f in r.get("files") or [])]
+
+
 def open_tickets(rows):
     return [r for r in rows if not r["passes"]]
 
@@ -106,6 +116,9 @@ def selftest():
     assert any("added, removed" in p for p in problems([good[0]], good))
     assert continue_text(done, 340, 1200).startswith("continue: open tickets T-2 (d). 1 of 2 pass. Elapsed 340s / 1200s.")
     assert continue_text([dict(r, passes=True) for r in good]) == ""
+    code = dict(good[0], files=["app/x.py", "README.md"])
+    assert warnings([code]) == ["WARN T-1: lists code files and no symbols: its seed holds no node or callers"]
+    assert warnings([dict(code, symbols=["f"])]) == [] and warnings([dict(good[0], files=["README.md", "a.json"])]) == []
     print("tickets selftest ok")
 
 
@@ -117,7 +130,8 @@ def main(argv):
     if cmd == "check":
         orig = load(run, "tickets.orig.json") if os.path.exists(os.path.join(run, "tickets.orig.json")) else None
         bad = problems(rows, orig)
-        print("\n".join(bad) or f"ok: {len(rows)} tickets, {len(rows) - len(open_tickets(rows))} pass")
+        print("\n".join(bad + warnings(rows)) if bad else "\n".join(warnings(rows) + [
+            f"ok: {len(rows)} tickets, {len(rows) - len(open_tickets(rows))} pass"]))
         sys.exit(1 if bad else 0)
     if cmd == "freeze":
         assert not problems(rows), "fix `check` first"

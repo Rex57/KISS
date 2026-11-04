@@ -284,7 +284,7 @@ mods/kiss-mini/              the Claude Code mod: /kiss-mini, the background hos
 claude-agents/               kiss-implementer, kiss-reviewer and kiss-worker, the named subagents (Claude Code)
 ```
 
-Selftests: `python3 -I skills/kiss-harness/scripts/tickets.py --selftest`, the same for `prompt.py`,
+Selftests: `python3 -I skills/kiss-harness/scripts/tickets.py --selftest`, the same for `prompt.py`, `briefs.py`,
 `cgcallers.py`, `skills/kiss-doctor/scripts/doctor.py`, `skills/kiss-dream/scripts/guard.py`, `check_memory.py`, `.claude/skills/kiss-check-update/scripts/check_update.py`, `rules/feedback.py` and the three scripts in `skills/kiss-housekeeping/scripts/`. The mod's tests: `claude plugin test .`.
 
 A new version changes `version` in the four manifests that carry one (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`, `.antigravity-plugin/plugin.json`), and gets a tag `v<version>`.

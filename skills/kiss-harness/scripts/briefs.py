@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Write one brief per ticket, seeded with `codegraph explore -p W` and the callers of what it edits.
+"""Write one brief and one seed file per ticket.
 
   python3 -I briefs.py RUN W BRANCH ID [ID ...]
+  python3 -I briefs.py --selftest
 
-RUN holds tickets.json and issues/ (tickets.py render). The index is synced before the seed; the seed reads only
-symbols that exist, plus `codegraph callers` of each one the ticket edits; an empty seed falls back to the
-ticket's files.
+The brief (RUN/briefs/task-<ID>-brief.md) holds W, the read-first line, the ticket and one line that points to the
+seed. The seed (RUN/briefs/seed-<ID>.md) is CodeGraph output, read after a sync: for each symbol of the ticket that
+exists, `codegraph node` and `codegraph callers --limit 100`, then the ticket's `seeds` queries through `explore`. A
+ticket whose files CodeGraph does not index gets "No code seed". The rules live in the implementer prompt.
 """
-import json, os, subprocess, sys
+import json, os, subprocess, sys, tempfile
 
 CALLERS_LIMIT = 100   # rules/codegraph.md, "Subagents" item 3
-HB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+NO_CODE = "No code seed: this ticket edits files CodeGraph does not index."
 
 
 def exts(paths):
@@ -22,14 +24,14 @@ def run(*a, timeout=120):
     return subprocess.run(a, capture_output=True, text=True, timeout=timeout)
 
 
-def file_types(W):
+def file_types(W, run=run):
     """(indexed, not indexed) file types in W, read from CodeGraph and git, never written by hand."""
     indexed = exts(run("codegraph", "files", "-p", W, "--format", "flat", "--no-metadata").stdout.splitlines())
     assert indexed, f"codegraph files lists nothing for {W}"
     return sorted(indexed), sorted(exts(run("git", "-C", W, "ls-files").stdout.splitlines()) - indexed)
 
 
-def exists(W, name):
+def exists(W, name, run=run):
     """True when the index holds a symbol with exactly this name (a ticket may name one it creates)."""
     out = run("codegraph", "query", "-p", W, "-j", "-l", "50", name).stdout
     try:
@@ -39,10 +41,12 @@ def exists(W, name):
 
 
 def empty(out):
-    return not out.strip() or "No results found" in out or "Found 0 symbols" in out
+    """No result: judged on the head only, since a result's source code may hold these words."""
+    head = "\n".join(out.strip().splitlines()[:6])
+    return not head or "No results found" in head or "Found 0 symbols" in head
 
 
-def sync(W):
+def sync(W, run=run):
     """Sync the worktree index so the seed reads today's code; a timeout is reported, not fatal."""
     try:
         r = run("codegraph", "sync", "-q", W, timeout=900)
@@ -51,84 +55,100 @@ def sync(W):
         return "`codegraph sync` ran over 900 s: the seed may be stale; run the sync yourself first."
 
 
-def seed(W, t):
-    """The SEED text: explore on each query, then callers of each existing symbol the ticket edits."""
+def seed(W, t, indexed, run=run):
+    """The seed text: node and callers of each existing symbol, then explore on each query."""
+    files = t.get("files") or []
+    if files and not exts(files) & set(indexed):
+        return NO_CODE
     parts = []
-    # a ticket may carry no seeds: its symbols are then the one query
-    for q in t.get("seeds") or ([" ".join(t["symbols"])] if t.get("symbols") else []):
+    for name in t.get("symbols") or []:
+        if exists(W, name, run):
+            for args in (["node", "-p", W, name], ["callers", "-p", W, "--limit", str(CALLERS_LIMIT), name]):
+                parts.append(f"### `codegraph {' '.join(args[:2])} \"{W}\" {' '.join(args[3:])}`\n{run('codegraph', *args).stdout}")
+    for q in t.get("seeds") or []:
         out = run("codegraph", "explore", "-p", W, q).stdout
         if not empty(out):
             parts.append(f'### `codegraph explore -p "{W}" "{q}"`\n{out}')
-    if not parts and t.get("files"):
-        q = " ".join(t["files"][:6])
+    if not parts and files:
+        q = " ".join(files[:6])
         out = run("codegraph", "explore", "-p", W, q).stdout
-        parts.append(f'### `codegraph explore -p "{W}" "{q}"` (the ticket\'s files: its queries found nothing)\n{out}')
-    for name in t.get("symbols") or []:
-        if exists(W, name):
-            out = run("codegraph", "callers", "-p", W, "--limit", str(CALLERS_LIMIT), name).stdout
-            parts.append(f'### `codegraph callers -p "{W}" --limit {CALLERS_LIMIT} {name}`\n{out}')
+        parts.append(f'### `codegraph explore -p "{W}" "{q}"` (the ticket\'s files: it names no symbol and its queries found nothing)\n{out}')
     return "\n".join(parts) or "(empty: the ticket names no existing symbol or file; start from `codegraph explore` yourself)"
 
 
-def main(R, W, branch, ids):
+def main(R, W, branch, ids, run=run):
     tickets = {t["id"]: t for t in json.load(open(os.path.join(R, "tickets.json")))}
     status = run("codegraph", "status", W).stdout
     assert f"Project: {W}" in status, f"wrong or missing index for {W}:\n{status}"
-    stale = sync(W)
-    indexed, unindexed = file_types(W)
-    P = f'-p "{W}"'
+    stale = sync(W, run)
+    indexed, unindexed = file_types(W, run)
+    os.makedirs(os.path.join(R, "briefs"), exist_ok=True)
     for i in ids:
         t = tickets[i]
         issue = open(os.path.join(R, "issues", f"{i}.md")).read()
+        seed_path = os.path.join(R, "briefs", f"seed-{i}.md")
+        text = f"""# Seed — ticket {i}
+
+{stale or "The index was synced just before this seed."} In W, CodeGraph indexes {', '.join(indexed)}; it does not
+index {', '.join(unindexed) or 'any other tracked type'}, nor git-ignored files. The output below is verbatim CodeGraph
+output: treat it as already read.
+
+{seed(W, t, indexed, run)}
+"""
         brief = f"""# Brief — ticket {i}: {t['title']}
 
-Worktree W = `{W}`, branch `{branch}` (already checked out; never switch or create branches). W is
-indexed: `codegraph status "{W}"` prints `Project: {W}`. Every CodeGraph call names W (`{P}`; MCP
-`projectPath: "{W}"`). Never run `codegraph init`. {stale or "The index was synced just before this brief."}
+Worktree W = `{W}`, branch `{branch}` (already checked out).
 
 Read first: `{R}/spec.md`, `{R}/decisions.md` and `{R}/progress.md` (once, at the start), then this brief.
 
-## The CodeGraph rule (binding)
-STEP 1 is CodeGraph: start from the SEED below (verbatim CodeGraph output: treat it as already read). Then:
-- `codegraph node {P} <name>` for each symbol you change, and for EVERY function your new code, tests or docs
-  name (a docs line that states what a function does is a code fact: check it).
-- `codegraph callers {P} <name>` for each shared function you edit; check every caller.
-- Before a delete, rename or signature change: `python3 -I "{HB}/scripts/cgcallers.py" <name> {P}`; read
-  every `[grep only]` line.
-Usage notes:
-1. `codegraph node` takes ONE name per call; for several names use `codegraph explore {P} "a b c"`.
-2. Use a qualified name for a method (`Engine.ack`); a bare common name prints every definition.
-3. A caller list that ends "+N more" is cut: run `codegraph callers {P} --limit 100 <name>`.
-4. The line "results come from a different git worktree" is expected when you pass `{P}` from another folder:
-   the results are W's. A tool result that shows a preview and names a file: read that file.
-grep/find/Read only for a literal (a route, an env name, a payload key, error text, SQL), a file CodeGraph does
-not index, or a count. In W, CodeGraph indexes {', '.join(indexed)}; it does not index {', '.join(unindexed)},
-nor git-ignored files such as `.kiss/` (from `codegraph files {P} --format flat --no-metadata` and
-`git ls-files` when this brief was written). Never `grep -n "def X"` + `sed -n` (that is `codegraph node`).
-After each batch of edits and before you return: `codegraph sync -q "{W}"` (give it a 10-minute timeout;
-Claude Code: the Bash tool's `timeout: 600000`).
-
 ## The ticket (`{R}/issues/{i}.md`)
 {issue}
-## Tests during the work
-Your own tests, the tests `codegraph affected {P} <changed files>` names, and the selftest of each changed
-module that has one, run as the project facts file says. Never the full check: the controller runs it once at
-the end.
-
-## Commit
-One commit, explicit `git add` / `git rm` paths, message `{t['title']}` (you may shorten it), with the trailer
-lines the project's instructions name.
-
-## SEED (run by the dispatcher)
-{seed(W, t)}
+Read `{seed_path}` now.
 """
-        path = os.path.join(R, "briefs", f"task-{i}-brief.md")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        open(path, "w").write(brief)
-        print(i, len(brief), "chars", path)
+        for path, body in ((seed_path, text), (os.path.join(R, "briefs", f"task-{i}-brief.md"), brief)):
+            with open(path, "w") as f:
+                f.write(body)
+            print(i, len(body), "chars", path)
+
+
+def selftest():
+    assert exts(["web/a.svelte", " core/b.py", "Makefile", "x/.env", "Files (291):"]) == {".svelte", ".py"}
+    assert empty("ℹ No results found for \"x\"") and not empty("**Exploration: x**\nFound 3 symbols")
+    W = "/w/my app"
+    known = {"foo": "skills/x/a.py"}
+
+    def fake(*a, timeout=120):
+        cmd = a[-1] if a[0] == "git" else a[1]
+        out = {"status": f"Project: {W}\n", "sync": "",
+               "files": "Files (1):\n\n  skills/x/a.py\n", "ls-files": "skills/x/a.py\nREADME.md\n",
+               "query": json.dumps([{"node": {"name": n}} for n in known if n == a[-1]]),
+               "node": f"NODE-OF {a[-1]}\n", "callers": f"CALLERS-OF {a[-1]}\n",
+               "explore": f"**Exploration: {a[-1]}**\nFound 2 symbols\n" + "code\n" * 9 + "    if 'No results found' in out:\n"}[cmd]
+        return subprocess.CompletedProcess(a, 0, out, "")
+
+    with tempfile.TemporaryDirectory() as R:
+        rows = [{"id": "T-1", "title": "code", "files": ["skills/x/a.py"], "symbols": ["foo", "new_one"], "seeds": ["foo bar"]},
+                {"id": "T-2", "title": "docs", "files": ["README.md"]}]
+        json.dump(rows, open(os.path.join(R, "tickets.json"), "w"))
+        os.makedirs(os.path.join(R, "issues"))
+        for r in rows:
+            open(os.path.join(R, "issues", r["id"] + ".md"), "w").write(f"# {r['id']}: {r['title']}\n")
+        main(R, W, "br", ["T-1", "T-2"], run=fake)
+        read = lambda n: open(os.path.join(R, "briefs", n)).read()
+        s1, s2, b1 = read("seed-T-1.md"), read("seed-T-2.md"), read("task-T-1-brief.md")
+        for want in ("NODE-OF foo", "CALLERS-OF foo", "Exploration: foo bar"):
+            assert want in s1, (want, s1)
+        assert "new_one" not in s1, s1                         # a symbol the ticket creates has no seed yet
+        assert s1.index("NODE-OF foo") < s1.index("CALLERS-OF foo") < s1.index("Exploration: foo bar"), s1
+        assert NO_CODE in s2 and "NODE-OF" not in s2, s2
+        assert [l for l in b1.splitlines() if "seed-T-1.md" in l] == [f"Read `{R}/briefs/seed-T-1.md` now."], b1
+        for rule in ("codegraph", "cgcallers", "Commit", "Tests during the work", "sync"):
+            assert rule not in b1, (rule, b1)                 # the rules live in the implementer prompt only
+    print("briefs selftest ok")
 
 
 if __name__ == "__main__":
-    assert exts(["web/a.svelte", " core/b.py", "Makefile", "x/.env", "Files (291):"]) == {".svelte", ".py"}
-    assert empty("ℹ No results found for \"x\"") and not empty("**Exploration: x**\nFound 3 symbols")
-    main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:])
+    if sys.argv[1:] == ["--selftest"]:
+        selftest()
+    else:
+        main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:])
