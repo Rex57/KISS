@@ -558,6 +558,15 @@ test('a code worker\'s git stash, git worktree change and --output outside are d
   expect(ran).toEqual(allowed.map(c => `Bash cd '${WT}' && ${c}`))
 })
 
+test('a code worker\'s Monitor is denied, as its shell command would run unguarded outside the worktree; the main loop\'s passes', async ($, on) => {
+  const { ran } = await worker($, on)
+  for (const arg of [{ command: 'git -C /repo commit -m x' }, { command: 'tail -f build.log' }, { ws: 'ws://localhost:9000' }] as Record<string, string>[]) {
+    expect(JSON.stringify(await call($, 'Monitor', { description: 'watch', ...arg })), JSON.stringify(arg)).toContain('runs shell commands only with Bash')
+  }
+  await call($, 'Monitor', { description: 'watch', command: 'tail -f build.log' }, null)
+  expect(ran).toEqual(['Monitor tail -f build.log'])
+})
+
 test('a worker\'s Bash command runs in its worktree: the mod puts a cd there first, one word with a space or a quote', async ($, on) => {
   // The worker's shell starts in the host's folder (the spawn's cwd does not move it), so a bare git write needs the cd.
   const { ran } = await worker($, on, { tmp: "/tmp/it's a dir/" })

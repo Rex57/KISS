@@ -79,7 +79,8 @@ skill when it is installed: a draft pull request takes it as its body.
    with "kiss-mini: a worker writes only in its worktree": commit in the worktree and report, never try again
    elsewhere. Start every Bash command as the brief's `Bash` line shows, with the folder's path in single quotes: a
    worker's shell starts in the host's folder, and the mod puts that prefix before a command without it, which makes
-   auto mode review the command again. A question task changes no file in the checkout: it runs in the owner's own working tree, read-only by this rule;
+   auto mode review the command again. A code or bug worker's Monitor is denied (its shell command would start
+   outside the worktree): use Bash. A question task changes no file in the checkout: it runs in the owner's own working tree, read-only by this rule;
    the mod denies only Edit, Write and NotebookEdit and turns off the Python and pytest caches, so a Bash command can
    still write there.
 4. **Conduct:** ask one concrete question at a time. Stop at a design choice and ask it. Mark a draft as unfinished.

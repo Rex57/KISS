@@ -745,6 +745,8 @@ export const register: Register = on => {
     const t = (await tasks($)).find(x => x.agentId === e.agentId)
     if (t?.stopped) return { deny: `kiss-mini: the owner stopped this task (${t.report}). Make no more tool calls; end now.` }
     if (t && GITHUB_WRITES.test(String(e.tool))) return { deny: 'kiss-mini: only the owner\'s press in the /kiss-mini pane writes to GitHub. Commit on your branch and report.' }
+    // Monitor's shell command would start in the host's folder, past the cd below and the worktree guard.
+    if (t && isCode(t) && String(e.tool) === 'Monitor') return { deny: 'kiss-mini: a code worker runs shell commands only with Bash, in its worktree. Use Bash.' }
     // A question reads the owner's own working tree: it writes no file there, and its commands leave no caches.
     // shortcut: read-only by rule; only Edit, Write and NotebookEdit are denied and the Python and pytest caches are
     // off, so a Bash command (cargo test, pytest --cov, sed -i, git stash) can still write in the checkout; upgrade:
