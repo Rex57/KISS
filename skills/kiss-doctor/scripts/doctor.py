@@ -343,15 +343,20 @@ def plan_lines(system, items):
             out += [f"{i['n']}. {i['what']} ({i['agent']})"] + [f"   command: {command(c)}" for c in i["run"]] + detail(i)
     if not any(i["n"] for i in items):
         out.append("Nothing to install.")
-    out += by_hand(items, [i for i in items if i["n"]])
+    out += by_hand(system, items, [i for i in items if i["n"]])
     if any(i["n"] for i in items):
         out.append("Answer all, none, or the numbers to install (for example 1,3).")
     return out
 
 
-def by_hand(items, ran):
-    """The steps only the owner can do: the items setup never runs, the steps after the items in `ran`, the links."""
+def by_hand(system, items, ran):
+    """The steps only the owner can do: the items setup never runs, the steps after the items in `ran`, the PATH line
+    for the cgcallers folder (setup never edits a shell profile), the links."""
     out, hand = [], [i for i in items if not i["n"]]
+    if system["bin"] not in system.get("path", "").split(os.pathsep) and (
+            any(i["what"] == "cgcallers" for i in items) or os.path.isfile(os.path.join(system["bin"], "cgcallers"))):
+        out += ["Put the cgcallers folder on your PATH: add this line to your shell profile yourself:",
+                f'  export PATH="{system["bin"]}:$PATH"']
     if hand:
         out.append("For you to do (setup never runs these):")
         for i in hand:
@@ -429,7 +434,7 @@ def setup(system, answer=None, runner=execute, find=None, checks=None):
     if ran or failed:                                       # the checks run again after a failure too
         lines += ["", "The checks again:"] + (checks or (lambda: report(system["agents"])[0]))()
     if ran or ok or failed:
-        lines += [""] + by_hand(items, ran)
+        lines += [""] + by_hand(system, items, ran)
     return lines, ok
 
 
@@ -444,14 +449,16 @@ def detect():
     return {"os": {"Darwin": "macos", "Windows": "windows"}.get(platform.system(), "linux"),
             "shell": os.path.basename(shell), "pm": next((p for p in PMS if shutil.which(p)), None),
             "agents": [a for a, cli in CLI.items() if shutil.which(cli)], "repo": repo or None,
-            "bin": os.environ.get("KISS_BIN") or os.path.join(HOME, ".local", "bin"), "kiss": KISS}
+            "bin": os.environ.get("KISS_BIN") or os.path.join(HOME, ".local", "bin"), "kiss": KISS,
+            "path": os.environ.get("PATH", "")}
 
 
 def gaps(system):
     """What the checks find missing on this machine, in plan()'s form."""
     out = {k: {} for k, missing in [("git", not shutil.which("git")), ("python", sys.version_info < (3, 9)),
                                      ("node", not (shutil.which("node") and shutil.which("npm"))),
-                                     ("codegraph", not shutil.which("codegraph")), ("cgcallers", not shutil.which("cgcallers")),
+                                     ("codegraph", not shutil.which("codegraph")),
+                                     ("cgcallers", not (shutil.which("cgcallers") or os.path.isfile(os.path.join(system["bin"], "cgcallers")))),
                                      ("index", system["repo"] and not os.path.isdir(os.path.join(system["repo"], ".codegraph")))]
            if missing}
     need, marks = required(), markers()
@@ -701,6 +708,13 @@ def selftest():
             got = detect()
             assert (got["pm"], got["agents"], got["repo"], got["bin"]) == ("brew", ["codex"], None, os.path.join(fx, "bin")), got
             assert "cgcallers" in gaps(dict(got, agents=[]))
+            os.makedirs(os.path.join(fx, "bin"))                       # F3: copied but its folder not on PATH
+            with open(os.path.join(fx, "bin", "cgcallers"), "w") as f:
+                f.write("x")
+            assert "cgcallers" not in gaps(dict(got, agents=[])), "cgcallers planned again"
+            line = 'export PATH="%s:$PATH"' % os.path.join(fx, "bin")
+            assert any(line in l for l in by_hand(got, [], [])), by_hand(got, [], [])
+            assert not any("export PATH" in l for l in by_hand(dict(got, path=os.path.join(fx, "bin")), [], []))
         finally:
             for k, v in old_env.items():
                 os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
