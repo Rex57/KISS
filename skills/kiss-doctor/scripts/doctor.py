@@ -327,7 +327,8 @@ def plan(system, gaps):
             run = [[w.format(**values) for w in shlex.split(c)] for c in cmds]
             n += bool(run and not hand)
             out.append({"n": n if run and not hand else None, "what": row["what"], "agent": agent, "run": run, "hand": hand,
-                        "source": row["source"], "changes": row["changes"].format(**values),
+                        "source": row["source"], "changes": row["changes"].format(**values) if cmds or "pm" not in row else
+                        "nothing: you install it yourself from the link",
                         "after": row.get("after", {}).get(agent, "")})
     return out
 
@@ -392,7 +393,7 @@ def apply(items, answer, runner=execute):
     words = [w for w in re.split(r"[,\s]+", answer.strip().lower()) if w]
     if words == ["all"] or words == ["none"]:
         want = sorted(numbered) if words == ["all"] else []
-    elif words and all(w.isdigit() and int(w) in numbered for w in words):
+    elif words and all(re.fullmatch(r"[0-9]+", w) and int(w) in numbered for w in words):
         want = sorted({int(w) for w in words})
     else:
         return [f"refused: {answer!r} is not all, none, or numbers of the plan ({', '.join(map(str, numbered)) or 'none'});"
@@ -582,6 +583,7 @@ def selftest():
     assert all("sudo" in i["hand"] and i["n"] is None for i in apt), apt
     none = plan(sysfor(os="linux", pm=None), {"git": {}})                    # no package manager: the download link only
     assert none[0]["run"] == [] and none[0]["n"] is None and "https://git-scm.com/downloads" in none[0]["hand"], none
+    assert "package manager" not in none[0]["changes"] and "the link" in none[0]["changes"], none     # F10
     known = {"codegraph": {}, "cgcallers": {}, "index": {}, ("claude", "Install ponytail"): {},
             ("codex", "Install ponytail"): {}, ("codex", "Install Matt Pocock's skills"): {},
             ("claude", "rule"): {"file": "/h/.claude/CLAUDE.md"}, ("gemini", "Install ponytail"): {}}
@@ -645,7 +647,7 @@ def selftest():
     for want in ("done 1. CodeGraph", "done 2. cgcallers", "FAIL 3.", "codegraph init -y '/r/my app'", "npm ERR! 404",
                  "not run: 4, 5, 6, 7", "CHECKS AGAIN"):
         assert want in text, (want, text)
-    for answer in ("8", "0", "1,x", "rm -rf /", ""):                  # outside the plan: refused, nothing runs
+    for answer in ("8", "0", "1,x", "rm -rf /", "", "²", "٣"):   # outside the plan: refused, nothing runs (F6)
         ran.clear()
         lines, ok = setup(sysfor(), answer, runner(), find, checks)
         assert not ok and ran == [] and "refused" in lines[0] and "CHECKS AGAIN" not in lines, (answer, lines)
