@@ -17,6 +17,7 @@ import glob, json, os, re, sys
 
 CG_READ = {"query", "explore", "context", "node", "files", "callers", "callees", "impact", "affected"}
 GREPS = {"grep", "egrep", "fgrep", "rg"}
+LEAD = {"rtk", "do", "then", "else", "time", "xargs", "env", "sudo"}   # words before the command itself
 NA = "tokens: not available on this agent"
 RUN = re.compile(r"/runs/([\w.-]+)")   # a run folder's name in a path
 BOUND = 350_000   # context tokens; past it, the controller starts a new agent at the next round boundary
@@ -93,8 +94,9 @@ def bash_kinds(cmd):
     for seg in re.split(r"\|\||&&|;|\n", cmd):
         for i, stage in enumerate(seg.split("|")):
             w = [x for x in stage.split() if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", x)]
-            if w[:1] == ["rtk"]:
-                w = w[1:]
+            fed = False   # after xargs, a grep searches the files the pipe names: a search, not a filter
+            while w and w[0] in LEAD:
+                fed, w = fed or w[0] == "xargs", w[1:]
             if not w:
                 continue
             first = os.path.basename(w[0])
@@ -102,7 +104,7 @@ def bash_kinds(cmd):
                     first.startswith("python") and any(os.path.basename(x) == "cgcallers.py" for x in w[1:])):
                 cg += 1
             elif first in GREPS or (first == "git" and w[1:2] == ["grep"]):
-                if i:
+                if i and not fed:
                     piped += 1
                 else:
                     search += 1
@@ -243,6 +245,9 @@ def selftest():
             "implementer a1: context 3005", "reviewer a2: context 3100",
             "implementer a5: context 351000; past 350k: start a new one at this boundary",
             "reviewer a6: context 349000"], context(R)
+    for cmd, want in (('for f in *.py; do grep -n x "$f"; done', (0, 1, 0)), ("find . | xargs grep -l foo", (0, 1, 0)),
+                      ("time rg foo src", (0, 1, 0)), ("if true; then codegraph explore -p /w a; fi", (1, 0, 0))):
+        assert bash_kinds(cmd) == want, (cmd, bash_kinds(cmd))
     print("metrics selftest ok")
 
 
