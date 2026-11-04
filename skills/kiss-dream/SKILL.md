@@ -47,9 +47,10 @@ Its answer:
 - `WRITTEN` (exit 0): done; `DIFFERS from its draft` (exit 5): report it.
 
 Skip a step whose store the agent does not have. agentmemory is optional and never stalls a run: run step 4 only
-when `curl -s --max-time 5 http://localhost:3111/agentmemory/livez` answers, and give every other agentmemory call
-`--max-time 60`. A call that fails or times out skips the rest of step 4: its row in the report says so in one line
-(not met, the call and its error), and the run goes on with step 5.
+when `curl -sf --max-time 5 http://localhost:3111/agentmemory/livez` answers and `~/.agentmemory/secret` exists.
+Every other agentmemory call uses `curl -sf` (an HTTP error is a failed call) with `--max-time 60`;
+`consolidate-pipeline` runs long and gets `--max-time 900`. A call that fails or times out skips the rest of step 4:
+its row in the report says so in one line (not met, the call and its error), and the run goes on with step 5.
 
 1. **Inventory** (show it, then go on; no wait): for each memory folder of the repo, the notes; per session
    transcript: date, size, subagent count; the subagent transcripts against `journal.jsonl`; the tool results.
