@@ -9,7 +9,7 @@ ticket's files.
 """
 import json, os, subprocess, sys
 
-CALLERS_LIMIT = 40
+CALLERS_LIMIT = 100   # rules/codegraph.md, "Subagents" item 3
 HB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
