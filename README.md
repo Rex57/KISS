@@ -44,12 +44,15 @@ What KISS adds:
 - **Proof in the running product.** The reviewer uses the product (its UI, API or CLI), not only the diff, and
   each ticket has acceptance tests that name their seam.
 - **No missed caller.** Every agent reads the code through CodeGraph first, and each subagent gets CodeGraph's
-  output in its brief. CodeGraph's `callers` misses some calls (a function passed as a value, a call through
+  output in its seed file. CodeGraph's `callers` misses some calls (a function passed as a value, a call through
   `getattr`, an import inside a function). So before a delete, rename or signature change, the implementer and the
   reviewer run `cgcallers`. It syncs the index, shows each definition of the name in its own block, and puts
   CodeGraph's callers beside a word search of the files that import the function's module or package (every file
   for a method; comments and strings left out, but not a name given to `getattr` as a string). It marks each call
-  that CodeGraph missed (`[grep only]`) and each edge CodeGraph only guessed from the name (`[cg guess]`).
+  that CodeGraph missed (`[grep only]`) and each edge CodeGraph only guessed from the name (`[cg guess]`). With
+  `pyright` (Python) or `typescript-language-server` (JS/TS) on your `PATH`, its LSP pass asks that server for the
+  references and marks each one CodeGraph did not list `[lsp]` (a method on a typed object, for example); with no
+  server it says that the pass was skipped.
 - **You decide.** Only a choice that is costly to undo becomes a question (`D<n>`, kept in `decisions.md`). A gate
   (the tickets, the merge, a push) asks for your go with its evidence. Nothing is pushed without you.
 - **Safety in code.** A guard that protects your data is a script with a selftest, not an instruction the model
@@ -103,6 +106,8 @@ it checks each one.
 | [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close; `ponytail-audit` and `ponytail-debt`: `kiss-code-clean`'s audit report and debt ledger (`kiss-doctor` does not check `ponytail-audit`) | `kiss-doctor setup`, or see "Install ponytail" below |
 | [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate; `research`: `kiss-system-design`'s research decisions (`kiss-doctor` does not check `research`) | `kiss-doctor setup`, or see "Install Matt Pocock's skills" below |
 | `cgcallers` (in this repo) | CodeGraph's callers plus a word search of the importing files, before a delete or rename | `kiss-doctor setup` (into `~/.local/bin`, or the folder `KISS_BIN` names), or `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (that folder on your `PATH`) |
+| [pyright](https://github.com/microsoft/pyright) (optional) | `cgcallers`' LSP pass for Python | `npm install -g pyright` |
+| [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) (optional) | `cgcallers`' LSP pass for JS/TS (it needs TypeScript 5 or 6: TypeScript 7 has no `tsserver.js`) | `npm install -g typescript-language-server typescript@5` |
 | A headless browser (optional) | The reviewer uses a web UI | Chrome or Chromium, or Playwright |
 | [agentmemory](https://github.com/rohitg00/agentmemory) (optional) | Step 4 of `kiss-dream` | its README |
 

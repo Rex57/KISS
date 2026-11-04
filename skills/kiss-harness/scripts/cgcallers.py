@@ -15,25 +15,39 @@ is its module or a name bound to it (`import a.b as X`, `X = import_module(...)`
 filter it reads every indexed file of that language and prints a warning. codegraph misses a function passed as a
 value, a call through getattr with a string, a method on an object when two classes define the name, and recursion
 (KISS rules/codegraph.md, "callers is incomplete").
+With pyright-langserver (Python) or typescript-language-server (JS/TS) on PATH, an LSP pass asks the server for the
+references of each definition (one deadline of 120 s for the whole pass, then "LSP: timed out"); with no server it
+prints "no language server for <language>: LSP pass skipped".
 Each caller line is marked:
   [both]       codegraph has an edge on this line and the word search finds the name on it, or (Python) the line is
                in a function codegraph lists as a caller
   [grep only]  the name on a line with no codegraph edge: a caller codegraph missed, an import, or a namesake: read it
   [cg only]    a codegraph edge on a line the word search does not find (an alias such as `F.name`)
   [cg guess]   a codegraph edge with confidence 0.4 resolved by exact name match: a guess from the name only
+  [lsp]        a reference the language server found and codegraph did not list (also a grep line it confirms)
 """
 import argparse
 import ast
 import io
 import json
 import os
+import queue
 import re
+import shutil
 import subprocess
 import sys
+import threading
+import time
 import tokenize
+import urllib.parse
 
 PY = {"python"}
 JS = {"javascript", "typescript", "tsx", "jsx", "svelte"}
+# the language servers of the LSP pass, started over stdio when on PATH (D5); the whole pass stops after LSP_LIMIT s
+SERVERS = {"python": ["pyright-langserver", "--stdio"], "js": ["typescript-language-server", "--stdio"]}
+LSP_LIMIT = 120
+LSP_IDS = {"python": "python", "javascript": "javascript", "jsx": "javascriptreact", "typescript": "typescript",
+           "tsx": "typescriptreact"}
 IMPORT_MODULE = re.compile(r"""import_module\(\s*['"]([\w.]+)['"]""")
 IMPORT_FROM = re.compile(r"""(?:\bfrom|\bimport|\brequire)\s*\(?\s*['"]([^'"]+)['"]""")
 
@@ -185,6 +199,121 @@ def aliases(src, lang):
     return out
 
 
+class Lsp:
+    """One language server over stdio: framed JSON-RPC, a reader thread, and replies to the server's own requests."""
+
+    def __init__(self, argv, W):
+        self.p = subprocess.Popen(argv, cwd=W, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.q, self.n, self.checked = queue.Queue(), 0, set()
+        threading.Thread(target=self.read, daemon=True).start()
+
+    def read(self):
+        f = self.p.stdout
+        while True:
+            size = 0
+            while True:
+                line = f.readline()
+                if not line:
+                    return
+                if not line.strip():
+                    break
+                if line.lower().startswith(b"content-length:"):
+                    size = int(line.split(b":")[1])
+            try:
+                self.q.put(json.loads(f.read(size)))
+            except ValueError:
+                pass
+
+    def send(self, msg):
+        body = json.dumps(dict(msg, jsonrpc="2.0")).encode()
+        try:
+            self.p.stdin.write(b"Content-Length: %d\r\n\r\n" % len(body) + body)
+            self.p.stdin.flush()
+        except OSError:
+            pass
+
+    def ask(self, method, params, deadline, clock):
+        self.n += 1
+        self.send({"id": self.n, "method": method, "params": params})
+        return self.pump(deadline, clock, lambda m: m.get("id") == self.n and "method" not in m)
+
+    def pump(self, deadline, clock, done):
+        """Read messages until done(message) holds (its result) or the deadline passes (TimeoutError)."""
+        while clock() < deadline:
+            try:
+                m = self.q.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            if m.get("method") == "textDocument/publishDiagnostics":
+                self.checked.add((m.get("params") or {}).get("uri"))
+            if "method" in m and "id" in m:          # the server asks: configuration gets one empty answer per item
+                items = (m.get("params") or {}).get("items")
+                self.send({"id": m["id"], "result": [None] * len(items) if m["method"] == "workspace/configuration" and items else None})
+            if done(m):
+                if "error" in m:
+                    raise OSError(m["error"].get("message", "error"))
+                return m.get("result")
+        raise TimeoutError
+
+    def stop(self):
+        self.p.kill()
+        self.p.wait()
+
+
+def lsp_refs(W, defs, text, servers, clock, limit=LSP_LIMIT):
+    """({index of a definition: {(file, line)}} of the references the language servers find, the lines to print)."""
+    refs, notes, deadline = {}, [], clock() + limit
+    root = os.path.realpath(W)
+    uri = lambda f: "file://" + urllib.parse.quote(os.path.join(root, f))
+    groups = {}
+    for i, dd in enumerate(defs):
+        lang = dd.get("language", "")
+        key = "python" if lang in PY else "js" if lang in LSP_IDS else lang
+        argv = servers.get(key)
+        if argv and shutil.which(argv[0]):
+            groups.setdefault(key, []).append(i)
+        elif "no language server for %s: LSP pass skipped" % lang not in notes:
+            notes.append("no language server for %s: LSP pass skipped" % lang)
+    for key, idx in groups.items():
+        server = Lsp(servers[key], root)
+        options = {}
+        tsc = shutil.which("tsc")                    # typescript-language-server needs a TypeScript: the global one
+        if key == "js" and tsc and not os.path.isdir(os.path.join(root, "node_modules", "typescript")):
+            options = {"tsserver": {"path": os.path.join(os.path.dirname(os.path.realpath(tsc)), "..", "lib", "tsserver.js")}}
+        try:
+            server.ask("initialize", {"processId": os.getpid(), "rootUri": uri("").rstrip("/"), "capabilities": {},
+                                      "initializationOptions": options,
+                                      "workspaceFolders": [{"uri": uri("").rstrip("/"), "name": "W"}]}, deadline, clock)
+            server.send({"method": "initialized", "params": {}})
+            for i in idx:
+                dd = defs[i]
+                src = text(dd["filePath"])
+                line = (src.splitlines() or [""])[dd["startLine"] - 1] if dd["startLine"] <= len(src.splitlines()) else ""
+                at = re.search(r"\b%s\b" % re.escape(dd["name"]), line)
+                server.send({"method": "textDocument/didOpen", "params": {"textDocument": {
+                    "uri": uri(dd["filePath"]), "languageId": LSP_IDS.get(dd.get("language"), "python"), "version": 1, "text": src}}})
+                try:                                 # the server has read the workspace when it reports on the file
+                    server.pump(min(deadline, clock() + 30), clock, lambda m: uri(dd["filePath"]) in server.checked)
+                except TimeoutError:
+                    if clock() >= deadline:
+                        raise
+                found = server.ask("textDocument/references", {
+                    "textDocument": {"uri": uri(dd["filePath"])}, "context": {"includeDeclaration": False},
+                    "position": {"line": dd["startLine"] - 1, "character": at.start() if at else 0}}, deadline, clock) or []
+                for loc in found:
+                    path = os.path.realpath(urllib.parse.unquote(urllib.parse.urlparse(loc["uri"]).path))
+                    if path.startswith(root + os.sep):
+                        refs.setdefault(i, set()).add((os.path.relpath(path, root), loc["range"]["start"]["line"] + 1))
+        except TimeoutError:
+            notes.append("LSP: timed out")
+            break
+        except OSError as e:
+            notes.append("LSP: %s failed: %s" % (servers[key][0], str(e)[:200]))
+        finally:
+            server.stop()
+    return refs, notes
+
+
 def run(cmd, cwd):
     """stdout; on a failure also the exit code and stderr, so the output says why."""
     try:
@@ -199,8 +328,9 @@ def read_file(path):
         return f.read()
 
 
-def main(argv=None, cg=None, git=None, read=read_file):
-    """cg(args) and git(args) run `codegraph ARGS` and `git ARGS` in W and return stdout; read(path) returns a file."""
+def main(argv=None, cg=None, git=None, read=read_file, servers=SERVERS, clock=time.monotonic):
+    """cg(args) and git(args) run `codegraph ARGS` and `git ARGS` in W and return stdout; read(path) returns a file;
+    servers names the language servers, clock the time the LSP pass reads."""
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("name", nargs="?")
     ap.add_argument("-p", dest="W", help="the checkout (default: git toplevel of this folder)")
@@ -266,14 +396,15 @@ def main(argv=None, cg=None, git=None, read=read_file):
 
     word = a.name.rsplit(".", 1)[-1]           # Class.method: codegraph takes it whole, the code has the method word
     n = re.escape(word)
+    blocks = []
     for d in defs:
         dd = d["definition"]
         home, lang = dd["filePath"], dd.get("language", "")
-        print("\ndefinition  %s:%s  %s %s" % (home, dd["startLine"], dd.get("kind", ""), dd["name"]))
+        head = ["\ndefinition  %s:%s  %s %s" % (home, dd["startLine"], dd.get("kind", ""), dd["name"])]
         family = PY if lang in PY else JS if lang in JS else {lang}
         if not family & (PY | JS) and lang not in warned:
             warned.add(lang)
-            print("warning: no import filter for %s: searched every indexed %s file" % (lang, lang))
+            head.append("warning: no import filter for %s: searched every indexed %s file" % (lang, lang))
         # its module, and its package: `from pkg import name` reaches a name pkg/__init__ re-exports
         mod, pkg = module_of(home), os.path.basename(os.path.dirname(home))
         mods = {mod, pkg} - {""}
@@ -314,13 +445,60 @@ def main(argv=None, cg=None, git=None, read=read_file):
         for (f, ln), (who, guess) in edges.items():
             if (f, ln) not in matched:
                 rows.append(("cg guess" if guess else "cg only", f, ln or 0, who, ""))
+        blocks.append((head, rows, len({(c["filePath"], c["name"]) for c in who_cg.values()})))
+    refs, notes = lsp_refs(W, [d["definition"] for d in defs], text, servers, clock)
+    for i, (head, rows, callers) in enumerate(blocks):
+        seen = {(r[1], r[2]) for r in rows}
+        rows = [("lsp",) + r[1:] if r[0] == "grep only" and (r[1], r[2]) in refs.get(i, ()) else r for r in rows]
+        home = defs[i]["definition"]
+        for f, ln in sorted(refs.get(i, set()) - seen - {(home["filePath"], home["startLine"])}):
+            body = text(f).splitlines()
+            spans = def_spans(text(f)) if f.endswith(".py") else []
+            rows.append(("lsp", f, ln, enclosing(spans, ln) if spans else "-", body[ln - 1].strip()[:110] if ln <= len(body) else ""))
+        print("\n".join(head))
         rows.sort(key=lambda r: (r[0] != "grep only", r[1].startswith("tests/"), r[1], r[2]))
         for mark, f, ln, who, line in rows:
             print("[%-9s] %s:%s  %s  %s" % (mark, f, ln, who, line))
         g = [r for r in rows if r[0] == "grep only"]
         print("%d codegraph callers; %d grep-only lines (%d outside tests): read each before you trust a count."
-              % (len({(c["filePath"], c["name"]) for c in who_cg.values()}), len(g), sum(not r[1].startswith("tests/") for r in g)))
+              % (callers, len(g), sum(not r[1].startswith("tests/") for r in g)))
+    for note in notes:
+        print(note)
     return 0
+
+
+FAKE_LSP = r"""
+import json, sys
+def read():
+    size = 0
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            sys.exit(0)
+        if not line.strip():
+            break
+        if line.lower().startswith(b"content-length:"):
+            size = int(line.split(b":")[1])
+    return json.loads(sys.stdin.buffer.read(size))
+def send(m):
+    body = json.dumps(dict(m, jsonrpc="2.0")).encode()
+    sys.stdout.buffer.write(b"Content-Length: %d\r\n\r\n" % len(body) + body)
+    sys.stdout.buffer.flush()
+root = ""
+while True:
+    m = read()
+    if m.get("method") == "initialize":
+        root = m["params"]["rootUri"]
+        send({"id": 0, "method": "workspace/configuration", "params": {"items": [{}]}})   # a request back, as pyright sends
+        send({"id": m["id"], "result": {"capabilities": {}}})
+    elif m.get("method") == "textDocument/didOpen":
+        send({"method": "textDocument/publishDiagnostics", "params": {"uri": m["params"]["textDocument"]["uri"], "diagnostics": []}})
+    elif m.get("method") == "textDocument/references":
+        send({"id": m["id"], "result": [{"uri": root + "/" + f, "range": {"start": {"line": n - 1, "character": 4},
+              "end": {"line": n - 1, "character": 10}}} for f, n in json.loads(sys.argv[1])]})
+    elif m.get("method") == "shutdown":
+        send({"id": m["id"], "result": None})
+"""
 
 
 def selftest():
@@ -396,10 +574,12 @@ def selftest():
                 fh.write(body)
         subprocess.run(["git", "init", "-q"], cwd=W, check=True)
 
-        def out(*argv, git=None):
+        lsp = {}                                                 # the language servers on "PATH"
+
+        def out(*argv, git=None, clock=None):
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                main(list(argv), cg=fake_cg, git=git)
+                main(list(argv), cg=fake_cg, git=git, servers=lsp, clock=clock or time.monotonic)
             return buf.getvalue()
 
         o = out("helper", "-p", W)
@@ -444,6 +624,19 @@ def selftest():
         assert "[grep only] routes.py:3  -  f = getattr(pkg, 'helper2', None)" in o, o   # F3: getattr with a string
         assert "uses_pkg.py" not in o, o                                                   # another name from the package
         assert "[grep only] routes.py:2  -  ROUTES" in o and "[grep only] lazy.py:3  -  m.helper2()" in o, o   # F2: via the package
+        # T-2: the LSP pass, with a fake server that speaks the protocol over stdio
+        assert out("helper", "-p", W).rstrip().endswith("no language server for python: LSP pass skipped")
+        lsp["python"] = [sys.executable, "-c", FAKE_LSP, json.dumps([["app.py", 6], ["other.py", 2], ["app.py", 17]])]
+        o = out("helper", "-p", W, "-f", "lib/util.py")
+        lines = o.splitlines()
+        assert "[both     ] app.py:6  go  return helper()" in lines, o                     # a CodeGraph edge stays
+        assert "[lsp      ] other.py:2  elsewhere  return helper()" in lines, o            # a reference nobody else found
+        assert "[lsp      ] app.py:17  go5  return CS.helper()" in lines, o                # a grep line the server confirms
+        assert "LSP pass skipped" not in o and "timed out" not in o, o
+        lsp["python"] = [sys.executable, "-c", "import time; time.sleep(30)"]           # a server that never answers
+        ticks = iter(range(0, 10 ** 6, 31))                                              # each look at the clock: 31 s
+        o = out("helper", "-p", W, "-f", "lib/util.py", clock=lambda: next(ticks))
+        assert o.rstrip().endswith("LSP: timed out") and "[both     ] app.py:6  go" in o, o
     assert code_only("a('x // y') // z\n/* q\n */ b(\"c\")") == "a('      ')     \n    \n    b(\" \")"
     print("cgcallers selftest ok")
     return 0
