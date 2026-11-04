@@ -146,36 +146,43 @@ def selftest():
             with open(facts, "w") as f:
                 f.write(body)
             run("start", R, "PROJECT=" + facts, *start_keys)
-            assert f"of a {want}s budget" in run("implementer", R, "ELAPSED=0"), ("D8: the full check time", body)
+            assert f"of a {want}s budget" in run("implementer", R, "ELAPSED=0"), ("the facts file's full check time adds to the budget", body)
         run("start", R, "PROJECT=/w/.kiss/project.md", *start_keys)
         assert os.path.exists(os.path.join(HB, "references", "traps.md"))
         for text in (out, rv):   # every agent of a run reads the same traps
             assert HB + "/references/traps.md" in text
     assert "mattpocock-skills:tdd" in out and "Skipped:" in out and "Risk:" in out
-    assert "longer than about 2 minutes goes in the background" in out and "never a sleep or poll loop" in out, "D8"
+    assert "longer than about 2 minutes goes in the background" in out and "never a sleep or poll loop" in out, "a long command runs in the background, never a poll loop"
     for rule in ("at least three kinds of bad input", "sweeps every file type", "Never relax the limit or the expected value"):
-        assert out.count(rule) == 1, ("D7", rule)
-    assert "write a `Risk:` line instead" in out, "D7: the never-relax rule names its Risk line"
-    assert "Triage" in rv and "check that each settlement holds" in rv and "do not report a settled line again as new" in rv, "D6"
-    assert 'codegraph node -p "/w" <name>` for each function the ticket changes' in out and "Never `grep" in out, "B2"
+        assert out.count(rule) == 1, ("each test rule appears once", rule)
+    assert "write a `Risk:` line instead" in out, "the never-relax rule names its Risk line"
+    for rule in ("list in its test the forms it must still accept and refuse", "Skip tdd's refactor step and its `code-review` pointer",
+                 "cannot see a script's own `--selftest`"):
+        assert out.count(rule) == 1, ("the parser, refactor and affected rules each appear once", rule)
+    assert "stays out of the loop" not in out and "a mod's tests" in out, "one reading of refactoring; affected's blind spot named"
+    assert loop["fix"].splitlines()[0] == ("Round 1 of Run 9: these items (review findings or an owner decision), to do now. "
+                                           "Time: elapsed 5s of a 13800s budget."), "an owner's decision is not read as a review finding"
+    assert "cannot see a script's own `--selftest`" in loop["fix"] and "a mod's tests" in loop["fix"], "the fix round runs what affected misses"
+    assert "Triage" in rv and "check that each settlement holds" in rv and "do not report a settled line again as new" in rv, "the reviewer checks settled lines, never reports them as new"
+    assert 'codegraph node -p "/w" <name>` for each function the ticket changes' in out and "Never `grep" in out, "one function is read with codegraph node, never grep plus sed"
     for rule in ("codegraph node -p", "codegraph callers -p", "cgcallers.py", "codegraph sync -q", "codegraph affected",
                  "Never the full check", "by explicit path", "callcheck.py"):
-        assert out.count(rule) == 1, ("T-5: each rule once", rule)
-    assert re.search(r'callcheck\.py" -p "/w" --cached`.*keep its output for step 6.*`## <ID> <commit>`, the callcheck output from step 5', out, re.S), "T-3, R16"
-    assert "read every `[grep only]` and `[lsp]` line" in out, "R15"
+        assert out.count(rule) == 1, ("each CodeGraph and commit rule appears once", rule)
+    assert re.search(r'callcheck\.py" -p "/w" --cached`.*keep its output for step 6.*`## <ID> <commit>`, the callcheck output from step 5', out, re.S), "callcheck's output goes into the ticket's progress entry"
+    assert "read every `[grep only]` and `[lsp]` line" in out, "cgcallers' grep-only and lsp lines are read"
     assert "ponytail:ponytail-review" in rv and "G. Risk, load and speed" in rv and "A|B|C|D|E|F|G" in rv
-    assert "failed before" in loop["fix"] and '"test":' in loop["fix"], "A1: each fix names its test"
-    assert "only the findings of severity critical or high" in loop["recheck"], "A1: recheck by severity"
+    assert "failed before" in loop["fix"] and '"test":' in loop["fix"], "each fix names its test"
+    assert "only the findings of severity critical or high" in loop["recheck"], "the recheck covers only critical or high findings"
     assert "reproduced_in_app" in loop["recheck"] and "diff and the test output" in loop["recheck"]
-    assert "a broken command or link" in sv and "a low finding with no effect" in sv, "A2: the fix bar"
-    assert "merge gate" in sv and "2 fix rounds per review and 3 per run" in sv, "A2: log and round caps"
+    assert "a broken command or link" in sv and "a low finding with no effect" in sv, "the sort's bar for a fix"
+    assert "merge gate" in sv and "2 fix rounds per review and 3 per run" in sv, "the merge gate log and the round caps"
     assert ("only low or medium findings that touch no guard, data or owner rule are left, there is no gate" in sv
-            and "offers them as one kiss-mini task" in sv and "any other finding left asks a gate" in sv), "D10"
-    assert 'A finding of medium or higher severity that fits none of these is a "fix"' in sv, "F8: every finding has a bucket"
-    assert "Start no subagent of your own" in rv, "A4"
+            and "offers them as one kiss-mini task" in sv and "any other finding left asks a gate" in sv), "low leftovers go to one kiss-mini task, the rest to a gate"
+    assert 'A finding of medium or higher severity that fits none of these is a "fix"' in sv, "every finding has a bucket"
+    assert "Start no subagent of your own" in rv, "the reviewer starts no subagent"
     fx, rc = loop["fix"], loop["recheck"]
-    assert 'codegraph sync -q "/w"' in fx and fx.index("Fix each one") < fx.index("codegraph sync -q") < fx.index("Run the acceptance"), "T-7: fix syncs after its edits"
-    assert 'codegraph sync -q "/w"' in rc and rc.index("codegraph sync -q") < rc.index("CodeGraph"), "T-7: recheck syncs before CodeGraph"
+    assert 'codegraph sync -q "/w"' in fx and fx.index("Fix each one") < fx.index("codegraph sync -q") < fx.index("Run the acceptance"), "the fix prompt syncs CodeGraph after its edits"
+    assert 'codegraph sync -q "/w"' in rc and rc.index("codegraph sync -q") < rc.index("CodeGraph"), "the recheck syncs before it reads with CodeGraph"
     print("prompt selftest ok")
 
 

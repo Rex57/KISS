@@ -8,6 +8,9 @@ project's instructions file (CLAUDE.md, AGENTS.md or GEMINI.md) already says.
 
 - The environment to set, and to unset, in a fresh shell.
 - One test file: `<command>`. One group: `<command>`.
+- Tests `codegraph affected` cannot see: a script's own `--selftest`, tests that load the code without an import (a
+  mod's tests), and the command for each.
+- Smoke check (one fast end-to-end test, run before any new work): `<command>`.
 - The full check (the controller runs it once, at the end): `<command>`.
 - Full check time: <n> minutes (how long the full check runs; the run's time budget adds it once).
 - Build steps: which change needs which build, and what goes in the same commit (for example: a change under
