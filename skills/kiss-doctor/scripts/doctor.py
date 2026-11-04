@@ -354,12 +354,14 @@ INSTALL = [
     {"key": "rule", "what": "the CodeGraph rule", "source": "https://github.com/Rex57/KISS (rules/codegraph.md)",
      "changes": "appends the rule to {file}", "agents": {a: ["cat {kiss}/rules/codegraph.md >> {file}"] for a in CLI}},
     {"key": "mcp", "what": "CodeGraph's MCP server", "source": "https://github.com/colbymchenry/codegraph",
-     "changes": "adds the MCP server codegraph (codegraph serve --mcp) to {agent}'s user settings (Claude Code: also allows"
-                " its tools, mcp__codegraph__*)",
+     "changes": "adds the MCP server codegraph (codegraph serve --mcp) to {agent}'s user settings",
      "agents": {"claude": ["claude mcp add --scope user codegraph -- codegraph serve --mcp", "allow mcp__codegraph__* in {settings}"],
                 "codex": ["codex mcp add codegraph -- codegraph serve --mcp"],
                 "gemini": ["gemini mcp add --scope user codegraph codegraph serve --mcp"]},
      "hand": {"antigravity": "in Antigravity's MCP settings, add a server named codegraph that runs: codegraph serve --mcp"}},
+    {"key": "mcp-allow", "what": "CodeGraph's MCP tools allowed (Claude Code)", "source": "https://github.com/colbymchenry/codegraph",
+     "changes": "adds mcp__codegraph__* to permissions.allow in {settings}, after a backup beside it",
+     "agents": {"claude": ["allow mcp__codegraph__* in {settings}"]}},
     {"key": "Install KISS", "what": "KISS", "source": "https://github.com/Rex57/KISS", "changes": "adds the KISS plugin to {agent}",
      "agents": {"claude": ["claude plugin marketplace add Rex57/KISS", "claude plugin install kiss@kiss"],
                 "codex": ["codex plugin marketplace add Rex57/KISS", "codex plugin add kiss@kiss"],
@@ -588,8 +590,11 @@ def gaps(system):
         for level, _, _, fix in check_skills(agent, roots, need, note, loaded_here(agent)):
             if level == "FAIL" and fix.startswith("Install "):
                 out[(agent, fix)] = {}
-        if not mcp_state(agent)[0]:
+        server, allowed = mcp_state(agent)
+        if not server:
             out[(agent, "mcp")] = {"settings": settings_path()}
+        elif allowed is False:                  # the server is there, its tools are not allowed (Claude Code)
+            out[(agent, "mcp-allow")] = {"settings": settings_path()}
     return out
 
 
@@ -861,6 +866,8 @@ def selftest():
         ("CodeGraph's MCP server", "gemini", ["gemini mcp add --scope user codegraph codegraph serve --mcp"], ""),
         ("CodeGraph's MCP server", "antigravity", [], "by hand: in Antigravity's MCP settings, add a server named codegraph"
                                                       " that runs: codegraph serve --mcp")], got
+    mcp_items = [i for i in plan(four, {(a, "mcp"): {"settings": "/s"} for a in ("claude", "codex", "gemini")})]
+    assert not any("Claude Code" in i["changes"] or "mcp__" in i["changes"] for i in mcp_items if i["agent"] != "claude"), mcp_items  # R9
     assert not any("codegraph install" in c for r in INSTALL for c in r.get("run", []) + [
         x for cs in r.get("agents", {}).values() for x in cs]), "never codegraph install (D10)"
     with tempfile.TemporaryDirectory() as fx:                 # the permission: added once, after a backup
@@ -882,7 +889,7 @@ def selftest():
     assert execute([sys.executable, "-c", stdin_is_null])[0] == 0      # a question reads end of input, never waits
     # gaps() and detect() on this KISS folder, with a scratch Codex home that has nothing
     assert all(k in {r["key"] for r in INSTALL} for k in set(required().values())), required()
-    old_env = {k: os.environ.get(k) for k in ("CODEX_HOME", "PATH", "KISS_BIN")}
+    old_env = {k: os.environ.get(k) for k in ("CODEX_HOME", "PATH", "KISS_BIN", "CLAUDE_CONFIG_DIR")}
     with tempfile.TemporaryDirectory() as fx:
         try:
             os.environ["CODEX_HOME"] = os.path.join(fx, "codex")
@@ -907,6 +914,25 @@ def selftest():
             open(os.path.join(repo, "web", "b.tsx"), "w").close()
             assert "typescript-language-server" in gaps(dict(got, agents=[], repo=repo))
             assert not {"pyright", "typescript-language-server"} & set(gaps(dict(got, agents=[], repo=None)))
+            # R7, R8: the MCP item from each agent's own `mcp list` (fake CLIs), and Claude Code's permission
+            def cli(name, mcp_out):
+                with open(os.path.join(fx, "path", name), "w") as f:
+                    f.write('#!/bin/sh\n[ "$1" = plugin ] && echo "[]" && exit 0\necho "%s"\n' % mcp_out)
+                os.chmod(os.path.join(fx, "path", name), 0o755)
+            os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(fx, "ccd")
+            cli("codex", "")
+            assert ("codex", "mcp") in gaps(dict(got, agents=["codex"])) and check_mcp("codex")[0][0] == "INFO"
+            cli("codex", "codegraph  codegraph  serve --mcp  -  -  enabled")
+            assert ("codex", "mcp") not in gaps(dict(got, agents=["codex"])) and check_mcp("codex")[0][0] == "OK"
+            cli("claude", "codegraph: codegraph serve --mcp - Connected")
+            found = gaps(dict(got, agents=["claude"]))
+            assert ("claude", "mcp") not in found and found[("claude", "mcp-allow")] == {"settings": settings_path()}, found
+            assert check_mcp("claude")[0][0] == "WARN"
+            assert show(plan(dict(got, agents=["claude"]), {("claude", "mcp-allow"): found[("claude", "mcp-allow")]})) == [
+                ("CodeGraph's MCP tools allowed (Claude Code)", "claude", ["allow mcp__codegraph__* in " + settings_path()], "")]
+            execute(["allow", "mcp__codegraph__*", "in", settings_path()])
+            assert ("claude", "mcp-allow") not in gaps(dict(got, agents=["claude"])) and check_mcp("claude")[0][0] == "OK"
+            assert check_mcp("antigravity")[0][0] == "INFO"
             os.makedirs(os.path.join(fx, "bin"))                       # F3: copied but its folder not on PATH
             with open(os.path.join(fx, "bin", "cgcallers"), "w") as f:
                 f.write("x")
