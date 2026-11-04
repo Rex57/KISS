@@ -714,6 +714,16 @@ test('Discard of a harness task whose sender folder is gone removes the worktree
   expect(w.toasts.length).toBe(toasts)
 })
 
+test('a harness task merged into its base while its sender folder is gone ends done; its worktree goes in its repository', async ($, on) => {
+  const w = world(on, { cwd: RUN })
+  await handoff($, w, false)
+  w.gone.push(RUN)
+  w.merged = true
+  await w.clock.advance(60_000)
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('done')
+  expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
+})
+
 test('Discard whose worktree list fails keeps the task open with its worktree, and toasts git\'s words', async ($, on) => {
   const w = world(on, { fail: { 'worktree remove': { stderr: `fatal: '${WT}' is not a working tree` }, 'worktree list': { stderr: 'fatal: unable to read the worktree list' } } })
   await ready($, w)

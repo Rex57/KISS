@@ -329,17 +329,20 @@ async function tick($: $) {
   await orphans($)
   for (const t of await tasks($)) {
     // A ready task whose commits are already in its base was merged (by the harness, by hand): it is done. A branch
-    // with no commit of its own is in its base too, so it counts only with commits at its report.
-    if (isCode(t) && t.state === 'ready' && t.host === me && t.branch && t.worktree && !t.busy && (t.ahead ?? 0) > 0 &&
-      (await $.process.run(['git', '-C', t.cwd, 'merge-base', '--is-ancestor', t.branch, t.base!])).exitCode === 0) {
-      // A worktree with changes nobody committed is never forced away.
-      // The index the seed made (`?? .codegraph/`) is no change of the worker's.
-      const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.split('\n')
-        .filter(l => l.trim() && l.trim() !== '?? .codegraph/').join('\n')
-      if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
-      else await $.process.run(['git', '-C', t.cwd, 'worktree', 'remove', '--force', t.worktree])
-      await save($, { ...t, state: 'done', delivered: 'merge', ...(dirty ? {} : { worktree: undefined }) })
-      continue
+    // with no commit of its own is in its base too, so it counts only with commits at its report. Its git runs in the
+    // task's own repository: a harness task's sender folder (the run's worktree) is gone after the run's merge.
+    if (isCode(t) && t.state === 'ready' && t.host === me && t.branch && t.worktree && !t.busy && (t.ahead ?? 0) > 0) {
+      const repo = await repoOf($, t)
+      if ((await $.process.run(['git', '-C', repo, 'merge-base', '--is-ancestor', t.branch, t.base!])).exitCode === 0) {
+        // A worktree with changes nobody committed is never forced away.
+        // The index the seed made (`?? .codegraph/`) is no change of the worker's.
+        const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.split('\n')
+          .filter(l => l.trim() && l.trim() !== '?? .codegraph/').join('\n')
+        if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
+        else await $.process.run(['git', '-C', repo, 'worktree', 'remove', '--force', t.worktree])
+        await save($, { ...t, state: 'done', delivered: 'merge', ...(dirty ? {} : { worktree: undefined }) })
+        continue
+      }
     }
     if (isCode(t) && t.state === 'working' && t.host === me && t.claimed && now - t.claimed > CODE_MAX) await stop($, t, 'timed out after 30 minutes')
     if (t.kind !== 'watch' || t.state !== 'watching' || t.host !== me) continue
@@ -497,6 +500,13 @@ async function deliver($: $, id: string, how: Delivery) {
   }
 }
 
+/** A code task's own repository (D16): the main checkout of its worktree's git folder, else the sender's folder. */
+async function repoOf($: $, t: Task) {
+  if (t.repo) return t.repo
+  const common = t.worktree ? await $.process.run(['git', '-C', t.worktree, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 120_000 }) : undefined
+  return common?.exitCode === 0 ? common.stdout.trim().replace(/\/\.git$/, '') : t.cwd
+}
+
 async function deliverOnce($: $, id: string, how: Delivery) {
   const t = (await $.store.get(TASK + id)) as Task | undefined
   if (!t || !offers(t, how) || !t.branch) return
@@ -510,11 +520,10 @@ async function deliverOnce($: $, id: string, how: Delivery) {
   }
   try {
     const run = (cwd: string, ...args: string[]) => $.process.run(['git', '-C', cwd, ...args], { timeoutMs: 120_000 })
-    // Discard runs in the task's own repository (D16): the main checkout of its worktree's git folder, else the sender's
-    // folder; kept on the task, so a press after an interrupt finds it with both folders gone.
+    // Discard runs in the task's own repository, kept on the task, so a press after an interrupt finds it with both
+    // folders gone.
     if (how === 'discard' && !t.repo) {
-      const common = t.worktree ? await run(t.worktree, 'rev-parse', '--path-format=absolute', '--git-common-dir') : undefined
-      left = { ...t, repo: common?.exitCode === 0 ? common.stdout.trim().replace(/\/\.git$/, '') : t.cwd }
+      left = { ...t, repo: await repoOf($, t) }
       await save($, { ...left, busy: how })
     }
     const git = (...args: string[]) => run(how === 'discard' ? left.repo! : t.cwd, ...args)
