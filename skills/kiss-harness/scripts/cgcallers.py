@@ -61,21 +61,27 @@ def module_of(path):
 
 
 def imported(src, lang):
-    """The module names this source imports: the last part of each module path, each name a from-import takes
-    (a module of a package), and each importlib.import_module("...") string."""
+    """What this source imports, as tags: mod:M (a module path that ends in M, or an import_module string),
+    name:N (a name a from-import takes, maybe a module of a package), imp:P (`import ... P`), and from:P:N (N taken
+    from P, as a re-export of a package's __init__ or index)."""
     if lang in JS:
-        return {module_of(p) for p in IMPORT_FROM.findall(src)}
-    names = {m.split(".")[-1] for m in IMPORT_MODULE.findall(src)}
+        tags = {"mod:" + module_of(p) for p in IMPORT_FROM.findall(src)}
+        for names, p in re.findall(r"""\bimport\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]""", src):
+            tags |= {"from:%s:%s" % (module_of(p), n.split(" as ")[0].strip()) for n in names.split(",")}
+        return tags
+    tags = {"mod:" + m.split(".")[-1] for m in IMPORT_MODULE.findall(src)}
     try:
         tree = ast.parse(src)
     except SyntaxError:
-        return names | {w for l in re.findall(r"^\s*(?:from|import)\s.*$", src, re.M) for w in re.findall(r"\w+", l)}
+        words = {w for l in re.findall(r"^\s*(?:from|import)\s.*$", src, re.M) for w in re.findall(r"\w+", l)}
+        return tags | {k + w for k in ("mod:", "name:", "imp:") for w in words}
     for n in ast.walk(tree):
         if isinstance(n, ast.ImportFrom):
-            names |= {(n.module or "").split(".")[-1]} | {a.name for a in n.names}
+            m = (n.module or "").split(".")[-1]
+            tags |= {"mod:" + m} | {"name:" + a.name for a in n.names} | {"from:%s:%s" % (m, a.name) for a in n.names}
         elif isinstance(n, ast.Import):
-            names |= {a.name.split(".")[-1] for a in n.names}
-    return names
+            tags |= {k + a.name.split(".")[-1] for a in n.names for k in ("mod:", "imp:")}
+    return tags
 
 
 def code_only(src, quotes="'\"`"):
@@ -269,11 +275,13 @@ def main(argv=None, cg=None, git=None, read=read_file):
             warned.add(lang)
             print("warning: no import filter for %s: searched every indexed %s file" % (lang, lang))
         # its module, and its package: `from pkg import name` reaches a name pkg/__init__ re-exports
-        mods = {module_of(home), os.path.basename(os.path.dirname(home))} - {""}
+        mod, pkg = module_of(home), os.path.basename(os.path.dirname(home))
+        mods = {mod, pkg} - {""}
+        wanted = {"mod:" + mod, "name:" + mod, "imp:" + pkg, "from:%s:%s" % (pkg, word)}
         # a method is called on an object, whose file seldom imports the class's module: no import filter
         files = [f for f, l in indexed if l in family and (f == home or a.all or not family & (PY | JS)
                                                             or dd.get("kind") == "method"
-                                                            or mods & names(f, l))]
+                                                            or wanted & names(f, l))]
         langs = dict(indexed)
         who_cg = {c["id"]: c for c in d.get("callers") or []}
         edges = {}   # (file, line) -> (caller name, a guess?)
@@ -343,6 +351,8 @@ def selftest():
         "pkg/__init__.py": "from .util import helper2\n",
         "pkg/util.py": "def helper2():\n    return 1\n",
         "routes.py": "from pkg import helper2\nROUTES = [(\"GET\", helper2)]\nf = getattr(pkg, 'helper2', None)\n",
+        "pkg/other.py": "def other():\n    return 0\n",
+        "uses_pkg.py": "from pkg import other\ndef z(helper2):\n    return helper2()\n",
         "lazy.py": "import importlib\nm = importlib.import_module(\"pkg.util\")\nm.helper2()\n",
         "svc/main.go": "package svc\n\nfunc main() { Serve() }\n",
     }
@@ -430,6 +440,7 @@ def selftest():
         assert "[grep only] user.py:2  go3  return e.ack()" in o and "lib/eng.py:6" not in o, o   # F9: Class.method
         o = out("helper2", "-p", W)
         assert "[grep only] routes.py:3  -  f = getattr(pkg, 'helper2', None)" in o, o   # F3: getattr with a string
+        assert "uses_pkg.py" not in o, o                                                   # another name from the package
         assert "[grep only] routes.py:2  -  ROUTES" in o and "[grep only] lazy.py:3  -  m.helper2()" in o, o   # F2: via the package
     assert code_only("a('x // y') // z\n/* q\n */ b(\"c\")") == "a('      ')     \n    \n    b(\" \")"
     print("cgcallers selftest ok")
