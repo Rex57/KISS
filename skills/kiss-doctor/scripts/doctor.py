@@ -364,7 +364,10 @@ def by_hand(items, ran):
     return out + ["Optional, links only:"] + [f"- {what}: {url}" for what, url in OPTIONAL]
 
 
-def execute(argv):
+TIMEOUT = 300      # seconds per command: a stall ends as a FAIL with its output, well inside the skill's call
+
+
+def execute(argv, timeout=TIMEOUT):
     """Run one table command, without a shell: (exit code, output). The two file commands run in Python, so they
     work where no POSIX shell is."""
     try:
@@ -379,7 +382,7 @@ def execute(argv):
             shutil.copyfile(argv[3], argv[4])
             os.chmod(argv[4], 0o755)
             return 0, ""
-        p = subprocess.run([shutil.which(argv[0]) or argv[0]] + argv[1:], capture_output=True, text=True, timeout=900,
+        p = subprocess.run([shutil.which(argv[0]) or argv[0]] + argv[1:], capture_output=True, text=True, timeout=timeout,
                            stdin=subprocess.DEVNULL)
         return p.returncode, (p.stdout + p.stderr).strip()
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -672,6 +675,8 @@ def selftest():
         exe = os.path.join(fx, "bin", "cgcallers")
         assert execute(["install", "-m", "755", src, exe]) == (0, "") and os.access(exe, os.X_OK) and read(exe) == read(src)
     assert execute(["no-such-command-kiss"])[0] != 0
+    code, out = execute([sys.executable, "-c", "import time; time.sleep(5)"], timeout=1)       # F12: a stall ends as a FAIL
+    assert code != 0 and "timed out" in out and TIMEOUT <= 300, (code, out)
     gemini = [c for r in INSTALL for c in r.get("agents", {}).get("gemini", []) if c.startswith("gemini ")]
     assert len(gemini) == 4 and all(c.endswith(" --consent") for c in gemini), gemini   # no [Y/n] question
     stdin_is_null = "import os,sys; sys.exit(0 if os.fstat(0).st_rdev == os.stat(os.devnull).st_rdev else 3)"
