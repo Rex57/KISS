@@ -124,11 +124,28 @@ def agent_setup(agent):
     return "\n".join(with_imports(f, 0) for f in files), files, roots, note
 
 
+def unfenced(text):
+    """Each line of `text` outside a ``` or ~~~ fence, as a match with its offset; a fence's own lines are left out."""
+    fence = None
+    for line in re.finditer(r"^.*$", text, re.M):
+        mark = re.match(r"\s*(```|~~~)", line.group())
+        if mark and fence in (None, mark.group(1)):
+            fence = None if fence else mark.group(1)
+        elif fence is None:
+            yield line
+
+
+def section_end(text, at):
+    """Where the rule's section that holds `at` ends: the next `#` or `##` heading or the CODEGRAPH_START line of
+    `codegraph install`'s block, out of fences; else the end. The check's comparison and the replace both end there."""
+    return next((line.start() for line in unfenced(text)
+                 if line.start() > at and re.match(r"#{1,2} |\W*CODEGRAPH_START\W*$", line.group())), len(text))
+
+
 def section(text, first):
-    """The rule's words in a text: from its first bold lead-in to the next heading, whitespace collapsed."""
+    """The rule's words in a text: from its first bold lead-in to the section's end, whitespace collapsed."""
     at = text.find("**" + first)
-    end = re.search(r"^#{1,6} ", text[at:], re.M) if at >= 0 else None
-    return " ".join(text[at:at + end.start() if end else len(text)].split()) if at >= 0 else ""
+    return " ".join(text[at:section_end(text, at)].split()) if at >= 0 else ""
 
 
 def check_rule(agent, text, files, marks, rule=""):
@@ -154,24 +171,20 @@ def check_rule(agent, text, files, marks, rule=""):
 
 def rule_span(text, marks):
     """The rule's section in a text, (start, end): from the nearest heading above its first bold lead-in (the first in
-    the rule's order that the text holds, as section() reads it) to the next `#` or `##` heading, the CODEGRAPH_START
-    line of `codegraph install`'s block, or the end. A line inside a ``` fence is no heading. Under a `# ` heading (the
-    file's title) it starts at the lead-in's line (D23); start is None when no heading is above. None when the text holds
-    no lead-in."""
+    the rule's order that the text holds, as section() reads it) to section_end. A line inside a fence is no heading. It
+    starts at the lead-in's line when that heading is the file's first and a `# ` one (its title: D23, D25), or when a
+    CODEGRAPH_END line comes after it (codegraph install's block stays whole); start is None when no heading is above.
+    None when the text holds no lead-in."""
     first = next(("**" + m for m in marks if "**" + m in text), None)
     if first is None:
         return None
-    at, head, end, fence = text.find(first), None, len(text), False
-    for line in re.finditer(r"^.*$", text, re.M):
-        if line.group().lstrip().startswith("```"):
-            fence = not fence
-        elif not fence and line.start() <= at and re.match(r"#{1,6} ", line.group()):
-            head = line
-        elif not fence and line.start() > at and re.match(r"#{1,2} |\W*CODEGRAPH_START\W*$", line.group()):
-            end = line.start()
-            break
-    start = None if head is None else text.rfind("\n", 0, at) + 1 if head.group().startswith("# ") else head.start()
-    return start, end
+    at = text.find(first)
+    above = [line for line in unfenced(text) if line.start() <= at and re.match(r"#{1,6} |\W*CODEGRAPH_END\W*$", line.group())]
+    heads = [line for line in above if line.group().startswith("#")]
+    if not heads:
+        return None, section_end(text, at)
+    title = above[-1] is heads[0] and above[-1].group().startswith("# ")
+    return (text.rfind("\n", 0, at) + 1 if title or not above[-1].group().startswith("#") else above[-1].start()), section_end(text, at)
 
 
 def rule_file(files, marks, depth):
@@ -788,11 +801,23 @@ def selftest():
                       "**`callers` is incomplete:** old\n\n## Last\nz\n", "# Me\n\n" + rule + "\n## Last\nz\n"),
             "s5-above.md": ("# Me\n\n## Tools\n```sh\n# a comment\n```\n**Which index.** a\n\n## Last\nz\n",
                             "# Me\n\n" + rule + "\n## Last\nz\n"),
+            # A ~~~ fence is a fence too.
+            "r10.md": ("# Me\n\n## CodeGraph\n**Which index.** a\n~~~sh\n# my alias\nalias s=sync\n~~~\n"
+                       "**`callers` is incomplete:** old\n\n## Last\nz\n", "# Me\n\n" + rule + "\n## Last\nz\n"),
+            # codegraph install's block above the rule stays whole: after its CODEGRAPH_END line the section starts at the lead-in.
+            "r9.md": ("# Me\n<!-- CODEGRAPH_START -->\n## CodeGraph\nblock text\n<!-- CODEGRAPH_END -->\n**Which index.** a\n"
+                      "**`callers` is incomplete:** old\n\n## Next\nz\n",
+                      "# Me\n<!-- CODEGRAPH_START -->\n## CodeGraph\nblock text\n<!-- CODEGRAPH_END -->\n" + rule + "\n## Next\nz\n"),
+            # A `# ` heading that is not the file's first is the section's own: one CodeGraph heading after the replace (D25).
+            "s12.md": ("# Toolchain\n- Use uv.\n# CodeGraph — the rule\n**Which index.** a\n**`callers` is incomplete:** old\n"
+                       "# Explanations\nz\n", "# Toolchain\n- Use uv.\n" + rule + "\n# Explanations\nz\n"),
         }
         for rel, (before, after) in spans.items():
             path = put("spans/" + rel, before)
             code, out = replace(path)
             assert code == 0 and raw(path) == after, (rel, code, out, raw(path))
+        again = check_rule("claude", raw(os.path.join(t, "spans", "s2.md")), ["s2.md"], marks, rule)
+        assert [(o[0], "CODEGRAPH_START block" in o[2]) for o in again] == [("OK", False), ("WARN", True)], again
         bad = {"r/none.md": "# Mine\n**Other.** x\n", "r/nohead.md": "intro\n**Which index.** a\n"}
         for rel, text in bad.items():                            # three kinds of bad input: each a FAIL, nothing changed
             path = put(rel, text)
