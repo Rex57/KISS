@@ -73,17 +73,29 @@ def messages(path, start=None):
                 yield m
 
 
+def stamp(line):
+    try:
+        return json.loads(line).get("timestamp") or ""
+    except (ValueError, AttributeError):
+        return ""
+
+
 def other_run(path, R):
-    """True when the session names another run folder after its first line that names R."""
+    """True when the session holds a subagent of another run (the first run folder its prompt names is not R's)
+    that started after the session's first line that names R: the controller's count then holds that run's work."""
     hit, run = names(R), RUN.search(R)
     if not run:
         return False
-    seen = False
     with open(path, errors="replace") as fh:
-        for line in fh:
-            if seen and any(n != run.group(1) for n in RUN.findall(line)):
-                return True
-            seen = seen or bool(hit(line))
+        start = next((stamp(line) for line in fh if hit(line)), None)
+    if start is None:
+        return False
+    for f in glob.glob(os.path.join(path[:-len(".jsonl")], "subagents", "**", "agent-*.jsonl"), recursive=True):
+        with open(f, errors="replace") as fh:
+            line = fh.readline()
+        first = RUN.search(line)
+        if first and first.group(1) != run.group(1) and stamp(line) > start:
+            return True
     return False
 
 
@@ -177,8 +189,8 @@ def context(R):
 def selftest():
     import tempfile
 
-    def user(text):
-        return {"type": "user", "message": {"role": "user", "content": text}}
+    def user(text, ts="2026-01-01T09:00:00.000Z"):
+        return {"type": "user", "timestamp": ts, "message": {"role": "user", "content": text}}
 
     def said(mid, out, inp, write, read, hour=0, tools=()):
         return {"type": "assistant", "message": {"id": mid, "role": "assistant", "content": [
@@ -218,7 +230,7 @@ def selftest():
         put(os.path.join(S, "subagents", "agent-a4.jsonl"), [               # its own run first, R later: left out
             user(f"You review /x/runs/r8; one input is {R}/review-1.md"), said("m10", 5000, 5000, 0, 0)],
             "kiss:kiss-reviewer")
-        put(S + ".jsonl", [said("m0", 7000, 7000, 0, 0), user(f"start the run in {R}"),   # m0: before R
+        put(S + ".jsonl", [said("m0", 7000, 7000, 0, 0), user(f"start the run in {R}", "2026-01-01T10:00:00.000Z"),   # m0: before R
                            said("m5", 600, 1, 500, 4000, tools=[("Grep", None)])])
         # worked example: output 1200+800, 1400, 600 = 4000; input 2010+3005+3100+4501 = 12616, reads 9000 = 71%;
         # 1-hour writes 2000; CodeGraph 3 (codegraph explore, MCP explore, cgcallers), search 2 (grep -rn, Grep),
@@ -228,9 +240,13 @@ def selftest():
         got = tokens(R)
         assert got == want, got
         assert tokens(R + "/") == want, "a trailing slash names the same run"
-        with open(S + ".jsonl", "a") as f:                                   # the session goes on with run r8
-            f.write(json.dumps(user("now the next run, in /x/runs/r8")) + "\n")
+        with open(S + ".jsonl", "a") as f:                       # it only names run r8's folder (a review input)
+            f.write(json.dumps(user("read /x/runs/r8/review-1.md", "2026-01-01T11:00:00.000Z")) + "\n")
+        assert tokens(R) == want, "a name of another run's folder is not its work"
+        put(os.path.join(S, "subagents", "agent-a8.jsonl"), [               # run r8's agent, started in R's window
+            user("You are the implementer. R = /x/runs/r8", "2026-01-01T11:00:01.000Z")], "kiss:kiss-implementer")
         assert tokens(R) == want.replace("controller 1k", "controller 1k (the session also carries another run)"), tokens(R)
+        os.remove(os.path.join(S, "subagents", "agent-a8.jsonl"))
         assert tokens("/x/runs/none") == NA
         assert context("/x/runs/none") == NA
         put(os.path.join(S, "subagents", "agent-a5.jsonl"), [
