@@ -80,7 +80,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    `Skipped:` and `Risk:` line into one of three buckets: fix now (in the continue message), owner (a decision,
    asked at once) or log; write each line and its bucket into the "Triage" part of `R/decisions.md`. Run `callcheck.py -p
    W <the HEAD at the last stop, or BASE at the first>..HEAD` and send each caller line it prints to read to the implementer. Open tickets and no
-   BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer. Before each continue, fix
+   BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer (after a risky ticket,
+   step 6's `--review` message goes instead). Before each continue, fix
    round and recheck, run `metrics.py R --context` (Claude Code): an agent it marks gets the handoff of
    [references/agents.md](references/agents.md) instead, and the round goes to the new one. After 3 continuations, a
    gate. On BLOCKED: a decision when the block needs a choice, else a gate.
