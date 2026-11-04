@@ -117,7 +117,8 @@ function gitOutside(command: string, dir: string | undefined, wt: string | undef
         const folders = Object.keys(env).map(k => env[k])
         let here = dir
         let sub: string | undefined
-        for (let j = i + 1; j < seg.length && sub === undefined; j++) {
+        let j = i + 1
+        for (; j < seg.length && sub === undefined; j++) {
           const a = seg[j]!
           const eq = a.startsWith('--') ? a.indexOf('=') : -1
           const [opt, given] = eq > 0 ? [a.slice(0, eq), a.slice(eq + 1)] : /^-C./.test(a) ? ['-C', a.slice(2)] : [a, undefined]
@@ -127,7 +128,13 @@ function gitOutside(command: string, dir: string | undefined, wt: string | undef
           else if (['-c', '--namespace', '--config-env'].includes(opt)) value()
           else if (!a.startsWith('-')) sub = a
         }
-        if (sub !== undefined && !GIT_READS.includes(sub) && [here, ...folders].some(f => !inside(f, wt))) return true
+        const args = seg.slice(j)
+        // D22: refs/stash and the worktree list are shared by every worktree, so a worker's stash or worktree change
+        // reaches outside from anywhere. --output writes a file, also from a read verb (diff, log, show).
+        if (sub === 'stash' || (sub === 'worktree' && args[0] !== 'list')) return true
+        const output = args.flatMap((a, k) => (a === '--output' ? [args[k + 1] ?? ''] : a.startsWith('--output=') ? [a.slice(9)] : []))
+        if (sub !== undefined && (!GIT_READS.includes(sub) || output.length > 0) &&
+          [here, ...folders, ...output.map(o => resolve(here, o))].some(f => !inside(f, wt))) return true
       }
     }
   }

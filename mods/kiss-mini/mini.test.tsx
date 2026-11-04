@@ -522,6 +522,19 @@ test('a code worker\'s git commands inside its worktree, and its git reads anywh
   expect(ran).toEqual(allowed.map(c => `Bash cd '${WT}' && ${c}`))
 })
 
+test('a code worker\'s git stash, git worktree change and --output outside are denied, also from its worktree', async ($, on) => {
+  const { ran } = await worker($, on)
+  // refs/stash and the worktree list are shared by every worktree; --output writes a file, also from a read verb.
+  for (const command of ['git stash', 'git stash pop', `git -C ${WT}/sub stash push -m wip`,
+    'git worktree remove --force /repo', 'git worktree add ../other main', 'git worktree prune',
+    'git -C /repo diff --output=/repo/calc.py', 'git diff --output /repo/calc.py', `git log --output=${WT}/../x.txt`]) {
+    expect(JSON.stringify(await call($, 'Bash', { command })), command).toContain(ONLY)
+  }
+  const allowed = ['git worktree list', 'git diff --output=out.diff', 'git grep -o add', 'git -C /repo ls-files -o']
+  for (const command of allowed) await call($, 'Bash', { command })
+  expect(ran).toEqual(allowed.map(c => `Bash cd '${WT}' && ${c}`))
+})
+
 test('a worker\'s Bash command runs in its worktree: the mod puts a cd there first, one word with a space or a quote', async ($, on) => {
   // The worker's shell starts in the host's folder (the spawn's cwd does not move it), so a bare git write needs the cd.
   const { ran } = await worker($, on, { tmp: "/tmp/it's a dir/" })
