@@ -15,14 +15,16 @@ owner sees each command. `KD` is this skill's folder (the folder of this file).
 backup, that a new session is needed, the export line for the other agents), and stop. It sets only
 `env.KISS_FEEDBACK` in Claude Code's user settings (`"1"` or `"0"`) and edits no shell profile.
 
-**Setup.** When the owner asks `kiss-doctor setup`, run only `python3 -I "$KD/scripts/doctor.py" setup`. It finds
+**Setup.** When the owner asks `kiss-doctor setup`, run only `python3 -I "$KD/scripts/doctor.py" setup`, followed
+by the agents the owner names (`setup claude`), if any: then the plan and the checks cover only those. It finds
 the OS, the shell, the package manager and the agents on PATH, runs the checks, and prints a numbered plan of what
 is missing: each item with its command, its source and what it changes, then the steps only the owner can do (a
 `sudo` command, Antigravity's copy steps, Codex's `/hooks` trust, a new session) and the optional links. Show the
-plan as printed, ask "all, none, or the numbers?", and wait. The owner's answer is the go: run only
-`python3 -I "$KD/scripts/doctor.py" setup --apply <answer> --plan <id>`, with `all`, `none` or the owner's numbers
-(`1,3`) as the answer and the plan id the plan printed; a plan that changed since the owner saw it is refused, so
-show it again. Each command stops after 5 minutes as a FAIL, so the call needs up to 5 minutes per command it runs:
+plan as printed, ask "all, none, or the numbers?", and wait. The owner's answer is the go: run only the call the
+plan's last line names, `python3 -I "$KD/scripts/doctor.py" setup [<agents>] --apply <answer> --plan <id>`, with
+`all`, `none` or the owner's numbers (`1,3`) as the answer and the plan id the plan printed; a plan that changed
+since the owner saw it is refused, so show it again. An owner who skips an agent's items for now: run setup again
+with only the other agents, so its checks leave out the skipped agent. Each command stops after 5 minutes as a FAIL, so the call needs up to 5 minutes per command it runs:
 for one or two items give it a 10-minute timeout (Claude Code: the Bash tool's `timeout: 600000`); for more, run it
 in the background (Claude Code: `run_in_background`) and wait for it to end.
 Never type an install command yourself; every command comes from the script's install table. The

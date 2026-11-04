@@ -4,9 +4,10 @@ env.KISS_FEEDBACK in Claude Code's user settings.
 
   python3 -I doctor.py [AGENT ...]    AGENT: claude, codex, gemini, antigravity (default: each one whose CLI is on PATH)
   python3 -I doctor.py feedback on|off   set env.KISS_FEEDBACK in Claude Code's user settings ("1" or "0"), with a backup
-  python3 -I doctor.py setup             the numbered plan of what is missing, from the install table (installs nothing)
-  python3 -I doctor.py setup --apply all|none|1,3 --plan <id>   run those items of the plan with that id, one at a
-                                         time (a changed plan is refused); stop at the first failure;
+  python3 -I doctor.py setup [AGENT ...]   the numbered plan of what is missing, from the install table (installs
+                                         nothing); AGENT: only those agents on PATH (default: each one on PATH)
+  python3 -I doctor.py setup [AGENT ...] --apply all|none|1,3 --plan <id>   run those items of the plan with that id,
+                                         one at a time (a changed plan is refused); stop at the first failure;
                                          then the checks again and the steps by hand. Never sudo, never a shell profile.
   python3 -I doctor.py --selftest
 
@@ -352,8 +353,9 @@ def plan_lines(system, items):
         out.append("Nothing to install.")
     out += by_hand(system, items, [i for i in items if i["n"]])
     if any(i["n"] for i in items):
+        call = " ".join(["setup"] + system["agents"])           # the same agents, so --apply sees the same plan
         out += [f"plan id: {plan_id(items)}",
-                f"Answer all, none, or the numbers to install (for example 1,3); then: setup --apply <answer> --plan {plan_id(items)}"]
+                f"Answer all, none, or the numbers to install (for example 1,3); then: {call} --apply <answer> --plan {plan_id(items)}"]
     return out
 
 
@@ -447,6 +449,19 @@ def setup(system, answer=None, runner=execute, find=None, checks=None, pid=None)
     if ran or ok or failed:
         lines += [""] + by_hand(system, items, ran)
     return lines, ok
+
+
+def setup_args(rest, on_path):
+    """`setup [AGENT ...] [--apply <answer> --plan <id>]` → (the agents, in PATH order; the answer; the plan id).
+    No AGENT: every agent on PATH. An agent not on PATH, or any other form, exits with its reason."""
+    i = rest.index("--apply") if "--apply" in rest else len(rest)
+    names, tail = rest[:i], rest[i:]
+    if tail and (len(tail) != 4 or tail[2] != "--plan") or any(n.startswith("-") for n in names):
+        sys.exit("usage: doctor.py setup [AGENT ...] [--apply all|none|<numbers> --plan <id>]")
+    wrong = [n for n in names if n not in on_path]
+    if wrong:
+        sys.exit(f"not an agent on PATH: {', '.join(wrong)} (on PATH: {', '.join(on_path) or 'none'})")
+    return [a for a in on_path if not names or a in names], (tail[1] if tail else None), (tail[3] if tail else None)
 
 
 def loaded_here(agent):
@@ -696,6 +711,24 @@ def selftest():
     ran.clear()
     lines, ok = setup(sysfor(), "2", runner(), lambda s: {k: v for k, v in known.items() if k != "codegraph"}, checks, pid=pid)
     assert not ok and ran == [] and "the plan changed" in lines[0], lines
+    # setup AGENT ...: only those agents (an agent the owner skips is not planned or checked); the plan's last line
+    # names them, so --apply builds the same plan
+    on = ["claude", "codex"]
+    assert setup_args([], on) == (on, None, None) and setup_args(["claude"], on) == (["claude"], None, None)
+    assert setup_args(["codex", "claude", "--apply", "1,3", "--plan", "ab12"], on) == (on, "1,3", "ab12")
+    assert setup_args(["--apply", "all", "--plan", "ab12"], on) == (on, "all", "ab12")
+    for bad in (["gemini"], ["nope"], ["--apply", "1"], ["claude", "--apply", "1", "--plan"], ["-x"],
+                ["--plan", "x", "--apply", "1"], ["--apply", "1", "--plan", "x", "codex"]):
+        try:
+            setup_args(bad, on)
+            raise AssertionError(bad)
+        except SystemExit as e:
+            assert "usage" in str(e) or "not an agent on PATH: gemini (on PATH: claude, codex)" in str(e) or \
+                "nope" in str(e), (bad, e)
+    mine = plan(sysfor(agents=["claude"]), known)
+    assert [i["agent"] for i in mine] == ["device"] * 3 + ["claude"] * 2, show(mine)
+    assert "then: setup claude --apply <answer>" in "\n".join(plan_lines(sysfor(agents=["claude"]), mine))
+    assert "then: setup claude codex --apply" in "\n".join(plan_lines(sysfor(), plan(sysfor(), known)))
     # the two file commands run in Python: the rule appended once, cgcallers copied executable
     with tempfile.TemporaryDirectory() as fx:
         dst, src = os.path.join(fx, "home", "CLAUDE.md"), os.path.join(fx, "rule.md")
@@ -755,9 +788,9 @@ def main(argv):
         print("\n".join(set_feedback(settings_path(), argv[2] == "on")))
         return
     if argv[1:2] == ["setup"]:
-        if argv[2:] and (len(argv) != 6 or argv[2] != "--apply" or argv[4] != "--plan"):
-            sys.exit("usage: doctor.py setup [--apply all|none|<numbers> --plan <id>]")
-        lines, ok = setup(detect(), argv[3] if argv[2:] else None, pid=argv[5] if argv[2:] else None)
+        system = detect()
+        system["agents"], answer, pid = setup_args(argv[2:], system["agents"])
+        lines, ok = setup(system, answer, pid=pid)
         print("\n".join(lines))
         sys.exit(0 if ok else 1)
     agents = argv[1:] or [a for a, cli in CLI.items() if shutil.which(cli)]
