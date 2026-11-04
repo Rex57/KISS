@@ -66,5 +66,7 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
   - A ticket whose caller has a timeout: name that timeout as a time window.
   - A line that measures a total (a count, a score) also names what must not get worse item by item.
   - A line that says "as before" states the old behaviour as the code shows it.
+  - A ticket that adds or changes a message to an agent (a continue message, a prompt line): check it against that
+    agent's standing prompt, and give it an acceptance line that names what the agent then does.
 - **Ask the owner** about the breakdown: is the size right (too large, too small), is each blocking link real,
   should a ticket be merged or split? Change the list until the owner says yes.
