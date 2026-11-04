@@ -129,12 +129,14 @@ def code_only(src, quotes="'\"`"):
 
 
 def word_lines(src, lang, name):
-    """The lines where NAME is a word of code, not of a comment, a string or a docstring."""
+    """The lines where NAME is a word of code, not of a comment, a string or a docstring; in Python also the
+    string 'NAME' given to getattr, hasattr or setattr (a call CodeGraph cannot see)."""
     if lang in PY:
         found = set()
         try:
             for t in tokenize.generate_tokens(io.StringIO(src).readline):
-                if t.type == tokenize.NAME and t.string == name:
+                if t.type == tokenize.NAME and t.string == name or (
+                        t.type == tokenize.STRING and t.string[1:-1] == name and re.search(r"\b(get|set|has)attr\s*\(", t.line)):
                     found.add(t.start[0])
         except (tokenize.TokenError, SyntaxError):
             pass
@@ -279,7 +281,7 @@ def selftest():
         "user.py": "def go3(e):\n    return e.ack()\n",
         "pkg/__init__.py": "from .util import helper2\n",
         "pkg/util.py": "def helper2():\n    return 1\n",
-        "routes.py": "from pkg import helper2\nROUTES = [(\"GET\", helper2)]\n",
+        "routes.py": "from pkg import helper2\nROUTES = [(\"GET\", helper2)]\nf = getattr(pkg, 'helper2', None)\n",
         "lazy.py": "import importlib\nm = importlib.import_module(\"pkg.util\")\nm.helper2()\n",
         "svc/main.go": "package svc\n\nfunc main() { Serve() }\n",
     }
@@ -345,6 +347,7 @@ def selftest():
         o = out("ack", "-p", W)
         assert o.count("[grep only] user.py:2  go3  return e.ack()") == 2, o              # F1: a method's caller needs no import
         o = out("helper2", "-p", W)
+        assert "[grep only] routes.py:3  -  f = getattr(pkg, 'helper2', None)" in o, o   # F3: getattr with a string
         assert "[grep only] routes.py:2  -  ROUTES" in o and "[grep only] lazy.py:3  -  m.helper2()" in o, o   # F2: via the package
     assert code_only("a('x // y') // z\n/* q\n */ b(\"c\")") == "a('      ')     \n    \n    b(\" \")"
     print("cgcallers selftest ok")
