@@ -704,7 +704,7 @@ export const register: Register = on => {
     // shortcut: read-only by rule; only Edit, Write and NotebookEdit are denied and the Python and pytest caches are
     // off, so a Bash command (cargo test, pytest --cov, sed -i, git stash) can still write in the checkout; upgrade:
     // deny write verbs in Bash, or run the question in a copy of the working tree.
-    if (t?.kind === 'question' && ['Edit', 'Write', 'NotebookEdit'].includes(String(e.tool))) {
+    if (t?.kind === 'question' && FILE_TOOLS.includes(String(e.tool))) {
       return { deny: 'kiss-mini: a question changes no file. Answer from what you read.' }
     }
     // D21: a worker's shell starts in the host's folder whatever the spawn's cwd, so each Bash command first goes to the
