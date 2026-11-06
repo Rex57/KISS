@@ -256,6 +256,13 @@ def selftest():
         root, R = plugin("2.2.0"), os.path.join(cache, "run")
         os.makedirs(R)
         assert call(root, "start", R, "PROJECT=" + facts, *start_keys)[1] == "", "a prerelease ranks below its release"
+    for rule in ("break it in a scratch copy under /s", "see it fail, and keep the code in W unbroken",
+                 "a time bound is only a backstop", "at least 2 times the slowest time the run saw",
+                 "run every acceptance line not marked `(reviewer)`", "goes into a `Reviewer checks:` line"):
+        assert out.count(rule) == 1, ("the guard, clock and acceptance rules appear once", rule)
+    ends = [out.index(w) for w in ("`Mutants:` (each new guard", "`Reviewer checks:` (each acceptance line", "`Skipped:` what", "`Risk:` any risk")]
+    assert ends == sorted(ends), "the entry ends Mutants, Reviewer checks, Skipped, Risk"
+    assert "fails on the old code" in loop["fix"] and "write a `Risk:` line for that item" in loop["fix"], "a fix is proven on the old code"
     assert "take the next open ticket" not in out and "stop where it says" in out, "a continue's batch and its stop win"
     assert "only the findings of severity critical or high" in loop["recheck"], "the recheck covers only critical or high findings"
     assert "reproduced_in_app" in loop["recheck"] and "diff and the test output" in loop["recheck"]

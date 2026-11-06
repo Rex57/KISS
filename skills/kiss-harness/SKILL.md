@@ -67,7 +67,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    [references/spec-and-tickets.md](references/spec-and-tickets.md): tracer bullets, a refactor first, blocking
    links, a wide refactor in three stages, an acceptance line that names its seam, and the failure-path lines. A ticket with a time window
    (freshness, a timeout, staleness) asks for a test that runs the clock past that window. Mark a ticket `risky` only
-   when it is a guard whose failure harms real data, or a guard that later tickets build on. Then `tickets.py check
+   when it is a guard whose failure harms real data, or a guard that later tickets build on. Mark each acceptance
+   line that only the reviewer can check (the running product, or a reader's judgement) with the prefix
+   `(reviewer) `, and show those lines at the tickets gate. Then `tickets.py check
    R`, and a ponytail pass at **full** level: call the Skill tool with `ponytail` at full level for the cut; without
    it, the rule as stated here: cut each line that no person asked for, and record the cut in `decisions.md`. Then the **tickets gate**: ask about the breakdown and show the defaults you took; change it until
    the owner says yes, then `tickets.py render R`.
@@ -85,7 +87,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` and `git -C MAIN status` (both
    empty), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). **Triage** each new
    `Skipped:` and `Risk:` line into one of three buckets: fix now (in the continue message), owner (a decision,
-   asked at once) or log; write each line and its bucket into the "Triage" part of `R/decisions.md`. Run `callcheck.py -p
+   asked at once) or log; write each line and its bucket into the "Triage" part of `R/decisions.md`. Each
+   `Reviewer checks:` line is triaged like a `Skipped:` line; a progress entry with no `Mutants:` line is a fix-now line. Run `callcheck.py -p
    W <the HEAD at the last stop, or BASE at the first>..HEAD` and send each caller line it prints to read to the implementer. Open tickets and no
    BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer (after a risky ticket,
    step 6's `--review` message goes instead). Before each continue, fix

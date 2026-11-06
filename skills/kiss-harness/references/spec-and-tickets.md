@@ -58,7 +58,8 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
   every batch. When a batch cannot pass alone, end with one ticket that joins and checks them all.
 - **Acceptance lines** are the definition of done. Each one names its seam: `through <seam>: <what a person or a
   test sees>`. No file paths or code in a ticket's `spec` or `acceptance`; `files` and `symbols` are only hints for
-  the CodeGraph seed.
+  the CodeGraph seed. A line that only the reviewer can check (the running product, or a reader's judgement) starts
+  with `(reviewer) `; the implementer runs every other line before it sets `passes`.
 - **Failure paths and totals** each get their own acceptance line:
   - A ticket that makes state outside its process (a container, a file, an account, a plugin, a database): one
     line for an interrupt, and one for a failure after the first write.
