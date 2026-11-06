@@ -22,6 +22,7 @@ import json, os, re, string, sys
 
 HB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.dirname(os.path.dirname(HB))   # the plugin; in a plugin cache, its version folder
+MANIFESTS = (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "gemini-extension.json", ".antigravity-plugin/plugin.json")
 FACTS = ("Full check time:", "Smoke check", "Merge:", "After merge:", "Flake check:", "Shared test resources:")
 T = os.path.join(HB, "templates")
 PER_TICKET_S, REVIEW_S = 600, 7200
@@ -73,10 +74,22 @@ def version_key(name):
     return tuple(int(x) for x in m.group(1, 2, 3)) + (not pre, pre)
 
 
+def version(root):
+    """The running plugin's version from the first manifest it has (all four carry the same one), or None."""
+    for m in MANIFESTS:
+        try:
+            with open(os.path.join(root, m)) as f:
+                return json.load(f)["version"]
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return None
+
+
 def newer(root):
-    """The line for stderr when a sibling of the running plugin's version folder holds a higher version (D10)."""
+    """The line for stderr when a sibling of the running plugin's version folder holds a higher version (D10);
+    nothing for a plugin with no manifest."""
     run = os.path.basename(root)
-    if version_key(run) is None:
+    if version_key(run) is None or version(root) is None:
         return ""
     vs = [v for v in os.listdir(os.path.dirname(root)) if version_key(v) and version_key(v) > version_key(run)]
     best = max(vs, key=version_key, default=None)
@@ -87,11 +100,10 @@ def start(R, values, root=ROOT):
     unknown = sorted(set(values) - START_KEYS)
     if unknown:
         sys.exit(f"start: unknown keys {', '.join(unknown)} (known: {', '.join(sorted(START_KEYS))})")
-    with open(os.path.join(root, "gemini-extension.json")) as f:     # all four manifests carry the same version
-        version = json.load(f)["version"]
+    v = version(root) or "unknown"
     with open(os.path.join(R, "run.json"), "w") as f:
-        json.dump(dict(values, VERSION=version), f, indent=1)
-    out = [f"wrote {os.path.join(R, 'run.json')}: {', '.join(sorted(values))}, VERSION {version}"]
+        json.dump(dict(values, VERSION=v), f, indent=1)
+    out = [f"wrote {os.path.join(R, 'run.json')}: {', '.join(sorted(values))}, VERSION {v}"]
     try:
         with open(values.get("PROJECT", "")) as p:
             text = p.read()
@@ -256,6 +268,16 @@ def selftest():
         root, R = plugin("2.2.0"), os.path.join(cache, "run")
         os.makedirs(R)
         assert call(root, "start", R, "PROJECT=" + facts, *start_keys)[1] == "", "a prerelease ranks below its release"
+        os.makedirs(os.path.join(cache, "9.0.0"))                           # a newer folder beside each root below
+        for v, manifest, want in (("2.3.0", None, "unknown"), ("2.4.0", ".claude-plugin/plugin.json", "2.4.1")):
+            root = os.path.join(cache, v)
+            os.makedirs(os.path.join(root, ".claude-plugin"))
+            if manifest:
+                with open(os.path.join(root, manifest), "w") as f:
+                    json.dump({"version": want}, f)
+            o, e = call(root, "start", R, "PROJECT=" + facts, *start_keys)
+            assert json.load(open(os.path.join(R, "run.json")))["VERSION"] == want, (manifest, o)
+            assert (e == "") == (manifest is None), ("no manifest: no newer-version line", manifest, e)
     for rule in ("break it in a scratch copy under /s", "see it fail, and keep the code in W unbroken",
                  "a time bound is only a backstop", "at least 2 times the slowest time the run saw",
                  "run every acceptance line not marked `(reviewer)`", "goes into a `Reviewer checks:` line"):
