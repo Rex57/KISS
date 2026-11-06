@@ -75,7 +75,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    run uses and their plugin versions (the version folder in each skill's base path).
 4. **Implementer:** write the run's values once: `prompt.py start R W=W BR=<branch> SCR=<scratch folder>
    MAIN=<main checkout> PROJECT=<facts file> TITLE=<title> BASE=<base sha> SMOKE="<a fast end-to-end test>"
-   APP="<how to start the product, and its test data>"` (R/run.json). Then `prompt.py implementer R ELAPSED=0` →
+   APP="<how to start the product, and its test data>"` (R/run.json, with the running KISS `VERSION`). Show the owner
+   each WARN it prints for a facts line the file lacks, before the build. Any `prompt.py` call that prints "KISS <new>
+   is installed" on stderr: tell the owner to start the run in a new session. Then `prompt.py implementer R ELAPSED=0` →
    start ONE subagent with that text: your strongest model at medium effort, in the background. Give every path
    absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` and `git -C MAIN status` (both

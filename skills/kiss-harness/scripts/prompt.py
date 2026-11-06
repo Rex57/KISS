@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Print one filled prompt (SKILL.md); the controller gives it to a new subagent or sends it to a running one.
 
-  python3 -I prompt.py start R KEY=VALUE ...                 write the run's values once to R/run.json
+  python3 -I prompt.py start R KEY=VALUE ...                 write the run's values once to R/run.json, with
+                                                             VERSION (the running plugin's), and WARN for each
+                                                             facts line the run needs and PROJECT lacks
   python3 -I prompt.py <implementer|reviewer|severity|fix|recheck> R [KEY=VALUE ...]
   python3 -I prompt.py --selftest
 
@@ -13,11 +15,14 @@ implementer's answer); the sort writes sort-<ROUND>.json. Filled here: HB (the s
 BUDGET, in seconds: "Time: elapsed 340s of a 1200s budget."; empty without ELAPSED). With ELAPSED and no BUDGET, the
 budget is 10 minutes per ticket in R/tickets.json plus 2 hours for the reviews and fix rounds, plus the facts
 file's `Full check time:` minutes when it has that line. A value the template
-needs that neither run.json nor the call gives is an error that names it.
+needs that neither run.json nor the call gives is an error that names it. Every call prints a line on stderr when
+a newer KISS version folder sits beside the running one.
 """
 import json, os, re, string, sys
 
 HB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(HB))   # the plugin; in a plugin cache, its version folder
+FACTS = ("Full check time:", "Smoke check", "Merge:", "After merge:", "Flake check:", "Shared test resources:")
 T = os.path.join(HB, "templates")
 PER_TICKET_S, REVIEW_S = 600, 7200
 STEPS = ("implementer", "reviewer", "severity", "fix", "recheck")
@@ -59,13 +64,42 @@ def pairs(args):
     return dict(a.split("=", 1) for a in args)
 
 
-def start(R, values):
+def version_key(name):
+    """A sort key for a version folder name (a prerelease ranks below its release), or None for any other name."""
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?", name)
+    if not m:
+        return None
+    pre = [(0, int(x), "") if x.isdigit() else (1, 0, x) for x in (m.group(4) or "").split(".") if x]
+    return tuple(int(x) for x in m.group(1, 2, 3)) + (not pre, pre)
+
+
+def newer(root):
+    """The line for stderr when a sibling of the running plugin's version folder holds a higher version (D10)."""
+    run = os.path.basename(root)
+    if version_key(run) is None:
+        return ""
+    vs = [v for v in os.listdir(os.path.dirname(root)) if version_key(v) and version_key(v) > version_key(run)]
+    best = max(vs, key=version_key, default=None)
+    return f"KISS {best} is installed; this session runs {run}: start the run in a new session" if best else ""
+
+
+def start(R, values, root=ROOT):
     unknown = sorted(set(values) - START_KEYS)
     if unknown:
         sys.exit(f"start: unknown keys {', '.join(unknown)} (known: {', '.join(sorted(START_KEYS))})")
+    with open(os.path.join(root, "gemini-extension.json")) as f:     # all four manifests carry the same version
+        version = json.load(f)["version"]
     with open(os.path.join(R, "run.json"), "w") as f:
-        json.dump(values, f, indent=1)
-    return f"wrote {os.path.join(R, 'run.json')}: {', '.join(sorted(values))}"
+        json.dump(dict(values, VERSION=version), f, indent=1)
+    out = [f"wrote {os.path.join(R, 'run.json')}: {', '.join(sorted(values))}, VERSION {version}"]
+    try:
+        with open(values.get("PROJECT", "")) as p:
+            text = p.read()
+        out += [f"WARN: the facts file has no `{line}` line" for line in FACTS
+                if not re.search(r"^\W*" + re.escape(line), text, re.M)]
+    except OSError:
+        out.append(f"WARN: no facts file at {values.get('PROJECT', '(no PROJECT)')}")
+    return "\n".join(out)
 
 
 def prompt(step, R, call):
@@ -86,13 +120,16 @@ def prompt(step, R, call):
     return fill(step, keys)
 
 
-def main(argv):
+def main(argv, root=ROOT):
     if argv[1:] == ["--selftest"]:
         return selftest()
     if len(argv) < 3 or argv[1] not in ("start",) + STEPS or "=" in argv[2]:
         sys.exit(__doc__)
     step, R, values = argv[1], os.path.abspath(argv[2]), pairs(argv[3:])
-    print(start(R, values) if step == "start" else prompt(step, R, values))
+    warn = newer(root)
+    if warn:
+        print(warn, file=sys.stderr)
+    print(start(R, values, root) if step == "start" else prompt(step, R, values))
 
 
 def selftest():
@@ -173,6 +210,52 @@ def selftest():
     assert "ponytail:ponytail-review" in rv and "G. Risk, load and speed" in rv and "A|B|C|D|E|F|G" in rv
     assert "failed before" in loop["fix"] and '"test":' in loop["fix"], "each fix names its test"
     assert 'until the controller sends "product free"' in out and 'On "product free", run the held checks first' in out, "the hold and its end"
+    six = {"Full check time:": "- Full check time: 2 minutes", "Smoke check": "- Smoke check (one fast test): `make smoke`",
+           "Merge:": "- Merge: ask", "After merge:": "- After merge: ask", "Flake check:": "- Flake check: `make test` x 5",
+           "Shared test resources:": "- Shared test resources: none"}
+    template = open(os.path.join(T, "project.md")).read()
+    assert all(re.search(r"^\W*" + re.escape(line), template, re.M) for line in FACTS), "each line start checks is in the facts template"
+    with tempfile.TemporaryDirectory() as cache:                          # a scratch plugin cache: <cache>/<version>/
+        def plugin(v):
+            os.makedirs(os.path.join(cache, v))
+            with open(os.path.join(cache, v, "gemini-extension.json"), "w") as f:
+                json.dump({"version": v}, f)
+            return os.path.join(cache, v)
+
+        def call(root, *argv):
+            o, e = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(o), contextlib.redirect_stderr(e):
+                main(["prompt.py", *argv], root=root)
+            return o.getvalue(), e.getvalue()
+        root, R = plugin("2.1.1"), os.path.join(cache, "run")
+        plugin("2.1.0")
+        os.makedirs(os.path.join(cache, "notes"))
+        os.makedirs(R)
+        with open(os.path.join(R, "tickets.json"), "w") as f:
+            json.dump([{"id": "T-1"}], f)
+        facts = os.path.join(R, "project.md")
+        for body, warned in (("# Facts\n- Build steps: none\n", list(six)), ("\n".join(six.values()) + "\n", []), (None, [facts])):
+            if body is None:
+                os.remove(facts)
+            else:
+                with open(facts, "w") as f:
+                    f.write(body)
+            os.remove(os.path.join(R, "run.json")) if os.path.exists(os.path.join(R, "run.json")) else None
+            o, e = call(root, "start", R, "PROJECT=" + facts, *start_keys)
+            warns = [l for l in o.splitlines() if l.startswith("WARN")]
+            assert len(warns) == len(warned) and all(sum(w in l for l in warns) == 1 for w in warned), (body, o)
+            assert json.load(open(os.path.join(R, "run.json")))["VERSION"] == "2.1.1" and e == "", (body, o, e)
+        quiet = call(root, "implementer", R, "ELAPSED=1")
+        assert quiet[1] == "" and "Run 9" in quiet[0], "an older version and a folder that is not one: nothing"
+        plugin("2.2.0")
+        newer = "KISS 2.2.0 is installed; this session runs 2.1.1: start the run in a new session\n"
+        assert call(root, "start", R, "PROJECT=" + facts, *start_keys)[1] == newer
+        assert call(root, "implementer", R, "ELAPSED=1") == (quiet[0], newer), "the line on stderr; the prompt unchanged"
+    with tempfile.TemporaryDirectory() as cache:
+        os.makedirs(os.path.join(cache, "2.2.0-alpha.1"))
+        root, R = plugin("2.2.0"), os.path.join(cache, "run")
+        os.makedirs(R)
+        assert call(root, "start", R, "PROJECT=" + facts, *start_keys)[1] == "", "a prerelease ranks below its release"
     assert "take the next open ticket" not in out and "stop where it says" in out, "a continue's batch and its stop win"
     assert "only the findings of severity critical or high" in loop["recheck"], "the recheck covers only critical or high findings"
     assert "reproduced_in_app" in loop["recheck"] and "diff and the test output" in loop["recheck"]
