@@ -668,6 +668,8 @@ def setup(system, answer=None, runner=execute, find=None, checks=None, pid=None)
         lines += ["", "The checks again:"] + (
             [f"left out of the checks (you picked none of their items): {', '.join(skipped)}"] if skipped else []) + (
             checks or (lambda agents: report(agents)[0]))([a for a in system["agents"] if a not in skipped])
+    if ok and not picked:                                   # an answer of none: say so, not just the links
+        lines = ["none picked: nothing ran"] + lines
     if ran or ok or failed:
         lines += [""] + by_hand(system, items, ran)
     return lines, ok
@@ -1046,7 +1048,10 @@ def selftest():
         lines, ok = go(sysfor(), answer, runner(), find)
         assert not ok and ran == [] and "refused" in lines[0] and "CHECKS AGAIN" not in lines, (answer, lines)
     ran.clear()
-    assert go(sysfor(), "none", runner(), find)[1] and ran == []
+    lines, ok = go(sysfor(), "none", runner(), find)
+    assert ok and ran == [] and lines[0] == "none picked: nothing ran", lines
+    assert "none picked: nothing ran" not in go(sysfor(), "1", runner(), find)[0], "an answer that picks an item"
+    ran.clear()
     sudo = [{"n": 1, "what": "git", "agent": "device", "run": [["sudo", "apt", "install", "-y", "git"]], "hand": "",
              "source": "s", "changes": "c", "after": ""}]
     lines, ok, *_ = apply(sudo, "1", runner())                              # a sudo command never runs, even if numbered

@@ -26,7 +26,7 @@ Start fresh agents with no context, in parallel, with the brief below:
 - **after**: the tree as it is now, entry point the map;
 - **before** (first run only): the commit before the run, in a scratch worktree
   (`git worktree add --detach <scratch> <commit>`), entry points the old ones its agent
-  instructions file names. Remove the worktree when the test ends.
+  instructions file names (none tracked: the front door README.md). Remove the worktree when the test ends.
 
 Each reader's loaded agent instructions file (`CLAUDE.md`, `AGENTS.md`) is the current one. Tell it
 that this is not a doc page, so that a fact only that file holds shows up as a finding.

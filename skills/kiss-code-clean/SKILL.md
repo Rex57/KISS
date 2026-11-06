@@ -50,7 +50,8 @@ no tracked file; your one write is the list in the git-ignored `.kiss/clean/` (s
 6. **The delete check.** A delete candidate is code that nothing uses. Before you list one, prove it for each
    symbol: `codegraph callers -p "<repo>" <name>` (widen a cut list with `--limit`), `codegraph impact -p "<repo>"
    <name>`, and `python3 -I "$CC/../kiss-harness/scripts/cgcallers.py" <name> -p "<repo>"`; read every
-   `[grep only]` line. Then a word search of the whole repo, `git -C "<repo>" grep -nw <name>`, for a use CodeGraph
+   `[grep only]` line. When cgcallers reports no language server for the repo's language, say so in the list's
+   skipped lines; the delete check then rests on CodeGraph and the word search only. Then a word search of the whole repo, `git -C "<repo>" grep -nw <name>`, for a use CodeGraph
    cannot see: a string (a `getattr`, a registry or route table, a dispatch by name, a config file), a test, a doc.
    A name can be built at run time (`getattr(mod, "cmd_" + name)`, `globals()[...]`, `importlib`, a decorator that
    registers it): search the module's users for such a lookup and for the name's prefix or suffix (`"cmd_"`); a

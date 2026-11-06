@@ -26,9 +26,11 @@ def rank(rows):
 
 def table(data):
     cell = lambda v: str(v).replace("|", "\\|").replace("\n", " ")
-    lines = list(data.get("skipped", [])) + ["", "| # | Kind | Where | Evidence | Strength | Build |", "|---|---|---|---|---|---|"]
+    lines = list(data.get("skipped", [])) + ["", "| # | Kind | Where | Evidence | Strength | Build | Hot |",
+                                               "|---|---|---|---|---|---|---|"]
     for n, r in enumerate(rank(data["rows"]), 1):
-        lines.append("| %d | %s |" % (n, " | ".join(cell(r.get(k, "")) for k in ("kind", "where", "evidence", "strength", "build"))))
+        lines.append("| %d | %s | %s |" % (n, " | ".join(cell(r.get(k, "")) for k in ("kind", "where", "evidence", "strength", "build")),
+                                           "yes" if r.get("hot") else ""))
     return "\n".join(lines).lstrip("\n") + "\n"
 
 
@@ -47,10 +49,12 @@ def selftest():
         got = [r["where"] for r in rank(order)]
         assert got == want, got
     out = table({"skipped": ["ponytail not installed: no audit report, no debt ledger"],
-                 "rows": [{"kind": "bug", "where": "x.py:1", "evidence": "a|b", "strength": "Strong", "build": "kiss-mini"}]})
+                 "rows": [{"kind": "bug", "where": "x.py:1", "evidence": "a|b", "strength": "Strong", "build": "kiss-mini"},
+                          {"kind": "bug", "where": "y.py:2", "evidence": "c", "strength": "Strong", "build": "harness", "hot": True}]})
     assert out.splitlines() == ["ponytail not installed: no audit report, no debt ledger", "",
-                                "| # | Kind | Where | Evidence | Strength | Build |", "|---|---|---|---|---|---|",
-                                "| 1 | bug | x.py:1 | a\\|b | Strong | kiss-mini |"], out
+                                "| # | Kind | Where | Evidence | Strength | Build | Hot |", "|---|---|---|---|---|---|---|",
+                                "| 1 | bug | y.py:2 | c | Strong | harness | yes |",
+                                "| 2 | bug | x.py:1 | a\\|b | Strong | kiss-mini |  |"], out
     try:
         rank([{"kind": "style", "strength": "Strong"}])
         raise AssertionError("an unknown kind must stop")

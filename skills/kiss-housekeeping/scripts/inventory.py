@@ -78,6 +78,12 @@ def main(repo, extra):
     say("files a non-Markdown file names", sum(1 for r in rows if r["used_by"]))
 
 
+def unnamed(skill, keys):
+    """The row keys that SKILL.md's step 2 line ("... gets a row ...") does not name as [key]."""
+    line = next((l for l in skill.splitlines() if "gets a row" in l), "")
+    return sorted(k for k in keys if "[%s]" % k not in line)
+
+
 def selftest():
     """A scratch repo of 4 pages: 4 rows, the broken link, the tool that names one page's path, and the
     project's own gate CONFIG (its history folder) read from tools/check_docs.py."""
@@ -98,6 +104,10 @@ def selftest():
     assert rows["docs/setup-guide.md"]["broken"] == ["2:gone.md"] and rows["docs/setup-guide.md"]["inbound"] == 1
     assert rows["README.md"]["used_by"] == [] and rows["docs/notes/2026-10-01-idea.md"]["kind"] == "record"
     assert "inventory: 4 Markdown files" in out.stderr, out.stderr
+    keys = set(rows["README.md"])                    # SKILL.md step 2 names each key a row has, in brackets
+    skill = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "SKILL.md"), encoding="utf-8").read()
+    assert unnamed(skill, keys) == [], unnamed(skill, keys)
+    assert unnamed(skill.replace("[copy_of]", ""), keys) == ["copy_of"], "a step 2 that lacks a key fails"
     return "inventory selftest ok: 4 rows of 4 pages, 1 path user, 1 broken link, the project's CONFIG"
 
 
