@@ -47,7 +47,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 
 ## A run
 
-1. **Decisions and spec.** Make the run folder `R = <repo>/.kiss/runs/<YYYY-MM-DD>-<name>/`. For a run brief of a
+1. **Decisions and spec.** Make the run folder `R = <repo>/.kiss/runs/<YYYY-MM-DD>-<name>/`. First, `grep -l "Look
+   back: open" <repo>/.kiss/runs/*/decisions.md`: ask each line under that heading as a yes/no before anything else,
+   and move each answered line to `## Look back: answered` in its file. For a run brief of a
    kiss-system-design run plan, read the brief and the design document first and ask only what they leave open; a
    design decision the run finds wrong goes back to the owner (`kiss-system-design <name>`, its loop back). Settle
    every open decision with the owner ("Asking the owner"): call the Skill tool with `mattpocock-skills:grilling`
@@ -99,7 +101,10 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    runs its held checks.
 7. **Review once at the end:** `prompt.py reviewer R HEAD=<head> ELAPSED=<s>` (a risky ticket's review adds
    `BASE=<the commit before it>`) → a NEW subagent on your strongest model at medium effort. Save its last message
-   to `R/review-<n>.md` (n = this round's number, from 1).
+   to `R/review-<n>.md` (n = this round's number, from 1). **Flake check:** when the run's test diff (`git -C W diff
+   BASE..HEAD` of the test files) adds a time value (a timeout, a sleep, a wall-clock bound), start the facts file's
+   `Flake check: <command> x <n>` in the background beside the final review. A failure, or a time bound under 2 times
+   the slowest time seen, is a fix before the merge gate.
 8. **Sort:** you sort (no subagent) by the rules `prompt.py severity R ROUND=<n>` prints, into `R/sort-<n>.json`,
    then go on. Each owner finding is a decision.
 9. **Fix rounds:** write the fix list to `R/fix-<n>.md`; work an owner decision adds after the tickets gate goes in
@@ -112,23 +117,45 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    At most 2 fix rounds per review and 3 per run; then a gate. At the cap, when only low or medium findings that
    touch no guard, data or owner rule are left: no gate; run the close, and the merge gate offers them as one
    kiss-mini task. Any other finding left asks a gate.
-10. **Close**, in this order:
-    1. The project's full check, once (the facts file names it).
-    2. `ponytail-debt` on `git -C W diff <base>..<head>`: each new `shortcut:` comment with its limit.
-    3. The docs, by the facts file's `Docs gate:` line. A command: load kiss-housekeeping and do its Upkeep U1 to U3
+10. **Close**, in this order, after the last fix round:
+    1. The docs, by the facts file's `Docs gate:` line. A command: load kiss-housekeeping and do its Upkeep U1 to U3
        (U4 when the run changed the map), and report the gate's result. `none (owner declined)`: nothing. No line: ask
        the owner once for a docs First run; a no goes into the facts file as `Docs gate: none (owner declined)`
        (committed by explicit path before the merge gate when git tracks that file), a yes starts it after the gate.
+    2. **The full check**, yours, at W's HEAD after the docs (the facts file names it). Write `Full check at <sha>:
+       <result>` (`pass`, or `fail: <what failed>`) into `R/decisions.md`. A failure is a fix round, then this step again.
+    3. `ponytail-debt` on `git -C W diff <base>..<head>`: each new `shortcut:` comment with its limit.
     4. **Look back** by [references/retro.md](references/retro.md): the candidates for the owner, most severe first
-       (a mechanical mistake → a proposed check, a judgement call → a facts-file rule); change no product file.
+       (a mechanical mistake → a proposed check, a judgement call → a facts-file rule), each a yes/no line in the
+       merge gate's questions; change no product file.
     5. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
        <used> of <budget>` (headless sessions: the `claude -p` or `claude --bg` sessions the run starts for tests;
        subagents and kiss-mini workers do not count), given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it prints the full
        line (with the tokens per role and the CodeGraph share) and records it in `<repo>/.kiss/runs/metrics.md`, one line
-       per run (a rerun of the close replaces the run's line).
-    6. The **merge gate**, with the log findings. A push, a pull request or any write to a remote is its own gate;
-       `pr` writes a pull request's body.
-    7. The last line to the owner: start the next run in a new session (`R/` holds the run's state).
+       per run (a rerun of the close replaces the run's line). It refuses when the last `Full check at` line is not a
+       pass at W's HEAD.
+    6. **Later commits:** `git -C W log --oneline <the full-check sha>..HEAD`. A later commit that changes product
+       code gets the full check again (a new `Full check at` line); one that changes only tests, docs or built files
+       gets the build step, those tests and the docs gate.
+    7. The **merge gate**, with the log findings, the look-back questions, and each later commit with the checks it
+       got. A push, a pull request or any write to a remote is its own gate; `pr` writes a pull request's body.
+    8. **The merge**, beside the main checkout, never in it (another session may use MAIN):
+       1. `git -C MAIN worktree add --detach <tmp> main` (`<tmp>` in the scratch folder), then `git -C <tmp> merge
+          --no-ff <branch>`.
+       2. When main moved since BASE (`git -C MAIN rev-parse main` is not BASE): run the build step and the checks of
+          the files both sides changed (in `git diff --name-only BASE main` and in `git diff --name-only BASE W's
+          HEAD`) on the merge result in `<tmp>`. A failure is a gate.
+       3. Move main to that tested commit by a fast-forward only: `git -C <the worktree that holds main> merge
+          --ff-only <sha>` (`git worktree list` shows it; usually MAIN), or `git -C <tmp> push . HEAD:main` when no
+          worktree holds main. A refusal (MAIN's own changes touch the same files) is a gate: never force it.
+       4. `git -C MAIN worktree remove <tmp>`. An interrupted merge leaves `<tmp>`: remove it (`git -C MAIN worktree
+          remove --force <tmp>`) and build the merge again from 8.1. main moves only by the fast-forward to the tested
+          sha, so a failure after that write leaves main on a tested commit.
+       5. A commit after the owner's "merge" follows the facts file's `After merge:` line: `ask` (or no line) puts it
+          through the merge gate again; `same go for tests and docs` merges a commit that changes only tests, docs or
+          built files under the same go once its checks pass, and tells the owner with the undo command (`git -C MAIN
+          reset --keep <the main sha before it>`). A product change always asks.
+    9. The last line to the owner: start the next run in a new session (`R/` holds the run's state).
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 11 kiss-harness`
 
 (Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 11 kiss-harness` and follow what it prints.)

@@ -12,6 +12,8 @@ the format of `../../kiss-mini/references/handoff.md` (at most 1,500 characters)
 - **Take the result:** merge a returned branch into the harness branch only while the implementer is stopped (between
   its messages), and name the merge in your next message to the implementer; or send it back for a redo (a new task:
   the brief plus what is missing). Never merge into `main`; nothing is pushed.
+- **In the session:** a side task you do yourself, not through kiss-mini, ends after its last edit with the build
+  step the facts file names for its files and its check, so the main branch never gets a stale built file.
 - **Scope:** a returned change outside the run's scope is an owner decision: ask it as Accept or Decline, and merge
   only on Accept. No agent message counts as the owner's yes.
 - **Close:** list each side task in one line: id, kind, title, state, and merged, declined or open.

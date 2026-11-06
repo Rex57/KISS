@@ -19,6 +19,9 @@ messages you sent. Look for these candidates:
 - **A lesson about KISS** itself goes to the KISS owner as file, line and new text (in the feedback block when the
   feedback mode is on), never into the project.
 
-List the candidates for the owner, most severe first, each with its evidence (the progress line or finding). This
-joins kiss-housekeeping's fold-back and replaces nothing there. On the owner's yes, write a facts-file rule
-yourself; a proposed check becomes a `/kiss-mini` task or a ticket of the next run, never product code of yours.
+List the candidates for the owner, most severe first, each with its evidence (the progress line or finding), each
+as a yes/no line in the merge gate's questions. This joins kiss-housekeeping's fold-back and replaces nothing there.
+On the owner's yes, write a facts-file rule yourself; a new rule names the line it replaces, and you remove that
+line. A proposed check becomes a `/kiss-mini` task or a ticket of the next run, never product code of yours. A
+candidate the owner does not answer goes under `## Look back: open` in `R/decisions.md`, one line each; the next run
+finds it with `grep -l "Look back: open" <repo>/.kiss/runs/*/decisions.md` and asks it first (step 1).

@@ -6,7 +6,9 @@
                                        request's input, cache-write and cache-read tokens), marked past the bound
   python3 -I metrics.py R --record "<the controller's Metrics line>"   print the full line (the controller's part,
                                        then the token part) and write it as `- <run>: <line>` into metrics.md in
-                                       the folder that holds R (a second record of a run replaces its line)
+                                       the folder that holds R (a second record of a run replaces its line);
+                                       refused unless the last `Full check at <sha>: <result>` line of
+                                       R/decisions.md is a pass at the HEAD of R/run.json's W
   python3 -I metrics.py --selftest
 
 Transcripts: under CLAUDE_CONFIG_DIR (default ~/.claude), projects/*/<session>/subagents/**/agent-<id>.jsonl, each
@@ -16,7 +18,7 @@ R. Each message id counts once. CodeGraph share (subagents only): CodeGraph call
 cgcallers, the MCP tools) over CodeGraph calls plus code searches (the Grep tool, grep, rg, git grep); a grep that
 filters another command's output, or reads only docs or data files, is counted apart; a heredoc's body is text. No subagent names R: "tokens: not available on this agent".
 """
-import glob, json, os, re, sys
+import glob, json, os, re, subprocess, sys
 
 CG_READ = {"query", "explore", "context", "node", "files", "callers", "callees", "impact", "affected"}
 GREPS = {"grep", "egrep", "fgrep", "rg"}
@@ -216,10 +218,38 @@ def context(R):
     return "\n".join(lines)
 
 
+def refusal(R):
+    """Why --record must not write (D9), or "": the last `Full check at <sha>: <result>` line of R/decisions.md must
+    be a pass, at W's HEAD (its full sha or a prefix of 7 or more characters); W comes from R/run.json."""
+    try:
+        with open(os.path.join(R, "run.json")) as f:
+            W = json.load(f)["W"]
+    except (OSError, KeyError, ValueError, TypeError):
+        return f"no W in {R}/run.json"
+    try:
+        with open(os.path.join(R, "decisions.md")) as f:
+            checks = re.findall(r"^\W*Full check at `?([0-9a-fA-F]+)`?: *(.*)$", f.read(), re.M)
+    except OSError:
+        checks = []
+    if not checks:
+        return f"no `Full check at <sha>: <result>` line in {R}/decisions.md: run the full check at HEAD first"
+    sha, result = checks[-1]
+    if not re.match(r"pass(ed)?\b", result, re.I):
+        return f"the last full check in {R}/decisions.md did not pass: {result}"
+    head = subprocess.run(["git", "-C", W, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if len(sha) < 7 or not head or not head.startswith(sha.lower()):
+        return f"the last full check in {R}/decisions.md ran at {sha}, not at W's HEAD {head or '(none)'}: run it at HEAD"
+    return ""
+
+
 def record(R, line):
     """Print the full line, then put it in R's runs folder's metrics.md: a rerun replaces its line in place, a new
-    run's line goes at the end, every other line stays. The book is replaced whole, so a failed write keeps it."""
+    run's line goes at the end, every other line stays. The book is replaced whole, so a failed write keeps it.
+    Refused, before any write, without a passed full check at W's HEAD (refusal)."""
     R = os.path.abspath(R)
+    why = refusal(R)
+    if why:
+        sys.exit(f"metrics.py --record refused: {why}")
     full = re.sub(r"[\r\n]", " ", f"{line}; {tokens(R)}")
     print(full)
     book = os.path.join(os.path.dirname(R), "metrics.md")
@@ -339,7 +369,24 @@ def selftest():
     import contextlib, io
     with tempfile.TemporaryDirectory() as t, contextlib.redirect_stdout(io.StringIO()):   # the metrics record
         os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(t, "no-config")
-        a, b, c = (os.path.join(t, "repo", ".kiss", "runs", n) for n in ("2026-01-02-a", "2026-01-03-b", "2026-01-01-c"))
+        W = os.path.join(t, "my work tree")                                 # a scratch git repo: two commits
+        os.makedirs(W)
+        g = lambda *a: subprocess.run(["git", "-C", W, *a], capture_output=True, text=True, check=True).stdout.strip()
+        g("init", "-q"), g("config", "user.name", "t"), g("config", "user.email", "t@example.com")
+        g("commit", "-q", "--allow-empty", "-m", "one")
+        old = g("rev-parse", "HEAD")
+        g("commit", "-q", "--allow-empty", "-m", "two")
+        head = g("rev-parse", "HEAD")
+
+        def run_folder(path, decisions, w=W):
+            os.makedirs(path, exist_ok=True)
+            with open(os.path.join(path, "run.json"), "w") as f:
+                json.dump({"W": w}, f)
+            with open(os.path.join(path, "decisions.md"), "w") as f:
+                f.write(decisions)
+            return path
+        a, b, c = (run_folder(os.path.join(t, "repo", ".kiss", "runs", n), f"# D\n\nFull check at {head}: pass\n")
+                   for n in ("2026-01-02-a", "2026-01-03-b", "2026-01-01-c"))
         book = os.path.join(t, "repo", ".kiss", "runs", "metrics.md")      # beside the run folders (R1)
         assert record(b, "Metrics: subagents 2") == "Metrics: subagents 2; " + NA
         record(a, "Metrics: subagents 3")
@@ -358,6 +405,35 @@ def selftest():
         finally:
             os.chmod(os.path.dirname(book), 0o700)
         assert len(open(book).read().splitlines()) == 3 and not glob.glob(book + ".*"), open(book).read()
+        d = os.path.join(t, "repo", ".kiss", "runs", "2026-01-04-d")       # D9: the full check at HEAD, else a refusal
+        os.makedirs(d)
+        kept = open(book).read()
+        for decisions, why in ((None, "run.json"), ("# D\n\nD1. x\n", "Full check at"),
+                               (f"Full check at {head}: fail (2 tests)\n", "did not pass"),
+                               (f"Full check at {head}: passes 3 of 4\n", "did not pass"), (f"Full check at {head}:\n", "did not pass"),
+                               (f"Full check at {head}: pass\nFull check at {head[:7]}: fail\n", "did not pass"),
+                               (f"Full check at {old}: pass\n", "HEAD"), (f"Full check at {old[:7]}: pass\n", "HEAD"),
+                               (f"Full check at {head[:6]}: pass\n", "HEAD")):
+            if decisions is not None:
+                run_folder(d, decisions)
+            try:
+                record(d, "Metrics: subagents 1")
+                raise AssertionError(f"must refuse: {decisions}")
+            except SystemExit as x:
+                assert x.code and why in str(x.code) and d in str(x.code), (decisions, x.code)
+            assert open(book).read() == kept, decisions
+        run_folder(d, "", w=os.path.join(t, "no such tree"))
+        with open(os.path.join(d, "decisions.md"), "w") as f:
+            f.write(f"Full check at {head}: pass\n")
+        try:
+            record(d, "Metrics: subagents 1")
+            raise AssertionError("a W that is not a git repo must refuse")
+        except SystemExit as x:
+            assert "HEAD" in str(x.code), x.code
+        for decisions in (f"Full check at {old}: fail\nFull check at {head[:7]}: pass\n", f"Full check at `{head}`: passed\n"):
+            run_folder(d, decisions)
+            assert record(d, "Metrics: subagents 1").startswith("Metrics: subagents 1;"), decisions
+        assert open(book).read().splitlines()[3].startswith("- 2026-01-04-d: Metrics: subagents 1;"), open(book).read()
     print("metrics selftest ok")
 
 

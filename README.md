@@ -161,12 +161,17 @@ the first line of the run's `progress.md` records which skills the run used.
    findings that touch no guard, data or rule of yours are left: the merge gate offers them as one `/kiss-mini`
    task). A risky ticket gets its own review only when it guards real data or later tickets build on its guard;
    meanwhile the implementer builds the tickets that do not depend on it.
-5. **Close:** the project's full check, one metrics line (subagents, fix rounds, rechecks, headless sessions,
-   minutes against the budget, and on Claude Code the tokens per role and the CodeGraph share against code searches, with a grep after a
-   pipe or on docs or data counted apart), recorded one line
-   per run in `.kiss/runs/metrics.md`, a look back at the run (each mistake becomes a proposed check or a rule, on your yes), the list of new `shortcut:` comments (`ponytail-debt`), the docs Upkeep
-   (`kiss-housekeeping`) when `.kiss/project.md` names a docs gate (with no `Docs gate:` line it asks you once
-   whether to do a docs First run, and records a no), and the merge gate: one yes, or none when `.kiss/project.md` says `Merge: after a green close`. A push always asks.
+5. **Close**, after the last fix round: the docs Upkeep (`kiss-housekeeping`) when `.kiss/project.md` names a docs
+   gate (with no `Docs gate:` line it asks you once whether to do a docs First run, and records a no); the
+   controller's own full check at the head, written as `Full check at <sha>: <result>`; the list of new `shortcut:`
+   comments (`ponytail-debt`); a look back at the run (each mistake becomes a proposed check or a rule, each a yes/no
+   at the merge gate; an unanswered one is kept and asked first by the next run); one metrics line (subagents, fix
+   rounds, rechecks, headless sessions, minutes against the budget, and on Claude Code the tokens per role and the
+   CodeGraph share against code searches, with a grep after a pipe or on docs or data counted apart), recorded one
+   line per run in `.kiss/runs/metrics.md` and refused unless that full check passed at the head; and the merge gate,
+   which names each commit made after the full check with the checks it got: one yes, or none when
+   `.kiss/project.md` says `Merge: after a green close`. The merge is built and checked in a temporary worktree
+   beside your main checkout, and main moves to that tested commit by a fast-forward. A push always asks.
 
 The controller asks you two kinds of thing. A **decision** (`D<n>`) is a choice about the product, its data, its
 interfaces or its tests, and goes into `decisions.md`. A **gate** (the tickets, more rounds, the budget, the
