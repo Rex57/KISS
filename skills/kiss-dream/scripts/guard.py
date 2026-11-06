@@ -8,6 +8,8 @@
   python3 -I guard.py move MEMDIR TRASH FILE...  move MEMDIR/FILE into the TRASH folder
   python3 -I guard.py again MEMDIR            after CHANGED: copy MEMDIR to copy-2/ (copy-3/...), make it the expected copy
   python3 -I guard.py finish MEMDIR TRASH     at the end: move this run's scratch folder into the TRASH folder
+  python3 -I guard.py unrecorded REPO         list each run folder of REPO/.kiss/runs/ with a run.json, no
+                                              calls.jsonl and no line in its metrics.md (nothing when there is none)
   python3 -I guard.py --selftest
 
 Before a write or move: the report table (every step not met) and LOCK-HELD (exit 3) when MEMDIR/.consolidate-lock
@@ -132,6 +134,21 @@ def move(memdir, c, trash, files):
     return (2, ["not a note here: %s" % " ".join(missing)]) if missing else guarded(memdir, c, change)
 
 
+def unrecorded(repo):
+    """Each run folder under repo/.kiss/runs/ with a run.json, no calls.jsonl and no `- <run>: ` line in the runs
+    folder's metrics.md: its transcripts are still the only record of its metrics. An unreadable metrics.md holds no
+    line (a doubt keeps the transcripts)."""
+    runs = os.path.join(repo, ".kiss", "runs")
+    try:
+        with open(os.path.join(runs, "metrics.md")) as f:
+            book = f.read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        book = []
+    return [os.path.join(runs, n) for n in (sorted(os.listdir(runs)) if os.path.isdir(runs) else [])
+            if os.path.isfile(os.path.join(runs, n, "run.json")) and not os.path.exists(os.path.join(runs, n, "calls.jsonl"))
+            and not any(line.startswith("- %s: " % n) for line in book)]
+
+
 def again(memdir, c):
     n = 2
     while os.path.exists(os.path.join(c, "copy-%d" % n)):
@@ -233,17 +250,44 @@ def selftest():
         # the end: the scratch folder goes into the trash, and no copy stays in the cache
         code, out = finish(mem, c, os.path.join(t, "trash"))
         assert code == 0 and not os.path.exists(c) and os.path.isdir(os.path.join(t, "trash", os.path.basename(c), "first")), out
+    cli = lambda *a: subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "unrecorded", *a], capture_output=True, text=True)
+    with tempfile.TemporaryDirectory() as repo:                 # the run folders whose metrics live only in transcripts
+        runs = os.path.join(repo, ".kiss", "runs")
+        assert cli(repo).returncode == 0 and cli(repo).stdout == "", "no runs folder: nothing listed"
+        for name, files in (("2026-01-01-saved", ["run.json", "calls.jsonl"]), ("2026-01-02-booked", ["run.json"]),
+                            ("2026-01-03-open", ["run.json", "decisions.md"]), ("2026-01-04-norun", ["decisions.md"])):
+            os.makedirs(os.path.join(runs, name))
+            for f in files:
+                open(os.path.join(runs, name, f), "w").close()
+        with open(os.path.join(runs, "metrics.md"), "w") as f:
+            f.write("- 2026-01-02-booked: Metrics: subagents 2\n- 2026-01-03-open-old: Metrics: subagents 1\n")
+        r = cli(repo)
+        assert (r.returncode, r.stdout) == (0, os.path.join(runs, "2026-01-03-open") + "\n"), r
+        os.chmod(os.path.join(runs, "metrics.md"), 0)          # an unreadable book holds no line: a doubt keeps them
+        try:
+            r = cli(repo)
+        finally:
+            os.chmod(os.path.join(runs, "metrics.md"), 0o600)
+        assert r.returncode == 0 and r.stdout.splitlines() == [os.path.join(runs, n) for n in ("2026-01-02-booked", "2026-01-03-open")], r
+        for bad in (os.path.join(repo, "no such repo"), os.path.join(runs, "metrics.md"), ""):
+            r = cli(bad)
+            assert r.returncode not in (0, None) and r.stdout == "" and (r.stderr.strip() or "").startswith("not a folder"), (bad, r)
     print("guard selftest ok")
 
 
 def main(argv):
     if argv[1:] == ["--selftest"]:
         return selftest()
-    if len(argv) < 3 or argv[1] not in ("start", "where", "write", "move", "again", "finish"):
+    if len(argv) < 3 or argv[1] not in ("start", "where", "write", "move", "again", "finish", "unrecorded"):
         sys.exit(__doc__)
     cmd, memdir = argv[1], argv[2]
     if not os.path.isdir(memdir):
-        sys.exit("not a folder: %s" % memdir)
+        sys.exit("not a folder: %s" % (memdir or "(an empty argument)"))
+    if cmd == "unrecorded":
+        out = unrecorded(memdir)
+        if out:
+            print("\n".join(out))
+        return
     if cmd == "start":
         c = start(memdir)
         if c is None:
