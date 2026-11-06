@@ -3,7 +3,8 @@
 
   python3 -I tickets.py check RUN        the shape; after `freeze`, also: only `passes` changed; a WARN (exit 0)
                                          for a ticket that lists code files that exist in the repo of RUN, and no
-                                         symbols, and for each symbol that repo's CodeGraph index does not hold
+                                         symbols, and (before `freeze` only) for each symbol that repo's CodeGraph
+                                         index does not hold
   python3 -I tickets.py freeze RUN       copy tickets.json to tickets.orig.json at the build start
   python3 -I tickets.py render RUN       write issues/<ID>.md, the text briefs.py seeds
   python3 -I tickets.py open RUN         the open tickets, one per line
@@ -251,6 +252,16 @@ def selftest():
                 except SystemExit as x:
                     assert x.code == 0, x.code                            # a WARN never fails the check
             assert out.getvalue().splitlines() == want + ["ok: 2 tickets, 0 pass"], out.getvalue()
+        with contextlib.redirect_stdout(io.StringIO()):
+            main(["tickets.py", "freeze", run])
+        called = []                                                      # after the freeze: no query, no symbol WARN
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            try:
+                main(["tickets.py", "check", run], lookup=lambda *a, timeout=120: called.append(a) or fake(*a))
+            except SystemExit as x:
+                assert x.code == 0, x.code
+        assert out.getvalue().splitlines() == ["ok: 2 tickets, 0 pass"] and called == [], (out.getvalue(), called)
     gone = lambda *a, timeout=120: (_ for _ in ()).throw(FileNotFoundError("codegraph"))
     assert unindexed([dict(good[0], symbols=["f"])], root="/no/such/repo", run=gone) == ["symbol check skipped: no CodeGraph index in /no/such/repo"]
     with tempfile.TemporaryDirectory() as root:                          # an index, but no codegraph on PATH
@@ -276,7 +287,7 @@ def main(argv, lookup=briefs.run):
         orig = load(run, "tickets.orig.json") if os.path.exists(os.path.join(run, "tickets.orig.json")) else None
         bad = problems(rows, orig)
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(run))))   # <repo>/.kiss/runs/<run>
-        warn = warnings(rows, root) + unindexed(rows, root, lookup)
+        warn = warnings(rows, root) + ([] if orig else unindexed(rows, root, lookup))   # symbols: before the freeze only
         print("\n".join(bad + warn) if bad else "\n".join(warn + [
             f"ok: {len(rows)} tickets, {len(rows) - len(open_tickets(rows))} pass"]))
         sys.exit(1 if bad else 0)
