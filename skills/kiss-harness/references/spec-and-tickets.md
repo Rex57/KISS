@@ -33,7 +33,8 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
 - **User stories:** a long numbered list, `As a <actor>, I want <feature>, so that <benefit>`, that covers every
   part of the feature.
 - **Implementation decisions:** the modules to build or change, their interfaces, schema changes, API contracts and
-  the owner's technical rulings. No file paths and no code: they go stale. A prototype's snippet that states a
+  the owner's technical rulings. No file paths and no code: they go stale (one exception: "as before" and "as now"
+  cite `file:line` at BASE). A rule that applies to several modules gets its own bullet that names each module. A prototype's snippet that states a
   decision better than words (a state machine, a schema, a type) may stay, marked as from a prototype. For each
   one-way door, list the options rejected and why. A changed module interface or seam is written in
   `codebase-design`'s words (module, interface, seam, depth) when that skill is installed.
@@ -57,7 +58,7 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
   how far the change reaches, each batch a ticket after the first stage; then remove the old form, in a ticket after
   every batch. When a batch cannot pass alone, end with one ticket that joins and checks them all.
 - **Acceptance lines** are the definition of done. Each one names its seam: `through <seam>: <what a person or a
-  test sees>`. No file paths or code in a ticket's `spec` or `acceptance`; `files` and `symbols` are only hints for
+  test sees>`. No file paths or code in a ticket's `spec` or `acceptance` (except the `file:line` of an "as before" line); `files` and `symbols` are only hints for
   the CodeGraph seed. A line that only the reviewer can check (the running product, or a reader's judgement) starts
   with `(reviewer) `; the implementer runs every other line before it sets `passes`.
 - **Failure paths and totals** each get their own acceptance line:
@@ -66,7 +67,11 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
   - A deploy ticket: one line through the built artifact, not the source.
   - A ticket whose caller has a timeout: name that timeout as a time window.
   - A line that measures a total (a count, a score) also names what must not get worse item by item.
-  - A line that says "as before" states the old behaviour as the code shows it.
+  - A line that says "as before" or "as now" states the behaviour as the code shows it, and cites its `file:line`
+    at BASE.
+  - A text the user sees (a message, a warning) is copied word for word from its decision.
+  - A ticket that changes when or where a rule runs puts each reader of that rule (from `codegraph callers`) in
+    `symbols`, and its spec names the rule each reader keeps.
   - A ticket that adds or changes a message to an agent (a continue message, a prompt line): check it against that
     agent's standing prompt, and give it an acceptance line that names what the agent then does.
 - **Ask the owner** about the breakdown: is the size right (too large, too small), is each blocking link real,

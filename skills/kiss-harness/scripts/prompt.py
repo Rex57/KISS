@@ -263,6 +263,8 @@ def selftest():
     ends = [out.index(w) for w in ("`Mutants:` (each new guard", "`Reviewer checks:` (each acceptance line", "`Skipped:` what", "`Risk:` any risk")]
     assert ends == sorted(ends), "the entry ends Mutants, Reviewer checks, Skipped, Risk"
     assert "fails on the old code" in loop["fix"] and "write a `Risk:` line for that item" in loop["fix"], "a fix is proven on the old code"
+    assert ("triage fix-now line found after this review" in sv and "a guard or data change is high" in sv
+            and sv.index("triage fix-now line") < sv.index("Write /") ), "triage fix-now lines join the sort with a severity"
     assert "take the next open ticket" not in out and "stop where it says" in out, "a continue's batch and its stop win"
     assert "only the findings of severity critical or high" in loop["recheck"], "the recheck covers only critical or high findings"
     assert "reproduced_in_app" in loop["recheck"] and "diff and the test output" in loop["recheck"]

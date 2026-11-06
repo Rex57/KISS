@@ -8,6 +8,7 @@ The reviewer reported every issue on purpose; you decide which need a fix now. A
    - "owner": a choice only the owner can make (the spec or decisions do not settle it).
    - "log": a low finding with no effect on a user, data or an owner rule (wording, style, an edge no user meets). It stays in the sort file, and you show it at the merge gate.
    A finding of medium or higher severity that fits none of these is a "fix": only a low finding goes to the log.
+   Each triage fix-now line found after this review (the Triage part of $R/decisions.md) joins "fix" as a finding with a severity; a guard or data change is high, so its fix gets a recheck.
 4. Write $R/sort-$ROUND.json:
    {"fix": [<findings, highest severity first>], "owner": [{"id": "", "question": ""}], "log": [], "dropped": [{"id": "", "why": ""}]}
 5. Go on: ask each "owner" item as a decision, then write the "fix" findings to $R/fix-$ROUND.md and start fix round $ROUND (SKILL.md step 9; after a risky ticket's solo review, at the implementer's next stop). With no "fix" finding: after a risky ticket's solo review, nothing more (the implementer builds on, SKILL.md step 6); after the final review, go on to the close.

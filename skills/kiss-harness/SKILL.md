@@ -84,11 +84,14 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    is installed" on stderr: tell the owner to start the run in a new session. Then `prompt.py implementer R ELAPSED=0` →
    start ONE subagent with that text: your strongest model at medium effort, in the background. Give every path
    absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
-5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` and `git -C MAIN status` (both
-   empty), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). **Triage** each new
+5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` (empty) and `git -C MAIN
+   status` (empty for the files the run's diff `git -C W diff --name-only BASE..HEAD` names; another session's files
+   do not stop the run), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). **Triage** each new
    `Skipped:` and `Risk:` line into one of three buckets: fix now (in the continue message), owner (a decision,
    asked at once) or log; write each line and its bucket into the "Triage" part of `R/decisions.md`. Each
-   `Reviewer checks:` line is triaged like a `Skipped:` line; a progress entry with no `Mutants:` line is a fix-now line. Run `callcheck.py -p
+   `Reviewer checks:` line is triaged like a `Skipped:` line; a progress entry with no `Mutants:` line is a fix-now line.
+   A triage claim about the base code cites its file and line. A fix-now line found after a review goes into that
+   round's `sort-<n>.json` with a severity (step 8). Run `callcheck.py -p
    W <the HEAD at the last stop, or BASE at the first>..HEAD` and send each caller line it prints to read to the implementer. Open tickets and no
    BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer (after a risky ticket,
    step 6's `--review` message goes instead). Before each continue, fix
@@ -108,7 +111,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    BASE..HEAD` of the test files) adds a time value (a timeout, a sleep, a wall-clock bound), start the facts file's
    `Flake check: <command> x <n>` in the background beside the final review. A failure, or a time bound under 2 times
    the slowest time seen, is a fix before the merge gate.
-8. **Sort:** you sort (no subagent) by the rules `prompt.py severity R ROUND=<n>` prints, into `R/sort-<n>.json`,
+8. **Sort:** you sort (no subagent) by the rules `prompt.py severity R ROUND=<n>` prints, into `R/sort-<n>.json`
+   (with the triage fix-now lines found after that review, each with a severity; a guard or data change is high),
    then go on. Each owner finding is a decision.
 9. **Fix rounds:** write the fix list to `R/fix-<n>.md`; work an owner decision adds after the tickets gate goes in
    it with the ticket rules of [references/spec-and-tickets.md](references/spec-and-tickets.md) (its failure-path
@@ -162,6 +166,11 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 11 kiss-harness`
 
 (Agents other than Claude Code: at the end of the run, run `python3 -I <the KISS plugin folder>/rules/feedback.py 11 kiss-harness` and follow what it prints.)
+
+**The pause:** on the owner's "pause", stop the subagent, and write `## Pause <time>` into `R/decisions.md`: HEAD,
+`git -C W status`, the open tickets, the next exact command and the elapsed time. The clock stops. On "resume",
+continue the same agent (the handoff of [references/agents.md](references/agents.md) when it cannot be reached), and
+the clock starts again from the elapsed time.
 
 **The clock:** the budget is 10 minutes per ticket plus 2 hours for the reviews and fix rounds, plus the facts
 file's `Full check time:`. Put "Time: elapsed
