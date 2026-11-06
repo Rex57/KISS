@@ -97,7 +97,8 @@ its row in the report says so in one line (not met, the call and its error), and
    the backup exists and each replaced memory has its revision.
 5. **Disk:** first run `guard.py unrecorded "<repo>"`, before you move anything. Each run folder it lists has no
    recorded metrics yet, and its transcripts are their only source: ask the owner, and move nothing of that repo
-   until the owner says yes. Then move every session's subagent transcripts (all but `journal.jsonl`),
+   until the owner says yes. A check that fails or is refused (`cannot read`) counts as a listed run: ask first.
+   Then move every session's subagent transcripts (all but `journal.jsonl`),
    the tool results and the marked removed-worktree folders (whole) to the Trash. In the other folders, keep the
    journals (each agent's result), the session transcripts (for resume) and the meta files; remove only folders
    left empty, with `rmdir`. Done when the moved items are in the Trash folder.

@@ -17,7 +17,7 @@ is under one hour old and its PID lives; CHANGED (exit 4) and the changed files 
 writes, updates expected/, prints WRITTEN and compares each written note with its draft (exit 5 on a difference).
 It never writes, touches or removes the lock. The scratch folder is ~/.cache/kiss-dream/<project>-<time>/, mode 700.
 """
-import filecmp, os, shutil, sys, time
+import filecmp, os, shutil, stat, sys, time
 
 LOCK = ".consolidate-lock"
 
@@ -137,15 +137,30 @@ def move(memdir, c, trash, files):
 def unrecorded(repo):
     """Each run folder under repo/.kiss/runs/ with a run.json, no calls.jsonl and no `- <run>: ` line in the runs
     folder's metrics.md: its transcripts are still the only record of its metrics. An unreadable metrics.md holds no
-    line (a doubt keeps the transcripts)."""
+    line, and a run folder the guard cannot read is listed (a doubt keeps the transcripts). An unreadable runs folder
+    stops with "cannot read"."""
     runs = os.path.join(repo, ".kiss", "runs")
     try:
         with open(os.path.join(runs, "metrics.md")) as f:
             book = f.read().splitlines()
     except (OSError, UnicodeDecodeError):
         book = []
-    return [os.path.join(runs, n) for n in (sorted(os.listdir(runs)) if os.path.isdir(runs) else [])
-            if os.path.isfile(os.path.join(runs, n, "run.json")) and not os.path.exists(os.path.join(runs, n, "calls.jsonl"))
+    try:
+        names = sorted(os.listdir(runs))
+    except FileNotFoundError:
+        names = []
+    except OSError:
+        sys.exit("cannot read: %s" % runs)
+
+    def run(n):
+        try:
+            return stat.S_ISREG(os.stat(os.path.join(runs, n, "run.json")).st_mode)
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+        except OSError:
+            return True
+    return [os.path.join(runs, n) for n in names
+            if run(n) and not os.path.exists(os.path.join(runs, n, "calls.jsonl"))
             and not any(line.startswith("- %s: " % n) for line in book)]
 
 
@@ -263,12 +278,31 @@ def selftest():
             f.write("- 2026-01-02-booked: Metrics: subagents 2\n- 2026-01-03-open-old: Metrics: subagents 1\n")
         r = cli(repo)
         assert (r.returncode, r.stdout) == (0, os.path.join(runs, "2026-01-03-open") + "\n"), r
-        os.chmod(os.path.join(runs, "metrics.md"), 0)          # an unreadable book holds no line: a doubt keeps them
-        try:
-            r = cli(repo)
-        finally:
-            os.chmod(os.path.join(runs, "metrics.md"), 0o600)
+        with open(os.path.join(runs, "metrics.md"), "ab") as f:  # an unreadable book holds no line: a doubt keeps them
+            f.write(b"\xff\xfe not UTF-8\n")                   # (not chmod 0: root reads a mode-000 file)
+        r = cli(repo)
         assert r.returncode == 0 and r.stdout.splitlines() == [os.path.join(runs, n) for n in ("2026-01-02-booked", "2026-01-03-open")], r
+        if os.geteuid():                                       # root reads a mode-000 folder: these cases need a user
+            locked = os.path.join(runs, "2026-01-05-locked")   # a run folder the guard cannot read: a doubt keeps it
+            os.makedirs(locked)
+            os.chmod(locked, 0)
+            try:
+                r = cli(repo)
+            finally:
+                os.chmod(locked, 0o700)
+            assert r.returncode == 0 and r.stdout.splitlines() == [os.path.join(runs, n) for n in ("2026-01-02-booked", "2026-01-03-open", "2026-01-05-locked")], r
+            for shut in (runs, os.path.dirname(runs)):         # an unreadable runs folder or .kiss: no list, a refusal
+                os.chmod(shut, 0)
+                try:
+                    r = cli(repo)
+                finally:
+                    os.chmod(shut, 0o700)
+                assert r.returncode not in (0, None) and r.stdout == "" and r.stderr.strip() == "cannot read: %s" % runs, (shut, r)
+        shutil.rmtree(runs)                                    # a file where the runs folder goes: a refusal, for every user
+        open(runs, "w").close()
+        r = cli(repo)
+        assert r.returncode not in (0, None) and r.stdout == "" and r.stderr.strip() == "cannot read: %s" % runs, r
+        os.remove(runs)
         for bad in (os.path.join(repo, "no such repo"), os.path.join(runs, "metrics.md"), ""):
             r = cli(bad)
             assert r.returncode not in (0, None) and r.stdout == "" and (r.stderr.strip() or "").startswith("not a folder"), (bad, r)
