@@ -25,9 +25,9 @@ plus code reads. A search (the Grep tool, grep, rg, git grep) is a symbol search
 without regex and keyword decoration, is a name the index holds (briefs.exists: W's index from R/run.json, else the
 repo's), else a literal search (find and Glob too); a code read is the Read tool, cat, sed, head, tail, nl or awk of
 a file type the index holds. Apart: literal searches, greps after a pipe, greps on docs or data (a doc or data file,
-a docs folder, or a path outside the repo and W), counts (grep -c, | wc) and calls a PreToolUse hook blocked.
+a docs folder, or a path outside the repo and W), counts (grep -c, | wc) and calls a PreToolUse hook or auto mode refused.
 Commands are split outside quotes, at pipes, `;`, `&&`, `||` and `$( )`; a heredoc's body is text. No index: the
-share is n/a with the reason. No subagent names R: "tokens: not available on this agent".
+share is n/a with the reason. No subagent of the run: "tokens: not available on this agent".
 """
 import glob, json, os, re, shlex, subprocess, sys
 
@@ -369,12 +369,16 @@ def k(n):
     return f"{int(n / 1000 + 0.5)}k"
 
 
+REFUSED = ("PreToolUse:", "The server-side auto mode classifier", "<tool_use_error>Blocked")
+
+
 def blocked_ids(path):
-    """The ids of the tool calls a PreToolUse hook blocked (they never ran)."""
+    """The ids of the tool calls a PreToolUse hook or auto mode refused (they never ran): an error result that starts
+    with one of REFUSED (a hook's result counts also with no is_error, as before)."""
     out = set()
     with open(path, errors="replace") as fh:
         for line in fh:
-            if '"tool_result"' in line and "PreToolUse:" in line:
+            if '"tool_result"' in line and any(x in line for x in REFUSED):
                 try:
                     content = json.loads(line)["message"]["content"]
                 except (ValueError, KeyError, TypeError):
@@ -382,7 +386,8 @@ def blocked_ids(path):
                 for b in content if isinstance(content, list) else []:
                     c = b.get("content") if isinstance(b, dict) else None
                     text = c if isinstance(c, str) else " ".join(x.get("text", "") for x in c or [] if isinstance(x, dict))
-                    if b.get("type") == "tool_result" and text.lstrip().startswith("PreToolUse:"):
+                    text = text.lstrip()
+                    if b.get("type") == "tool_result" and (text.startswith("PreToolUse:") or b.get("is_error") and text.startswith(REFUSED)):
                         out.add(b.get("tool_use_id"))
     return out
 
@@ -685,6 +690,15 @@ def selftest():
                       ("grep -e read -e build x.json y.md", ["docs"]), ("grep --include=*.md -rn read .", ["docs"])):
         assert bash(cmd) == want, (cmd, bash(cmd))
     assert bash("grep -rn 'def read' src", True) == ["blocked"], "a call a hook blocked never ran"
+    with tempfile.TemporaryDirectory() as t:                # D7: each refused form is blocked; a plain result is not
+        res = lambda i, text, err=True: {"type": "tool_result", "tool_use_id": i, "content": text, **({"is_error": True} if err else {})}
+        rows = [res("h", "PreToolUse:Bash hook error: no"), res("a", "The server-side auto mode classifier gave no verdict"),
+                res("s", "<tool_use_error>Blocked: sleep 30 is not allowed</tool_use_error>"),
+                res("ok", "The server-side auto mode classifier", False), res("out", "<tool_use_error>Blocked: x", False),
+                res("err", "<tool_use_error>File does not exist.</tool_use_error>")]
+        with open(os.path.join(t, "a.jsonl"), "w") as fh:
+            fh.write(json.dumps({"type": "user", "message": {"role": "user", "content": rows}}) + "\n")
+        assert blocked_ids(os.path.join(t, "a.jsonl")) == {"h", "a", "s"}, blocked_ids(os.path.join(t, "a.jsonl"))
     for argv, want in ((["grep", "-n", "foo", "app.py", "2>/dev/null"], ("foo", ["app.py"])), (["grep", "-A", "3", "foo", "app.py"], ("foo", ["app.py"])),
                        (["grep", "-e", "a", "-e", "b", "x"], ("a", ["x"])), (["grep", "-rn", "--include=*.py", "f", "."], ("f", ["."]))):
         assert grep_args(argv)[:2] == want, (argv, grep_args(argv))
@@ -796,14 +810,16 @@ def selftest():
         assert len(open(calls).read().splitlines()) == 1, open(calls).read()
         put(b1, [user("go"), said("b", 1, 1, 0, 0, tools=tools[:2])], "kiss:kiss-implementer", "k-1")
         kept = open(book).read()
-        os.chmod(os.path.dirname(book), 0o500)                              # the second write fails after the first
+        os.rename(book, book + "-kept")                                     # the second write fails after the first:
+        os.mkdir(book)                                                      # a folder where metrics.md goes (also as root)
         try:
             record(e, "Metrics: subagents 2")
-            raise AssertionError("a write to a read-only folder must fail")
+            raise AssertionError("a write over a folder must fail")
         except OSError:
             pass
         finally:
-            os.chmod(os.path.dirname(book), 0o700)
+            os.rmdir(book)
+            os.rename(book + "-kept", book)
         assert len(open(calls).read().splitlines()) == 2 and open(book).read() == kept, "the first new, the second old and whole"
         record(e, "Metrics: subagents 2")                                   # a rerun makes both new
         assert len(open(calls).read().splitlines()) == 2 and "- 2026-01-05-e: Metrics: subagents 2;" in open(book).read()
