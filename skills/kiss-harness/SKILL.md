@@ -47,9 +47,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 
 ## A run
 
-1. **Decisions and spec.** Make the run folder `R = <repo>/.kiss/runs/<YYYY-MM-DD>-<name>/`. First, `grep -l "Look
-   back: open" <repo>/.kiss/runs/*/decisions.md`: ask each line under that heading as a yes/no before anything else,
-   and move each answered line to `## Look back: answered` in its file. For a run brief of a
+1. **Decisions and spec.** Make the run folder `R = <repo>/.kiss/runs/<YYYY-MM-DD>-<name>/`. First, `grep -l '^## Look
+   back: open' <repo>/.kiss/runs/*/decisions.md`: ask each line under that heading as a yes/no before anything else,
+   and move each answered line to `## Look back: answered` in its file (remove the heading with its last line). For a run brief of a
    kiss-system-design run plan, read the brief and the design document first and ask only what they leave open; a
    design decision the run finds wrong goes back to the owner (`kiss-system-design <name>`, its loop back). Settle
    every open decision with the owner ("Asking the owner"): call the Skill tool with `mattpocock-skills:grilling`
@@ -89,22 +89,24 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    do not stop the run), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). **Triage** each new
    `Skipped:` and `Risk:` line into one of three buckets: fix now (in the continue message), owner (a decision,
    asked at once) or log; write each line and its bucket into the "Triage" part of `R/decisions.md`. Each
-   `Reviewer checks:` line is triaged like a `Skipped:` line; a progress entry with no `Mutants:` line is a fix-now line.
+   `Reviewer checks:` line is triaged like a `Skipped:` line; a ticket entry (`## <ID> <commit>`) with no `Mutants:` line is a fix-now line.
    A triage claim about the base code cites its file and line. A fix-now line found after a review goes into that
    round's `sort-<n>.json` with a severity (step 8). Run `callcheck.py -p
    W <the HEAD at the last stop, or BASE at the first>..HEAD` and send each caller line it prints to read to the implementer. Open tickets and no
    BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer (after a risky ticket,
-   step 6's `--review` message goes instead). Before each continue, fix
+   step 6's `--review` message goes instead). When it stopped on a held check and the solo reviewer still runs, send
+   nothing; when that reviewer stops, send "product free" with the next continue. Before each continue, fix
    round and recheck, run `metrics.py R --context` (Claude Code): an agent it marks gets the handoff of
    [references/agents.md](references/agents.md) instead, and the round goes to the new one. After 3 continuations, a
    gate. On BLOCKED: a decision when the block needs a choice, else a gate.
 6. **A risky ticket** is reviewed alone (step 7 on its commits) as soon as the implementer names it; otherwise the
-   final review covers it. Start the solo reviewer, and at once send the implementer `tickets.py continue R <elapsed>
+   final review covers it. Start the solo reviewer (with "one at a time" in the facts file's `Shared test resources:`,
+   only after the previous solo reviewer stops), and at once send the implementer `tickets.py continue R <elapsed>
    <budget> --review <ID>`: only the open tickets that do not depend on the risky one, up to the next risky ticket.
    When it prints nothing (each open ticket waits for it), send no message. The solo review's fix round goes to the
    implementer at its next stop. When the message holds the product checks (the facts file's `Shared test
    resources:` says "one at a time"), send the implementer "product free" as soon as the solo reviewer stops; it then
-   runs its held checks.
+   runs its held checks (step 5: a stop on a held check waits for it).
 7. **Review once at the end:** `prompt.py reviewer R HEAD=<head> ELAPSED=<s>` (a risky ticket's review adds
    `BASE=<the commit before it>`) → a NEW subagent on your strongest model at medium effort. Save its last message
    to `R/review-<n>.md` (n = this round's number, from 1). **Flake check:** when the run's test diff (`git -C W diff
@@ -135,16 +137,18 @@ is in your skill list; a skill that is not there is skipped, and the step does w
     4. **Look back** by [references/retro.md](references/retro.md): the candidates for the owner, most severe first
        (a mechanical mistake → a proposed check, a judgement call → a facts-file rule), each a yes/no line in the
        merge gate's questions; change no product file.
-    5. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
+    5. **Later commits:** `git -C W log --oneline <the full-check sha>..HEAD`, before the metrics line (and again at
+       the merge gate for any commit made after it). A later commit that changes product code gets the full check
+       again and its own `Full check at` line. One that changes only tests, docs or built files gets the build step,
+       those tests and the docs gate; on a pass, write `Full check at <HEAD>: pass (after <sha>: build step, <tests>,
+       docs gate)`.
+    6. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
        <used> of <budget>` (headless sessions: the `claude -p` or `claude --bg` sessions the run starts for tests;
        subagents and kiss-mini workers do not count), given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it prints the full
        line (with the tokens per role and the `CodeGraph share (v2)`) and records it in `<repo>/.kiss/runs/metrics.md`, one line
        per run (a rerun of the close replaces the run's line), and saves each subagent tool call in `R/calls.jsonl`
        (the share's evidence after a tidy-up moves the transcripts). It refuses when the last `Full check at` line is not a
        pass at W's HEAD.
-    6. **Later commits:** `git -C W log --oneline <the full-check sha>..HEAD`. A later commit that changes product
-       code gets the full check again (a new `Full check at` line); one that changes only tests, docs or built files
-       gets the build step, those tests and the docs gate.
     7. The **merge gate**, with the log findings, the look-back questions, and each later commit with the checks it
        got. A push, a pull request or any write to a remote is its own gate; `pr` writes a pull request's body.
     8. **The merge**, beside the main checkout, never in it (another session may use MAIN):

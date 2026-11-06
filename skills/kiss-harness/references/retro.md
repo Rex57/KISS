@@ -24,4 +24,4 @@ as a yes/no line in the merge gate's questions. This joins kiss-housekeeping's f
 On the owner's yes, write a facts-file rule yourself; a new rule names the line it replaces, and you remove that
 line. A proposed check becomes a `/kiss-mini` task or a ticket of the next run, never product code of yours. A
 candidate the owner does not answer goes under `## Look back: open` in `R/decisions.md`, one line each; the next run
-finds it with `grep -l "Look back: open" <repo>/.kiss/runs/*/decisions.md` and asks it first (step 1).
+finds it with `grep -l '^## Look back: open' <repo>/.kiss/runs/*/decisions.md` and asks it first (step 1).
