@@ -14,20 +14,40 @@
 Transcripts: under CLAUDE_CONFIG_DIR (default ~/.claude), projects/*/<session>/subagents/**/agent-<id>.jsonl, each
 beside agent-<id>.meta.json (its agentType gives the role). A subagent counts when its first message (the prompt)
 names R; the controller is the session file beside that subagents folder, counted from its first message that names
-R. Each message id counts once. CodeGraph share (subagents only): CodeGraph calls (the CLI's read commands,
-cgcallers, the MCP tools) over CodeGraph calls plus code searches (the Grep tool, grep, rg, git grep); a grep that
-filters another command's output, or reads only docs or data files, is counted apart; a heredoc's body is text. No subagent names R: "tokens: not available on this agent".
+R. Each message id counts once. CodeGraph share (v2), subagents only: CodeGraph calls (the MCP tools, the CLI's
+read commands, cgcallers, and the seed scripts briefs.py and callcheck.py) over CodeGraph calls plus symbol searches
+plus code reads. A search (the Grep tool, grep, rg, git grep) is a symbol search when one alternative of its pattern,
+without regex and keyword decoration, is a name the index holds (briefs.exists: W's index from R/run.json, else the
+repo's), else a literal search (find and Glob too); a code read is the Read tool, cat, sed, head, tail, nl or awk of
+a file type the index holds. Apart: literal searches, greps after a pipe, greps on docs or data (a doc or data file,
+a docs folder, or a path outside the repo and W), counts (grep -c, | wc) and calls a PreToolUse hook blocked.
+Commands are split outside quotes, at pipes, `;`, `&&`, `||` and `$( )`; a heredoc's body is text. No index: the
+share is n/a with the reason. No subagent names R: "tokens: not available on this agent".
 """
-import glob, json, os, re, subprocess, sys
+import glob, json, os, re, shlex, subprocess, sys
 
-CG_READ = {"query", "explore", "context", "node", "files", "callers", "callees", "impact", "affected"}
-GREPS = {"grep", "egrep", "fgrep", "rg"}
-DOCS = {".md", ".json", ".jsonl", ".txt", ".log", ".yaml", ".yml", ".toml", ".csv"}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import briefs  # noqa: E402  (the index lookup is the seed's own: briefs.exists)
+
+CG_READ = {"query", "explore", "context", "node", "files", "callers", "callees", "impact", "affected", "search"}
+SEEDS = {"briefs.py", "callcheck.py"}
+CG_SCRIPTS = SEEDS | {"cgcallers.py"}
+GREPS = {"grep", "egrep", "fgrep", "rg", "ag", "ack"}
+READERS = {"cat", "sed", "head", "tail", "nl", "awk"}
+DOCS = {".md", ".markdown", ".txt", ".rst", ".json", ".jsonl", ".log", ".csv", ".tsv", ".toml", ".yaml", ".yml",
+        ".ini", ".cfg", ".env", ".out", ".lock", ".plist", ".svg", ".png", ".jpg", ".pdf", ".diff", ".patch"}
+GREP_ARG = {"-e", "-f", "-A", "-B", "-C", "-m", "-g", "-t", "--regexp", "--file", "--include", "--exclude",
+            "--exclude-dir", "--glob", "--type", "--max-count", "--context", "--after-context", "--before-context"}
+# a search pattern's decoration: regex escapes and classes, and the keywords that lead a definition
+DECOR = re.compile(r"\\[bswWdBSD<>]|\\\(|\\\)|\\\.|[\^$*+?()\[\]{}]|\b(?:def|func|function|class|struct|enum|protocol|"
+                   r"extension|interface|async|export|static|private|public|let|var|const|override|fileprivate|"
+                   r"internal|mutating|final)\b")
+SUBST = re.compile(r"\$\(([^()]*)\)")
 HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)")
 # shortcut: a << inside $(( )) or (( )) is a shift, so those spans are dropped before the heredoc search; one that
 # holds a nested "))" ends early, and a << in quotes still starts a heredoc; upgrade when counts look wrong
 ARITH = re.compile(r"\$?\(\(.*?\)\)")
-LEAD = {"rtk", "do", "then", "else", "time", "xargs", "env", "sudo"}   # words before the command itself
+LEAD = {"rtk", "do", "then", "else", "time", "xargs", "env", "sudo", "command", "nice", "exec"}   # words before the command itself
 NA = "tokens: not available on this agent"
 RUN = re.compile(r"/runs/([\w.-]+)")   # a run folder's name in a path
 BOUND = 350_000   # context tokens; past it, the controller starts a new agent at the next round boundary
@@ -122,50 +142,242 @@ def no_heredocs(cmd):
     return "\n".join(out)
 
 
-def on_docs(w):
-    """True when every file a grep names (after its pattern) is a doc or data file."""
-    args = [x.strip("'\"") for i, x in enumerate(w[1:]) if not x.startswith("-") and w[i] != "-e"]   # -e's word: a pattern
-    files = args if "-e" in w else args[1:]
-    return bool(files) and all(os.path.splitext(x)[1].lower() in DOCS for x in files)
+def statements(cmd):
+    """[[part, ...], ...]: the statements of a command and their pipe parts, split outside quotes; heredoc bodies
+    are text; the body of each `$( )` is a statement of its own."""
+    cmd = no_heredocs(cmd)
+    out, parts, cur, q, i = [], [], "", None, 0
+    while i < len(cmd):
+        c = cmd[i]
+        if q:
+            cur += c
+            if c == "\\" and q == '"' and i + 1 < len(cmd):
+                cur, i = cur + cmd[i + 1], i + 1
+            elif c == q:
+                q = None
+        elif c == "\\" and i + 1 < len(cmd):
+            cur, i = cur + c + cmd[i + 1], i + 1
+        elif c in "'\"":
+            q, cur = c, cur + c
+        elif c == "|" and cmd[i + 1:i + 2] != "|":
+            parts, cur = parts + [cur], ""
+        elif c in ";\n" or cmd[i:i + 2] in ("&&", "||") or c == "&" and cmd[i - 1:i] not in "<>" and cmd[i + 1:i + 2] != ">":
+            out, parts, cur = out + [parts + [cur]], [], ""
+            i += cmd[i:i + 2] in ("&&", "||")
+        else:
+            cur += c
+        i += 1
+    out.append(parts + [cur])
+    for body in SUBST.findall(cmd):
+        out += statements(body)
+    return [[p.strip() for p in st if p.strip()] for st in out if any(p.strip() for p in st)]
 
 
-def bash_kinds(cmd):
-    """(codegraph, code search, piped grep, grep on docs or data) counts of one Bash command."""
-    cg = search = piped = docs = 0
-    # shortcut: splits on ; && || | and newlines without reading quotes; upgrade when counts look wrong
-    for seg in re.split(r"\|\||&&|;|\n", no_heredocs(cmd)):
-        for i, stage in enumerate(seg.split("|")):
-            w = [x for x in stage.split() if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", x)]
-            fed = False   # after xargs, a grep searches the files the pipe names: a search, not a filter
-            while w and w[0] in LEAD:
-                fed, w = fed or w[0] == "xargs", w[1:]
+def words(part):
+    """(words, fed): a part's words after the words that lead a command (and xargs: fed is True)."""
+    try:
+        w = shlex.split(part)
+    except ValueError:
+        w = part.split()
+    fed = False
+    while w and (w[0] in LEAD or w[0] in ("(", "{", "!") or re.match(r"^[A-Za-z_]\w*=", w[0])):
+        if w[0] == "xargs":
+            fed, w = True, w[1:]
+            while w and w[0].startswith("-"):
+                w = w[2:] if w[0] in ("-I", "-n", "-P", "-L", "-d", "-E") else w[1:]
+        else:
+            w = w[1:]
+    return w, fed
+
+
+def grep_args(w):
+    """(pattern, files, flags) of a grep or rg word list: an option's value and a redirect are neither."""
+    pat, files, flags, inc, i = None, [], set(), [], 1
+    while i < len(w):
+        a = w[i]
+        if re.match(r"^(\d|&)?(>>?|<)", a):                 # 2>/dev/null, > out, 2> err
+            i += 1 if re.search(r"[<>]&?\S", a) else 2
+            continue
+        if a in GREP_ARG or re.fullmatch(r"-[A-Za-z]*[efABCmgt]", a):
+            if a in ("-e", "--regexp") or a.endswith("e") and not a.startswith("--"):
+                pat = w[i + 1] if pat is None and i + 1 < len(w) else pat
+            elif a in ("--include", "-g", "--glob", "-t", "--type") or a[-1:] in "gt" and not a.startswith("--"):
+                inc.append(w[i + 1] if i + 1 < len(w) else "")
+            flags.update(a.lstrip("-")[:-1] if not a.startswith("--") else [a])
+            i += 2
+            continue
+        if a.startswith("-") and len(a) > 1:
+            k, _, v = a.partition("=")
+            if k in ("--include", "--glob", "--type"):
+                inc.append(v)
+            flags.update([k] if a.startswith("--") else a[1:])
+        elif pat is None:
+            pat = a
+        else:
+            files.append(a)
+        i += 1
+    return pat, files, flags | {"include:" + x for x in inc}
+
+
+def place(path, here, ix):
+    """'code', 'docs' (a doc or data file, a docs folder, or a path outside the repo and W: a scratch copy, a run
+    folder, a tool's cache) or 'dir' (a folder or a glob) for a path a command names; None for no file."""
+    if not path or path.startswith(">") or path in ("/dev/null", "-"):
+        return None
+    if here and not path.startswith(("/", "$", "~")):
+        path = os.path.join(here, path)
+    path = path.replace("${W}", "$W")
+    ext = os.path.splitext(os.path.basename(path.rstrip("/*.")))[1].lower()
+    outside = (path.startswith(("~", "$R", "${R}", "$SCR", "${SCR}", "$S/", "$HOME", "$TMPDIR"))
+               or any(d in path for d in ("/.kiss/runs/", "/.kiss/scratch", "/tool-results/"))
+               or path.startswith("/") and not any(path == r or path.startswith(r.rstrip("/") + "/") for r in (ix["repo"], ix["W"]) if r))
+    if outside or ext in DOCS or re.search(r"(^|/)docs(/|$)", path) or os.path.basename(path) in ("README", "LICENSE", "CHANGELOG"):
+        return "docs"
+    return "code" if ext else "dir"
+
+
+def symbol(pattern, ix):
+    """True when one alternative of a search pattern, without its regex and keyword decoration, is one name the
+    index holds (briefs.exists, the seed's lookup); each name is looked up once."""
+    for alt in re.split(r"\\\||\|", pattern or ""):
+        alt = DECOR.sub(" ", alt).strip().strip(".:")
+        if re.fullmatch(r"[A-Za-z_$][\w$]*(?:(?:\.|::)[A-Za-z_$][\w$]*)*", alt or "-"):
+            seen = ix.setdefault("seen", {})
+            if alt not in seen:
+                seen[alt] = ix["holds"](alt)
+            if seen[alt]:
+                return True
+    return False
+
+
+def call_kinds(tool, inp, ix, blocked=False):
+    """The classes of one tool call for the CodeGraph share (v2): cg, seed (a seed script; CodeGraph too), symbol,
+    literal, read (a code file of a type the index holds), pipe, docs, count, blocked. Other calls give none."""
+    if blocked:
+        return ["blocked"]
+    if tool.startswith("mcp__codegraph__"):
+        return ["cg"]
+    search = lambda pat: "symbol" if symbol(pat, ix) else "literal"
+    if tool == "Grep":
+        g = inp.get("glob") or ""
+        if inp.get("output_mode") == "count":
+            return ["count"]
+        if place(inp.get("path") or "", None, ix) == "docs" or g and place("x" + g.split("*")[-1].rstrip("}"), None, ix) == "docs":
+            return ["docs"]
+        return [search(inp.get("pattern"))]
+    if tool == "Glob":
+        return ["docs"] if place(inp.get("path") or "", None, ix) == "docs" else ["literal"]
+    if tool == "Read":
+        f = inp.get("file_path") or ""
+        return ["read"] if place(f, None, ix) == "code" and os.path.splitext(f)[1].lower() in ix["exts"] else []
+    if tool != "Bash":
+        return []
+    out, here = [], None
+    for st in statements(inp.get("command") or ""):
+        w0, _ = words(st[0])
+        if w0[:1] == ["cd"] and len(st) == 1:
+            here = w0[1] if len(w0) > 1 else "~"
+            continue
+        for i, part in enumerate(st):
+            w, fed = words(part)
             if not w:
                 continue
             first = os.path.basename(w[0])
-            if (first == "codegraph" and w[1:2] and w[1] in CG_READ) or first == "cgcallers" or (
-                    first.startswith("python") and any(os.path.basename(x) == "cgcallers.py" for x in w[1:])):
-                cg += 1
-            elif first in GREPS or (first == "git" and w[1:2] == ["grep"]):
-                if i and not fed:
-                    piped += 1
-                elif on_docs(w[1:] if first == "git" else w):
-                    docs += 1
+            if first == "codegraph":
+                sub = next((x for x in w[1:] if not x.startswith("-")), "")
+                out += ["cg"] if sub in CG_READ else []
+            elif first in ("cgcallers", "cgcallers.py") or first.startswith("python") and any(os.path.basename(x) in CG_SCRIPTS for x in w[1:]):
+                out.append("seed" if any(os.path.basename(x) in SEEDS for x in w[1:]) else "cg")
+            elif first in GREPS or first == "git" and w[1:2] == ["grep"]:
+                pat, files, flags = grep_args(w[1:] if first == "git" else w)
+                counting = "c" in flags or "--count" in flags or any(words(x)[0][:1] == ["wc"] for x in st[i + 1:])
+                prev, _ = words(st[i - 1]) if i else ([], False)
+                if i and not fed and not (prev and os.path.basename(prev[0]) in READERS
+                                          and any(place(x, here, ix) == "code" for x in prev[1:])):
+                    out.append("pipe")
+                    continue
+                kinds = {place(x, here, ix) for x in files} - {None}
+                incs = {place("x" + x[8:].split("*")[-1], None, ix) for x in flags if x.startswith("include:")}
+                if not kinds and here and place("x", here, ix) == "docs":
+                    kinds = {"docs"}
+                if kinds == {"docs"} or kinds <= {"dir"} and incs == {"docs"}:
+                    out.append("docs")
                 else:
-                    search += 1
-    return cg, search, piped, docs
+                    out.append("count" if counting else search(pat))
+            elif first == "find":
+                roots = [x for x in w[1:] if not x.startswith("-")][:1]
+                out.append("docs" if roots and place(roots[0], here, ix) == "docs" else "literal")
+            elif first in READERS and not any(x.startswith((">", "-i")) for x in w[1:]):
+                files = [x for x in w[1:] if not x.startswith("-") and os.path.splitext(x)[1].lower() in ix["exts"]]
+                out += ["read"] if any(place(x, here, ix) == "code" for x in files) else []
+    return out
 
 
 def k(n):
     return f"{int(n / 1000 + 0.5)}k"
 
 
-def tokens(R):
+def blocked_ids(path):
+    """The ids of the tool calls a PreToolUse hook blocked (they never ran)."""
+    out = set()
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            if '"tool_result"' in line and "PreToolUse:" in line:
+                try:
+                    content = json.loads(line)["message"]["content"]
+                except (ValueError, KeyError, TypeError):
+                    continue
+                for b in content if isinstance(content, list) else []:
+                    c = b.get("content") if isinstance(b, dict) else None
+                    text = c if isinstance(c, str) else " ".join(x.get("text", "") for x in c or [] if isinstance(x, dict))
+                    if b.get("type") == "tool_result" and text.lstrip().startswith("PreToolUse:"):
+                        out.add(b.get("tool_use_id"))
+    return out
+
+
+def index(R):
+    """The CodeGraph index the share reads (W's, from R/run.json, when it has one, else the repo's): its file types
+    and its name lookup; without one, the reason."""
+    repo = R.split("/.kiss/runs/")[0] if "/.kiss/runs/" in R else os.path.dirname(os.path.dirname(R))
+    try:
+        with open(os.path.join(R, "run.json")) as f:
+            W = json.load(f).get("W") or ""
+    except (OSError, ValueError, AttributeError):
+        W = ""
+    root = next((d for d in (W, repo) if d and os.path.isdir(os.path.join(d, ".codegraph"))), None)
+    try:
+        listed = briefs.run("codegraph", "files", "-p", root, "--format", "flat", "--no-metadata").stdout if root else ""
+    except (OSError, subprocess.TimeoutExpired):
+        listed = ""
+    exts = briefs.exts(listed.splitlines())
+    if not exts:
+        return {"why": f"no CodeGraph index for {repo}"}
+    return {"repo": repo, "W": W, "exts": exts, "holds": lambda name: briefs.exists(root, name)}
+
+
+def share(tools, blocked, ix):
+    """The `CodeGraph share (v2)` part: CodeGraph / (CodeGraph + symbol searches + code reads), the rest apart."""
+    if "why" in ix:
+        return f"CodeGraph share (v2) n/a ({ix['why']})"
+    c = {}
+    for b in tools.values():
+        for kind in call_kinds(b.get("name", ""), b.get("input") or {}, ix, b.get("id") in blocked):
+            c[kind] = c.get(kind, 0) + 1
+    cg, sym, rd = c.get("cg", 0) + c.get("seed", 0), c.get("symbol", 0), c.get("read", 0)
+    return (f"CodeGraph share (v2) {cg / (cg + sym + rd):.2f}" if cg + sym + rd else "CodeGraph share (v2) n/a") + (
+        f" (CodeGraph {cg}, of it seed scripts {c.get('seed', 0)}; symbol searches {sym}; code reads {rd}; apart: "
+        f"literal searches {c.get('literal', 0)}, greps after a pipe {c.get('pipe', 0)}, on docs or data "
+        f"{c.get('docs', 0)}, counts {c.get('count', 0)}, blocked {c.get('blocked', 0)})")
+
+
+def tokens(R, index=index):
     R = os.path.abspath(R)
     subs = subagents(R)
     if not subs:
         return NA
-    usage, tools = {}, {}   # message id -> (role, usage); tool_use id -> block (subagents only)
+    usage, tools, blocked = {}, {}, set()   # message id -> (role, usage); tool_use id -> block (subagents only)
     for f, r in subs:
+        blocked |= blocked_ids(f)
         for m in messages(f):
             usage[m["id"]] = (r, m.get("usage") or {})
             for b in m.get("content") or []:
@@ -184,22 +396,11 @@ def tokens(R):
         reads += u.get("cache_read_input_tokens", 0)
         inp += u.get("input_tokens", 0) + u.get("cache_creation_input_tokens", 0) + u.get("cache_read_input_tokens", 0)
         hour += (u.get("cache_creation") or {}).get("ephemeral_1h_input_tokens", 0)
-    cg = search = piped = docs = 0
-    for b in tools.values():
-        name = b.get("name", "")
-        if name.startswith("mcp__codegraph__"):
-            cg += 1
-        elif name == "Grep":
-            search += 1
-        elif name == "Bash":
-            c, s, p, d = bash_kinds((b.get("input") or {}).get("command", ""))
-            cg, search, piped, docs = cg + c, search + s, piped + p, docs + d
-    share = f"{cg / (cg + search):.2f}" if cg + search else "n/a"
+    ix = index(R) if callable(index) else index
     return (f"Tokens: output {k(sum(out.values()))} (implementer {k(out['implementer'])}, reviewers "
             f"{k(out['reviewers'])}, controller {k(out['controller'])}"
             f"{' (the session also carries another run)' if carries else ''}), input {k(inp)} "
-            f"({round(100 * reads / inp) if inp else 0}% cache reads), 1-hour cache writes {k(hour)}; CodeGraph share "
-            f"{share} (CodeGraph {cg}, code search {search}; apart: {piped} greps after a pipe, {docs} on docs or data)")
+            f"({round(100 * reads / inp) if inp else 0}% cache reads), 1-hour cache writes {k(hour)}; {share(tools, blocked, ix)}")
 
 
 def context(R):
@@ -275,13 +476,15 @@ def record(R, line):
 
 def selftest():
     import tempfile
+    global FAKE
+    FAKE = {"repo": "/w", "W": "/w", "exts": {".py"}, "holds": {"read", "build", "Lsp.read"}.__contains__}
 
     def user(text, ts="2026-01-01T09:00:00.000Z"):
         return {"type": "user", "timestamp": ts, "message": {"role": "user", "content": text}}
 
     def said(mid, out, inp, write, read, hour=0, tools=()):
         return {"type": "assistant", "message": {"id": mid, "role": "assistant", "content": [
-            {"type": "tool_use", "id": f"{mid}-{n}", "name": t, "input": {"command": c} if c else {}}
+            {"type": "tool_use", "id": f"{mid}-{n}", "name": t, "input": c if isinstance(c, dict) else {"command": c} if c else {}}
             for n, (t, c) in enumerate(tools)], "usage": {
             "input_tokens": inp, "output_tokens": out, "cache_creation_input_tokens": write,
             "cache_read_input_tokens": read,
@@ -305,7 +508,12 @@ def selftest():
         put(os.path.join(S, "subagents", "agent-a1.jsonl"), [
             user(f"You are the implementer. R = {R}"), m1, m1,           # a message written twice counts once
             said("m2", 800, 5, 0, 3000, tools=[("Bash", "pytest -q | grep x"), ("Bash", "grep -rn x src"),
-                                               ("Grep", None)])], "kiss:kiss-implementer")
+                                               ("Grep", None), ("Bash", 'grep -n "def read" app.py'),
+                                               ("Read", {"file_path": "/w/app.py"}), ("Read", {"file_path": "/w/notes.md"}),
+                                               ("Bash", 'grep -rn "def build" src'), ("Bash", 'python3 -I "/h/briefs.py" R /w br T-1')]),
+            {"type": "user", "message": {"role": "user", "content": [                 # a hook blocked m2-6: it never ran
+                {"type": "tool_result", "tool_use_id": "m2-6", "content": "PreToolUse:Bash hook error: use codegraph"}]}}],
+            "kiss:kiss-implementer")
         put(os.path.join(S, "subagents", "agent-a2.jsonl"), [
             user(f"You are the reviewer of {R}/tickets.json"),
             said("m3", 1400, 100, 1000, 2000, tools=[("Bash", "python3 -I /h/cgcallers.py f -p /w | grep lsp")])],
@@ -320,20 +528,22 @@ def selftest():
         put(S + ".jsonl", [said("m0", 7000, 7000, 0, 0), user(f"start the run in {R}", "2026-01-01T10:00:00.000Z"),   # m0: before R
                            said("m5", 600, 1, 500, 4000, tools=[("Grep", None)])])
         # worked example: output 1200+800, 1400, 600 = 4000; input 2010+3005+3100+4501 = 12616, reads 9000 = 71%;
-        # 1-hour writes 2000; CodeGraph 3 (codegraph explore, MCP explore, cgcallers), search 2 (grep -rn, Grep),
-        # 2 greps after a pipe; share 3 / 5; the controller's Grep is not a subagent's
+        # 1-hour writes 2000; CodeGraph 4 (codegraph explore, MCP explore, cgcallers, briefs.py: 1 seed script),
+        # symbol searches 1 (def read), code reads 1 (app.py, not notes.md); apart: literal 2 (grep -rn x, an empty
+        # Grep), 2 greps after a pipe, 1 blocked (def build); share 4 / (4 + 1 + 1); the controller's Grep is not counted
         want = ("Tokens: output 4k (implementer 2k, reviewers 1k, controller 1k), input 13k (71% cache reads), "
-                "1-hour cache writes 2k; CodeGraph share 0.60 (CodeGraph 3, code search 2; apart: 2 greps after a pipe, 0 on "
-                "docs or data)")
-        got = tokens(R)
+                "1-hour cache writes 2k; CodeGraph share (v2) 0.67 (CodeGraph 4, of it seed scripts 1; symbol searches 1; "
+                "code reads 1; apart: literal searches 2, greps after a pipe 2, on docs or data 0, counts 0, blocked 1)")
+        assert tokens(R) == want.split("; CodeGraph share")[0] + "; CodeGraph share (v2) n/a (no CodeGraph index for /x)", tokens(R)
+        got = tokens(R, index=FAKE)
         assert got == want, got
-        assert tokens(R + "/") == want, "a trailing slash names the same run"
+        assert tokens(R + "/", index=FAKE) == want, "a trailing slash names the same run"
         with open(S + ".jsonl", "a") as f:                       # it only names run r8's folder (a review input)
             f.write(json.dumps(user("read /x/runs/r8/review-1.md", "2026-01-01T11:00:00.000Z")) + "\n")
-        assert tokens(R) == want, "a name of another run's folder is not its work"
+        assert tokens(R, index=FAKE) == want, "a name of another run's folder is not its work"
         put(os.path.join(S, "subagents", "agent-a8.jsonl"), [               # run r8's agent, started in R's window
             user("You are the implementer. R = /x/runs/r8", "2026-01-01T11:00:01.000Z")], "kiss:kiss-implementer")
-        assert tokens(R) == want.replace("controller 1k", "controller 1k (the session also carries another run)"), tokens(R)
+        assert tokens(R, index=FAKE) == want.replace("controller 1k", "controller 1k (the session also carries another run)"), tokens(R, index=FAKE)
         os.remove(os.path.join(S, "subagents", "agent-a8.jsonl"))
         assert tokens("/x/runs/none") == NA
         assert context("/x/runs/none") == NA
@@ -353,19 +563,32 @@ def selftest():
         BOUND, keep = 3_000, BOUND                                          # the mark's number is the bound's
         assert context(R).splitlines()[1] == "reviewer a2: context 3100; past 3k: start a new one at this boundary", context(R)
         BOUND = keep
-    for cmd, want in (('for f in *.py; do grep -n x "$f"; done', (0, 1, 0, 0)), ("find . | xargs grep -l foo", (0, 1, 0, 0)),
-                      ("time rg foo src", (0, 1, 0, 0)), ("if true; then codegraph explore -p /w a; fi", (1, 0, 0, 0)),
-                      ("grep -n x README.md", (0, 0, 0, 1)), ("grep -c y a.jsonl", (0, 0, 0, 1)),
-                      ("grep -rn x src", (0, 1, 0, 0)), ("grep -n x app.py", (0, 1, 0, 0)),
-                      ("cat > /s/n.md <<'EOF'\ngrep -rn x src\ncodegraph explore a\nEOF", (0, 0, 0, 0)),
-                      ("python3 - <<EOF | grep ok\ngrep x y\nEOF\ngrep -rn z src", (0, 1, 1, 0)),
-                      ("grep -n -e foo README.md", (0, 0, 0, 1)), ("grep -e a -e b x.json y.md", (0, 0, 0, 1)),
-                      ("grep -n -e foo src", (0, 1, 0, 0)),
-                      # the heredoc rule: a heredoc after any word or none; never inside $(( )) or (( ))
-                      ("echo $((1<<N))\ngrep -rn x src", (0, 1, 0, 0)), ("echo $((x<<n))\ngrep -rn x src", (0, 1, 0, 0)),
-                      ("((m = 2 <<N))\ngrep -rn x src", (0, 1, 0, 0)), ("x=1;cat<<EOF\ngrep a src\nEOF", (0, 0, 0, 0)),
-                      ("cat <<EOF\ngrep -rn x src\nEOF", (0, 0, 0, 0))):
-        assert bash_kinds(cmd) == want, (cmd, bash_kinds(cmd))
+    bash = lambda cmd, done=False: call_kinds("Bash", {"command": cmd}, FAKE, done)
+    for cmd, want in (('grep -n "a\\|b" notes.md', ["docs"]), ('grep -rn "two words" docs/', ["docs"]),
+                      ("grep -n foo app.py 2>/dev/null", ["literal"]), ("grep -A 3 foo app.py", ["literal"]),
+                      ('grep -n "def read" app.py', ["symbol"]), ("grep -rn 'Lsp.read(' src", ["symbol"]),
+                      ('grep -n "color: red" app.css', ["literal"]), ("grep -c read app.py", ["count"]),
+                      ("grep -rn read src | wc -l", ["count"]), ("pytest -q | grep -n read", ["pipe"]),
+                      ("cat app.py | grep -n read", ["read", "symbol"]), ("x=$(grep -rln read src); echo $x", ["symbol"]),
+                      ("grep -rn read /s/copy/app.py", ["docs"]), ("cd /s/copy && grep -rn read src", ["docs"]),
+                      ("cd /w && grep -rn read src", ["symbol"]), ("find . -name x", ["literal"]),
+                      ('python3 -I "/h/x/briefs.py" "/r" "/w" b T-1', ["seed"]), ("python3 -I /h/callcheck.py -p /w --cached", ["seed"]),
+                      ("cgcallers read -p /w", ["cg"]), ("rtk codegraph node -p /w read", ["cg"]), ("codegraph sync -q /w", []),
+                      ("cat app.py", ["read"]), ("sed -n 1,9p app.py", ["read"]), ("head -5 notes.md", []),
+                      ("cat > app.py <<'EOF'\ngrep -rn read src\ncodegraph explore a\nEOF", []),
+                      ("python3 - <<EOF | grep ok\ngrep x y\nEOF\ngrep -rn read src", ["pipe", "symbol"]),
+                      ("echo $((1<<N))\ngrep -rn read src", ["symbol"]), ("for f in *.py; do grep -n read \"$f\"; done", ["symbol"]),
+                      ("grep -e read -e build x.json y.md", ["docs"]), ("grep --include=*.md -rn read .", ["docs"])):
+        assert bash(cmd) == want, (cmd, bash(cmd))
+    assert bash("grep -rn 'def read' src", True) == ["blocked"], "a call a hook blocked never ran"
+    for argv, want in ((["grep", "-n", "foo", "app.py", "2>/dev/null"], ("foo", ["app.py"])), (["grep", "-A", "3", "foo", "app.py"], ("foo", ["app.py"])),
+                       (["grep", "-e", "a", "-e", "b", "x"], ("a", ["x"])), (["grep", "-rn", "--include=*.py", "f", "."], ("f", ["."]))):
+        assert grep_args(argv)[:2] == want, (argv, grep_args(argv))
+    for tool, inp, want in (("Read", {"file_path": "/w/app.py"}, ["read"]), ("Read", {"file_path": "/w/notes.md"}, []),
+                            ("Read", {"file_path": "/s/copy/app.py"}, []), ("Glob", {"pattern": "**/*.py"}, ["literal"]),
+                            ("Grep", {"pattern": "def read", "path": "/w/src"}, ["symbol"]), ("Grep", {"pattern": "x", "glob": "*.md"}, ["docs"]),
+                            ("Grep", {"pattern": "read", "output_mode": "count"}, ["count"]), ("mcp__codegraph__codegraph_explore", {}, ["cg"])):
+        assert call_kinds(tool, inp, FAKE) == want, (tool, inp, call_kinds(tool, inp, FAKE))
     import contextlib, io
     with tempfile.TemporaryDirectory() as t, contextlib.redirect_stdout(io.StringIO()):   # the metrics record
         os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(t, "no-config")

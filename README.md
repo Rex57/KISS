@@ -167,7 +167,8 @@ the first line of the run's `progress.md` records which skills the run used.
    comments (`ponytail-debt`); a look back at the run (each mistake becomes a proposed check or a rule, each a yes/no
    at the merge gate; an unanswered one is kept and asked first by the next run); one metrics line (subagents, fix
    rounds, rechecks, headless sessions, minutes against the budget, and on Claude Code the tokens per role and the
-   CodeGraph share against code searches, with a grep after a pipe or on docs or data counted apart), recorded one
+   CodeGraph share (v2): CodeGraph calls against symbol searches and code reads, with literal searches, greps after a
+   pipe or on docs or data, counts and blocked calls apart), recorded one
    line per run in `.kiss/runs/metrics.md` and refused unless that full check passed at the head; and the merge gate,
    which names each commit made after the full check with the checks it got: one yes, or none when
    `.kiss/project.md` says `Merge: after a green close`. The merge is built and checked in a temporary worktree

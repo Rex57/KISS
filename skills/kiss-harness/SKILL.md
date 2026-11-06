@@ -138,7 +138,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
     5. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
        <used> of <budget>` (headless sessions: the `claude -p` or `claude --bg` sessions the run starts for tests;
        subagents and kiss-mini workers do not count), given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it prints the full
-       line (with the tokens per role and the CodeGraph share) and records it in `<repo>/.kiss/runs/metrics.md`, one line
+       line (with the tokens per role and the `CodeGraph share (v2)`) and records it in `<repo>/.kiss/runs/metrics.md`, one line
        per run (a rerun of the close replaces the run's line). It refuses when the last `Full check at` line is not a
        pass at W's HEAD.
     6. **Later commits:** `git -C W log --oneline <the full-check sha>..HEAD`. A later commit that changes product
