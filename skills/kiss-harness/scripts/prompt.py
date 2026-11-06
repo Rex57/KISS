@@ -16,7 +16,7 @@ BUDGET, in seconds: "Time: elapsed 340s of a 1200s budget."; empty without ELAPS
 budget is 10 minutes per ticket in R/tickets.json plus 2 hours for the reviews and fix rounds, plus the facts
 file's `Full check time:` minutes when it has that line. A value the template
 needs that neither run.json nor the call gives is an error that names it. Every call prints a line on stderr when
-a newer KISS version folder sits beside the running one.
+a KISS version folder beside the running one holds a higher version (in its manifest).
 """
 import json, os, re, string, sys
 
@@ -91,7 +91,8 @@ def newer(root):
     run = os.path.basename(root)
     if version_key(run) is None or version(root) is None:
         return ""
-    vs = [v for v in os.listdir(os.path.dirname(root)) if version_key(v) and version_key(v) > version_key(run)]
+    up = os.path.dirname(root)
+    vs = [v for v in os.listdir(up) if version_key(v) and version_key(v) > version_key(run) and version(os.path.join(up, v))]
     best = max(vs, key=version_key, default=None)
     return f"KISS {best} is installed; this session runs {run}: start the run in a new session" if best else ""
 
@@ -268,7 +269,9 @@ def selftest():
         root, R = plugin("2.2.0"), os.path.join(cache, "run")
         os.makedirs(R)
         assert call(root, "start", R, "PROJECT=" + facts, *start_keys)[1] == "", "a prerelease ranks below its release"
-        os.makedirs(os.path.join(cache, "9.0.0"))                           # a newer folder beside each root below
+        os.makedirs(os.path.join(cache, "2.10.0"))
+        assert call(root, "start", R, "PROJECT=" + facts, *start_keys)[1] == "", "a folder with no manifest holds no version"
+        plugin("9.0.0")                                                     # a newer version beside each root below
         for v, manifest, want in (("2.3.0", None, "unknown"), ("2.4.0", ".claude-plugin/plugin.json", "2.4.1")):
             root = os.path.join(cache, v)
             os.makedirs(os.path.join(root, ".claude-plugin"))
