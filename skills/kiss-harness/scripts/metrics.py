@@ -15,9 +15,10 @@
   python3 -I metrics.py --selftest
 
 Transcripts: under CLAUDE_CONFIG_DIR (default ~/.claude), projects/*/<session>/subagents/**/agent-<id>.jsonl, each
-beside agent-<id>.meta.json (its agentType gives the role). The controller session is the transcript whose Bash call
-ran `prompt.py start` on R; a subagent counts when it is under that session and its meta toolUseId is one of the
-session's Agent calls from that start to its last `metrics.py --record` of R (another run's start ends it first).
+beside agent-<id>.meta.json (its agentType gives the role). A controller session is a transcript whose Bash call ran
+`prompt.py` (any step) on R (a resumed run has two); a subagent counts when it is under one and its meta toolUseId is
+one of that session's Agent calls from its first such call to its last `metrics.py --record` of R (another run's
+`prompt.py start` ends it first).
 The controller is counted from the session's first message that names R. Each message id counts once. CodeGraph share (v2), subagents only: CodeGraph calls (the MCP tools, the CLI's
 read commands, cgcallers, and the seed scripts briefs.py and callcheck.py) over CodeGraph calls plus symbol searches
 plus code reads. A search (the Grep tool, grep, rg, git grep) is a symbol search when one alternative of its pattern,
@@ -75,19 +76,20 @@ def role(agent_file):
     return "reviewers" if "reviewer" in kind else "implementer" if "implementer" in kind else "controller"
 
 
-def runs_script(cmd, script, arg):
-    """True when a statement of the command runs `script` with `arg` as one of its next two words."""
+def runs_script(cmd, script, arg=None):
+    """True when a statement of the command runs `script` (with `arg` as one of its next two words, when given)."""
     for st in statements(cmd):
         for part in st:
             w = words(part)[0]
-            if any(os.path.basename(x) == script and arg in w[j + 1:j + 3] for j, x in enumerate(w)):
+            if any(os.path.basename(x) == script and (arg is None or arg in w[j + 1:j + 3]) for j, x in enumerate(w)):
                 return True
     return False
 
 
 def agent_calls(session, name):
-    """The ids of a session's Agent calls for the run `name`: from its Bash call that ran `prompt.py start` on that
-    run to its last `metrics.py --record` of it (another run's start ends it first); none without that start."""
+    """The ids of a session's Agent calls for the run `name`: from its first Bash call that ran `prompt.py` (any step)
+    on that run to its last `metrics.py --record` of it (another run's `prompt.py start` ends it first); none without
+    such a call. A run resumed in a second session has its own controller session there."""
     ids, pending, on, recorded = set(), set(), False, False
     with open(session, errors="replace") as fh:
         for line in fh:
@@ -107,10 +109,10 @@ def agent_calls(session, name):
                 if not cmd:
                     continue
                 runs = set(RUN.findall(no_heredocs(cmd)))
-                if runs_script(cmd, "prompt.py", "start"):
+                if runs_script(cmd, "prompt.py"):
                     if name in runs:
                         on = True
-                    elif on:
+                    elif on and runs_script(cmd, "prompt.py", "start"):
                         return ids if recorded else ids | pending
                 elif on and name in runs and runs_script(cmd, "metrics.py", "--record"):
                     ids, pending, recorded = ids | pending, set(), True
@@ -118,8 +120,8 @@ def agent_calls(session, name):
 
 
 def subagents(R):
-    """[(file, role)] of the run's own subagents: under the controller session (the transcript whose Bash call ran
-    `prompt.py start` on R), each one whose meta `toolUseId` is one of that session's Agent calls for the run."""
+    """[(file, role)] of the run's own subagents: under each controller session (a transcript whose Bash call ran
+    `prompt.py` on R), each one whose meta `toolUseId` is one of that session's Agent calls for the run."""
     name, out = os.path.basename(R.rstrip("/")), []
     for s in glob.glob(os.path.join(config(), "projects", "*", "*.jsonl")):
         ids = agent_calls(s, name)
@@ -660,6 +662,11 @@ def selftest():
         BOUND, keep = 3_000, BOUND                                          # the mark's number is the bound's
         assert context(R).splitlines()[1] == "reviewer a2: context 3100; past 3k: start a new one at this boundary", context(R)
         BOUND = keep
+        S4 = os.path.join(C, "projects", "-x", "s4")                       # the run resumed in a second session (D16)
+        put(S4 + ".jsonl", [said("f", 0, 0, 0, 0, tools=[("Bash", f'python3 -I /h/prompt.py fix "{R}" ROUND=1 ELAPSED=9'), agent])])
+        put(os.path.join(S4, "subagents", "agent-a11.jsonl"), [user("Read progress.md first"), said("m13", 1, 1, 0, 0)], "kiss:kiss-implementer", "f-1")
+        assert sorted(os.path.basename(f) for f, _ in subagents(R)) == [f"agent-a{n}.jsonl" for n in (1, 11, 2, 5, 6)], subagents(R)
+        os.remove(os.path.join(S4, "subagents", "agent-a11.jsonl"))
     bash = lambda cmd, done=False: call_kinds("Bash", {"command": cmd}, FAKE, done)
     for cmd, want in (('grep -n "a\\|b" notes.md', ["docs"]), ('grep -rn "two words" docs/', ["docs"]),
                       ("grep -n foo app.py 2>/dev/null", ["literal"]), ("grep -A 3 foo app.py", ["literal"]),
