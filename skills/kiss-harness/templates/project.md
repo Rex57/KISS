@@ -11,7 +11,7 @@ project's instructions file (CLAUDE.md, AGENTS.md or GEMINI.md) already says.
 - Tests `codegraph affected` cannot see: a script's own `--selftest`, tests that load the code without an import (a
   mod's tests), and the command for each.
 - Smoke check (one fast end-to-end test, run before any new work): `<command>`.
-- The full check (the controller runs it once, at the end): `<command>`.
+- The full check (the controller runs it at the close, at the head that merges): `<command>`.
 - Full check time: <n> minutes (how long the full check runs; the run's time budget adds it once).
 - Flake check: `<command> x <n>` (the tests to run n times in a row in the background beside the final review, when
   the run's tests add a time value; a failure, or a time bound under 2 times the slowest time seen, is a fix).
@@ -24,7 +24,7 @@ project's instructions file (CLAUDE.md, AGENTS.md or GEMINI.md) already says.
 - Merge: `ask` (the merge gate asks the owner) or `after a green close` (a standing yes: merge when the full check
   passes and no decision is open). A push always asks.
 - After merge: `ask` (a commit after the owner's "merge" asks again) or `same go for tests and docs` (the owner's
-  "merge" also covers a later commit that changes only tests or docs).
+  "merge" also covers a later commit that changes only tests, docs or built files).
 - Docs gate: `python3 -I tools/check_docs.py .` (a kiss-housekeeping First run installs it; the close runs its
   Upkeep), or `none (owner declined)`. With no line, the close asks once.
 
