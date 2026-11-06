@@ -3,7 +3,7 @@
 
   python3 -I tickets.py check RUN        the shape; after `freeze`, also: only `passes` changed; a WARN (exit 0)
                                          for a ticket that lists code files that exist in the repo of RUN, and no
-                                         symbols
+                                         symbols, and for each symbol that repo's CodeGraph index does not hold
   python3 -I tickets.py freeze RUN       copy tickets.json to tickets.orig.json at the build start
   python3 -I tickets.py render RUN       write issues/<ID>.md, the text briefs.py seeds
   python3 -I tickets.py open RUN         the open tickets, one per line
@@ -16,7 +16,10 @@ One ticket: {"id", "title", "spec", "acceptance": [...], "passes": false} and, o
 "seeds" (hints for the CodeGraph seed), "depends_on" (ids), "risky" (the reviewer also checks it alone).
 JSON, not Markdown: an agent edits only `passes`, and `check` refuses any other change.
 """
-import json, os, re, sys
+import json, os, re, subprocess, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import briefs  # noqa: E402  (the index lookup is briefs.py's own)
 
 ID = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
 OPTIONAL = {"files": list, "symbols": list, "seeds": list, "depends_on": list, "risky": bool}
@@ -78,6 +81,17 @@ def warnings(rows, root):
     return [f"WARN {r['id']}: lists code files and no symbols: its seed holds no node or callers" for r in rows
             if not r.get("symbols") and any(os.path.splitext(f)[1] in CODE and os.path.isfile(os.path.join(root, f))
                                             for f in r.get("files") or [])]
+
+
+def unindexed(rows, root, run=briefs.run):
+    """A WARN for each ticket symbol root's index does not hold, never a failure: a ticket may name one it creates."""
+    if not os.path.isdir(os.path.join(root, ".codegraph")):
+        return [f"symbol check skipped: no CodeGraph index in {root}"]
+    try:
+        return [f"WARN {r['id']}: symbol {s} is not in the index (fine when the ticket creates it)"
+                for r in rows for s in r.get("symbols") or [] if not briefs.exists(root, s, run)]
+    except (OSError, subprocess.TimeoutExpired):
+        return ["symbol check skipped: codegraph did not run"]
 
 
 def open_tickets(rows):
@@ -175,6 +189,30 @@ def selftest():
         assert open(os.path.join(run, "issues", "T-1.md")).read() == (
             "# T-1: a\n\nb\n\n## Acceptance (the definition of done)\n\n- c\n\n## Files (hints)\n\n- `a.py`\n\n"
             "## Symbols (hints)\n\n- `f`\n"), open(os.path.join(run, "issues", "T-1.md")).read()
+    import contextlib, io, subprocess
+    held = [{"name": "read", "qualifiedName": "Lsp::read"}, {"name": "f", "qualifiedName": "f"}]
+    fake = lambda *a, timeout=120: subprocess.CompletedProcess(a, 0, json.dumps([{"node": n} for n in held]), "")
+    with tempfile.TemporaryDirectory() as root:                          # a repo whose run R is <root>/.kiss/runs/r
+        run = os.path.join(root, ".kiss", "runs", "r")
+        os.makedirs(run)
+        with open(os.path.join(run, "tickets.json"), "w") as f:
+            json.dump([dict(good[0], symbols=["Lsp.read", "f", "made_here"]), dict(good[1], symbols=["Lsp::read"])], f)
+        for index, want in ((False, ["symbol check skipped: no CodeGraph index in " + root]),
+                            (True, ["WARN T-1: symbol made_here is not in the index (fine when the ticket creates it)"])):
+            if index:
+                os.makedirs(os.path.join(root, ".codegraph"))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                try:
+                    main(["tickets.py", "check", run], lookup=fake)
+                except SystemExit as x:
+                    assert x.code == 0, x.code                            # a WARN never fails the check
+            assert out.getvalue().splitlines() == want + ["ok: 2 tickets, 0 pass"], out.getvalue()
+    gone = lambda *a, timeout=120: (_ for _ in ()).throw(FileNotFoundError("codegraph"))
+    assert unindexed([dict(good[0], symbols=["f"])], root="/no/such/repo", run=gone) == ["symbol check skipped: no CodeGraph index in /no/such/repo"]
+    with tempfile.TemporaryDirectory() as root:                          # an index, but no codegraph on PATH
+        os.makedirs(os.path.join(root, ".codegraph"))
+        assert unindexed([dict(good[0], symbols=["f"])], root, gone) == ["symbol check skipped: codegraph did not run"]
     for argv in (["tickets.py"], ["tickets.py", "check"], ["tickets.py", "nope", "/no/such/run"]):   # the usage, no traceback
         try:
             main(argv)
@@ -184,7 +222,7 @@ def selftest():
     print("tickets selftest ok")
 
 
-def main(argv):
+def main(argv, lookup=briefs.run):
     if argv[1:] == ["--selftest"]:
         return selftest()
     if len(argv) < 3 or argv[1] not in ("check", "freeze", "render", "open", "continue"):
@@ -195,7 +233,8 @@ def main(argv):
         orig = load(run, "tickets.orig.json") if os.path.exists(os.path.join(run, "tickets.orig.json")) else None
         bad = problems(rows, orig)
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(run))))   # <repo>/.kiss/runs/<run>
-        print("\n".join(bad + warnings(rows, root)) if bad else "\n".join(warnings(rows, root) + [
+        warn = warnings(rows, root) + unindexed(rows, root, lookup)
+        print("\n".join(bad + warn) if bad else "\n".join(warn + [
             f"ok: {len(rows)} tickets, {len(rows) - len(open_tickets(rows))} pass"]))
         sys.exit(1 if bad else 0)
     if cmd == "freeze":
