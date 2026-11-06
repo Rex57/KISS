@@ -668,7 +668,7 @@ def setup(system, answer=None, runner=execute, find=None, checks=None, pid=None)
         lines += ["", "The checks again:"] + (
             [f"left out of the checks (you picked none of their items): {', '.join(skipped)}"] if skipped else []) + (
             checks or (lambda agents: report(agents)[0]))([a for a in system["agents"] if a not in skipped])
-    if ok and not picked:                                   # an answer of none: say so, not just the links
+    if ok and not picked and "all" not in answer.lower():   # an answer of none: say so, not just the links
         lines = ["none picked: nothing ran"] + lines
     if ran or ok or failed:
         lines += [""] + by_hand(system, items, ran)
@@ -1051,6 +1051,10 @@ def selftest():
     lines, ok = go(sysfor(), "none", runner(), find)
     assert ok and ran == [] and lines[0] == "none picked: nothing ran", lines
     assert "none picked: nothing ran" not in go(sysfor(), "1", runner(), find)[0], "an answer that picks an item"
+    byhand = lambda system: {("claude", "rule-replace"): {"file": "/h/c.md", "hand": "no heading above the rule in /h/c.md"}}
+    lines, ok = go(sysfor(), "all", runner(), byhand)                       # no numbered item: `all` picked all of none
+    assert ok and "none picked: nothing ran" not in lines, lines
+    assert go(sysfor(), "none", runner(), byhand)[0][0] == "none picked: nothing ran", "the answer none, as before"
     ran.clear()
     sudo = [{"n": 1, "what": "git", "agent": "device", "run": [["sudo", "apt", "install", "-y", "git"]], "hand": "",
              "source": "s", "changes": "c", "after": ""}]
