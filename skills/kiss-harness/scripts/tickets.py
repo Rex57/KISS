@@ -9,7 +9,9 @@
   python3 -I tickets.py open RUN         the open tickets, one per line
   python3 -I tickets.py continue RUN [ELAPSED BUDGET] [--review ID]   the controller's message, or nothing when all
                                          pass; with --review (a risky ticket under review alone), only the open
-                                         tickets that do not depend on it, or nothing when all of them do
+                                         tickets that do not depend on it, up to the first risky one, or nothing
+                                         when all of them do; plus the hold of the product checks when the facts
+                                         file's `Shared test resources:` line says "one at a time"
   python3 -I tickets.py --selftest
 
 One ticket: {"id", "title", "spec", "acceptance": [...], "passes": false} and, optional, "files", "symbols",
@@ -108,12 +110,24 @@ def waits_for(rows, tid):
     return out
 
 
-def continue_text(rows, elapsed=None, budget=None, review=None):
+def one_at_a_time(run):
+    """True when the facts file of run/run.json has a `Shared test resources:` line that says "one at a time" (D17)."""
+    try:
+        with open(os.path.join(run, "run.json")) as f, open(json.load(f)["PROJECT"]) as p:
+            return any(re.match(r"\W*Shared test resources:", l) and "one at a time" in l.lower() for l in p)
+    except (OSError, KeyError, ValueError, TypeError):
+        return False
+
+
+def continue_text(rows, elapsed=None, budget=None, review=None, hold=False):
     left = open_tickets(rows)
     wait = waits_for(rows, review) if review else set()
     go = [r for r in left if r["id"] not in wait and r["id"] != review]
     if not go:
         return ""
+    stop = next((r["id"] for r in go if r.get("risky")), None) if review else None
+    if stop:                                                   # a risky ticket keeps its own solo review
+        go = go[:[r["id"] for r in go].index(stop) + 1]
     clock = f" Elapsed {elapsed}s / {budget}s." if elapsed is not None and budget is not None else ""
     text = ("continue: open tickets " + ", ".join(f"{r['id']} ({r['title']})" for r in go)
             + f". {len(rows) - len(left)} of {len(rows)} pass.{clock}")
@@ -122,7 +136,9 @@ def continue_text(rows, elapsed=None, budget=None, review=None):
     waiting = [r["id"] for r in left if r["id"] in wait]
     return (text + " Build only these, then stop with your final message"
             + (f"; do not start {', '.join(waiting)} until the review of {review} is done." if waiting else ".")
-            + f" {review} is under review alone: its fix round comes at your next stop.")
+            + f" {review} is under review alone: its fix round comes at your next stop."
+            + (f" {stop} is risky: stop after it." if stop else "")
+            + (' Hold your product checks until the controller sends "product free".' if hold else ""))
 
 
 def render(run, rows):
@@ -139,6 +155,7 @@ def render(run, rows):
 
 
 def selftest():
+    import contextlib, io
     good = [{"id": "T-1", "title": "a", "spec": "b", "acceptance": ["c"], "passes": False},
             {"id": "T-2", "title": "d", "spec": "e", "acceptance": ["f"], "passes": False, "depends_on": ["T-1"]}]
     assert problems(good) == []
@@ -164,7 +181,34 @@ def selftest():
         "stop."), continue_text(four, review="T-2")
     assert continue_text(four[:3], review="T-1") == "", "every open ticket waits for the risky one: no message"
     assert continue_text(four) == "continue: open tickets T-2 (d), T-3 (g), T-4 (h). 1 of 4 pass. Take the next open ticket."
+    risky = [dict(good[0], passes=True, risky=True), dict(good[1], id="T-2", depends_on=[]),
+             dict(good[1], id="T-3", title="g", depends_on=[], risky=True), dict(good[0], id="T-4", title="h")]
+    assert continue_text(risky, review="T-1") == (                       # the batch ends at its first risky ticket
+        "continue: open tickets T-2 (d), T-3 (g). 1 of 4 pass. Build only these, then stop with your final message. "
+        "T-1 is under review alone: its fix round comes at your next stop. T-3 is risky: stop after it."), continue_text(risky, review="T-1")
+    assert continue_text(risky) == "continue: open tickets T-2 (d), T-3 (g), T-4 (h). 1 of 4 pass. Take the next open ticket."
     import tempfile
+    hold = ' Hold your product checks until the controller sends "product free".'
+    with tempfile.TemporaryDirectory() as run:                           # the hold reads the facts file of run.json
+        with open(os.path.join(run, "tickets.json"), "w") as f:
+            json.dump(four, f)
+        facts = os.path.join(run, "project.md")
+        with open(os.path.join(run, "run.json"), "w") as f:
+            json.dump({"PROJECT": facts}, f)
+        for body, held in (("- Shared test resources: one Postgres; One at a time.\n", True),
+                           ("- Shared test resources: one Postgres, 3 sessions at once\n", False),
+                           ("- Merge: ask\n- Note: one at a time is fine\n", False), (None, False)):
+            if body is not None:
+                with open(facts, "w") as f:
+                    f.write(body)
+            elif os.path.exists(facts):
+                os.remove(facts)
+            for argv, want in ((["--review", "T-1"], continue_text(four, review="T-1") + (hold if held else "")),
+                               ([], continue_text(four))):              # the plain continue never holds
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    main(["tickets.py", "continue", run, *argv])
+                assert out.getvalue() == want + "\n", (body, argv, out.getvalue())
     with tempfile.TemporaryDirectory() as root:                          # the repo that holds R
         os.makedirs(os.path.join(root, "app"))
         open(os.path.join(root, "app", "x.py"), "w").close()
@@ -189,7 +233,6 @@ def selftest():
         assert open(os.path.join(run, "issues", "T-1.md")).read() == (
             "# T-1: a\n\nb\n\n## Acceptance (the definition of done)\n\n- c\n\n## Files (hints)\n\n- `a.py`\n\n"
             "## Symbols (hints)\n\n- `f`\n"), open(os.path.join(run, "issues", "T-1.md")).read()
-    import contextlib, io, subprocess
     held = [{"name": "read", "qualifiedName": "Lsp::read"}, {"name": "f", "qualifiedName": "f"}]
     fake = lambda *a, timeout=120: subprocess.CompletedProcess(a, 0, json.dumps([{"node": n} for n in held]), "")
     with tempfile.TemporaryDirectory() as root:                          # a repo whose run R is <root>/.kiss/runs/r
@@ -257,7 +300,7 @@ def main(argv, lookup=briefs.run):
             if review not in {r["id"] for r in rows}:
                 sys.exit(f"--review {review!r}: not a ticket id")
         e, b = (int(argv[3]), int(argv[4])) if len(argv) > 4 else (None, None)
-        print(continue_text(rows, e, b, review))
+        print(continue_text(rows, e, b, review, hold=bool(review) and one_at_a_time(run)))
     else:
         sys.exit(__doc__)
 

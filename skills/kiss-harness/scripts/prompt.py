@@ -172,6 +172,8 @@ def selftest():
     assert "read every `[grep only]` and `[lsp]` line" in out, "cgcallers' grep-only and lsp lines are read"
     assert "ponytail:ponytail-review" in rv and "G. Risk, load and speed" in rv and "A|B|C|D|E|F|G" in rv
     assert "failed before" in loop["fix"] and '"test":' in loop["fix"], "each fix names its test"
+    assert 'until the controller sends "product free"' in out and 'On "product free", run the held checks first' in out, "the hold and its end"
+    assert "take the next open ticket" not in out and "stop where it says" in out, "a continue's batch and its stop win"
     assert "only the findings of severity critical or high" in loop["recheck"], "the recheck covers only critical or high findings"
     assert "reproduced_in_app" in loop["recheck"] and "diff and the test output" in loop["recheck"]
     assert "a broken command or link" in sv and "a low finding with no effect" in sv, "the sort's bar for a fix"

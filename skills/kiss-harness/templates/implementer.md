@@ -26,4 +26,6 @@ A ticket you cannot finish without the owner's decision: write the question in p
 When no ticket is open, end with one message that ends with a fenced ```json block:
 {"status": "DONE" | "BLOCKED", "base": "$BASE", "head": "<HEAD>", "passes": "<n> of <m>", "blocked": [{"id": "", "question": ""}], "notes": []}
 
-The controller may send "continue: <open tickets>": take the next open ticket. It may send review findings: fix each one, then answer as that message asks.
+The controller may send "continue: <open tickets>": build the tickets it names, in file order, and stop where it says. It may send review findings: fix each one, then answer as that message asks.
+
+When a continue message says "Hold your product checks until the controller sends "product free"", another agent uses a shared test resource (the facts file's `Shared test resources:` line): build, and run only the checks that need no such resource. A ticket that needs a held check ends your turn: name the ticket and the held check, and leave its "passes" false. On "product free", run the held checks first, then finish that ticket and go on.
