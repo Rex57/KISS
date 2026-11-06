@@ -737,14 +737,14 @@ def selftest():
                                      "- 2026-01-01-c: Metrics: subagents  5; " + NA + "\n"), open(book).read()
         record(a, "Metrics: subagents 4")                                    # a rerun replaces its line in place
         assert open(book).read().splitlines()[1] == "- 2026-01-02-a: Metrics: subagents 4; " + NA, open(book).read()
-        os.chmod(os.path.dirname(book), 0o500)                              # R2: a write error keeps the old lines
-        try:
+        os.mkdir(f"{book}.{os.getpid()}.tmp")                               # R2: a write error keeps the old lines
+        try:                                                                # (a folder where the temporary file goes)
             record(a, "Metrics: subagents 9")
-            raise AssertionError("a write to a read-only folder must fail")
+            raise AssertionError("a write over a folder must fail")
         except OSError:
             pass
         finally:
-            os.chmod(os.path.dirname(book), 0o700)
+            os.rmdir(f"{book}.{os.getpid()}.tmp")
         assert len(open(book).read().splitlines()) == 3 and not glob.glob(book + ".*"), open(book).read()
         d = os.path.join(t, "repo", ".kiss", "runs", "2026-01-04-d")       # D9: the full check at HEAD, else a refusal
         os.makedirs(d)

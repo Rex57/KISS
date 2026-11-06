@@ -279,30 +279,30 @@ def selftest():
         r = cli(repo)
         assert (r.returncode, r.stdout) == (0, os.path.join(runs, "2026-01-03-open") + "\n"), r
         with open(os.path.join(runs, "metrics.md"), "ab") as f:  # an unreadable book holds no line: a doubt keeps them
-            f.write(b"\xff\xfe not UTF-8\n")                   # (not chmod 0: root reads a mode-000 file)
+            f.write(b"\xff\xfe not UTF-8\n")                   # (bad bytes, not file modes: root ignores modes)
         r = cli(repo)
         assert r.returncode == 0 and r.stdout.splitlines() == [os.path.join(runs, n) for n in ("2026-01-02-booked", "2026-01-03-open")], r
-        if os.geteuid():                                       # root reads a mode-000 folder: these cases need a user
-            locked = os.path.join(runs, "2026-01-05-locked")   # a run folder the guard cannot read: a doubt keeps it
-            os.makedirs(locked)
-            os.chmod(locked, 0)
-            try:
-                r = cli(repo)
-            finally:
-                os.chmod(locked, 0o700)
-            assert r.returncode == 0 and r.stdout.splitlines() == [os.path.join(runs, n) for n in ("2026-01-02-booked", "2026-01-03-open", "2026-01-05-locked")], r
-            for shut in (runs, os.path.dirname(runs)):         # an unreadable runs folder or .kiss: no list, a refusal
-                os.chmod(shut, 0)
-                try:
-                    r = cli(repo)
-                finally:
-                    os.chmod(shut, 0o700)
-                assert r.returncode not in (0, None) and r.stdout == "" and r.stderr.strip() == "cannot read: %s" % runs, (shut, r)
-        shutil.rmtree(runs)                                    # a file where the runs folder goes: a refusal, for every user
-        open(runs, "w").close()
+        locked = os.path.join(runs, "2026-01-05-locked")       # a run folder the guard cannot read: a doubt keeps it
+        os.symlink("2026-01-05-locked", locked)                # (a link to itself: no file modes, which root ignores)
         r = cli(repo)
-        assert r.returncode not in (0, None) and r.stdout == "" and r.stderr.strip() == "cannot read: %s" % runs, r
-        os.remove(runs)
+        assert r.returncode == 0 and r.stdout.splitlines() == [os.path.join(runs, n) for n in ("2026-01-02-booked", "2026-01-03-open", "2026-01-05-locked")], r
+        kiss = os.path.dirname(runs)                           # an unreadable runs folder: no list, a refusal
+        for how in ("a link to itself", "a file for .kiss", "a file for runs"):
+            shutil.rmtree(kiss)
+            os.makedirs(kiss)
+            if how == "a link to itself":
+                os.symlink("runs", runs)
+            elif how == "a file for .kiss":
+                os.rmdir(kiss)
+                open(kiss, "w").close()
+            else:
+                open(runs, "w").close()
+            r = cli(repo)
+            assert r.returncode not in (0, None) and r.stdout == "" and r.stderr.strip() == "cannot read: %s" % runs, (how, r)
+            if how == "a file for .kiss":
+                os.remove(kiss)
+                os.makedirs(kiss)
+        shutil.rmtree(kiss)
         for bad in (os.path.join(repo, "no such repo"), os.path.join(runs, "metrics.md"), ""):
             r = cli(bad)
             assert r.returncode not in (0, None) and r.stdout == "" and (r.stderr.strip() or "").startswith("not a folder"), (bad, r)
