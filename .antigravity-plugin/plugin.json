@@ -2,7 +2,7 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "kiss",
   "displayName": "KISS",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "Keep It Simple Stupid Workflow harness: one implementer, one reviewer that uses the running product, and tickets with acceptance tests. Also kiss-system-design (from a product idea to a run plan), kiss-code-clean (a ranked clean-up list of a code base), kiss-housekeeping (docs clean-up and a docs gate), kiss-mini, kiss-doctor and kiss-dream (\"tidy up memory\").",
   "author": {
     "name": "Nanami (Rex57)",
