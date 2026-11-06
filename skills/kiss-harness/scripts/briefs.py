@@ -7,7 +7,7 @@
 The brief (RUN/briefs/task-<ID>-brief.md) holds W, the read-first line, the ticket and one line that points to the
 seed. The seed (RUN/briefs/seed-<ID>.md) is CodeGraph output, read after a sync: for each symbol of the ticket that
 exists (a bare name, `Class.method` or `Class::method`), `codegraph node` and `codegraph callers --limit 100` (or
-`codegraph explore` of it when its node holds no code), then the ticket's `seeds` queries through `explore`. A
+`codegraph explore` of it when its kind is a type, TYPE_KINDS), then the ticket's `seeds` queries through `explore`. A
 ticket whose files CodeGraph does not index gets "No code seed". The rules live in the implementer prompt.
 """
 import json, os, subprocess, sys, tempfile
@@ -32,16 +32,27 @@ def file_types(W, run=run):
     return sorted(indexed), sorted(exts(run("git", "-C", W, "ls-files").stdout.splitlines()) - indexed)
 
 
-def exists(W, name, run=run):
-    """True when the index holds a symbol with exactly this name (a ticket may name one it creates). A `Class.method`
-    or `Class::method` name matches a node whose qualified name is `Class::method` or ends with `::Class::method`."""
+# CodeGraph's kinds of a type (D19: its node may be only a member list); checked in a Python and a Swift index.
+TYPE_KINDS = {"class", "struct", "enum", "interface", "protocol", "trait", "extension", "union", "record"}
+
+
+def kind(W, name, run=run):
+    """The kind of the node the index holds with exactly this name, or None (a ticket may name one it creates). A
+    `Class.method` or `Class::method` name matches a node whose qualified name is `Class::method` or ends with
+    `::Class::method`."""
     out = run("codegraph", "query", "-p", W, "-j", "-l", "50", name).stdout
     q = name.replace(".", "::")
     try:
-        return any(h["node"]["name"] == name or "::" in q and (h["node"].get("qualifiedName") == q
-                   or str(h["node"].get("qualifiedName")).endswith("::" + q)) for h in json.loads(out or "[]"))
+        return next((str(h["node"].get("kind", "")) for h in json.loads(out or "[]") if h["node"]["name"] == name
+                     or "::" in q and (h["node"].get("qualifiedName") == q
+                                       or str(h["node"].get("qualifiedName")).endswith("::" + q))), None)
     except (ValueError, KeyError, TypeError, AttributeError):
-        return False
+        return None
+
+
+def exists(W, name, run=run):
+    """True when the index holds a symbol with exactly this name (kind's match)."""
+    return kind(W, name, run) is not None
 
 
 def empty(out):
@@ -60,19 +71,20 @@ def sync(W, run=run):
 
 
 def seed(W, t, indexed, run=run):
-    """The seed text: node and callers of each existing symbol (explore of one whose node holds no code), then explore
-    on each query."""
+    """The seed text: node and callers of each existing symbol (explore of a type kind, D19), then explore on each
+    query."""
     files = t.get("files") or []
     if files and not exts(files) & set(indexed):
         return NO_CODE
     parts = []
     for name in t.get("symbols") or []:
-        if not exists(W, name, run):
+        k = kind(W, name, run)
+        if k is None:
+            continue
+        if k in TYPE_KINDS:                                   # a type whose node may be only a member list (D19)
+            parts.append(f'### `codegraph explore -p "{W}" "{name}"` (a {k}: its node may hold no code)\n{run("codegraph", "explore", "-p", W, name).stdout}')
             continue
         node = run("codegraph", "node", "-p", W, name).stdout
-        if "```" not in node:                                 # a type whose node is only a member list (D19)
-            parts.append(f'### `codegraph explore -p "{W}" "{name}"` (its node holds no code)\n{run("codegraph", "explore", "-p", W, name).stdout}')
-            continue
         parts.append(f'### `codegraph node -p "{W}" {name}`\n{node}')
         args = ["callers", "-p", W, "--limit", str(CALLERS_LIMIT), name]
         parts.append(f"### `codegraph {' '.join(args[:2])} \"{W}\" {' '.join(args[3:])}`\n{run('codegraph', *args).stdout}")
@@ -139,14 +151,16 @@ def selftest():
     assert not exists(W, "rea", index(lsp)) and not exists(W, "Lsp", index(lsp)) and exists(W, "a.py", index({"name": "a.py", "qualifiedName": "x/a.py"}))
     for code, out in ((1, ""), (1, "error: no index"), (0, "not json"), (0, '[{"x": 1}]'), (0, '{"node": 1}')):
         assert not exists(W, "Lsp.read", index(code=code, out=out)), (code, out)   # a failed lookup: no match, no crash
-    known = [{"name": "foo", "qualifiedName": "foo"}, lsp, {"name": "Shape", "qualifiedName": "Shape"}]
+    known = [{"name": "foo", "qualifiedName": "foo", "kind": "function"}, dict(lsp, kind="method"),
+             {"name": "Shape", "qualifiedName": "Shape", "kind": "struct"}]
 
     def fake(*a, timeout=120):
         cmd = a[-1] if a[0] == "git" else a[1]
         out = {"status": f"Project: {W}\n", "sync": "",
                "files": "Files (1):\n\n  skills/x/a.py\n", "ls-files": "skills/x/a.py\nREADME.md\n",
                "query": json.dumps([{"node": n} for n in known]),
-               "node": f"**{a[-1]}** (struct)\n**Members (2):**\n" if a[-1] == "Shape" else f"NODE-OF {a[-1]}\n```py\ncode\n```\n",
+               # the kind decides, not the output form: a method's node with no code fence, a struct's with one
+               "node": f"NODE-OF {a[-1]} (no fence)\n" if "read" in a[-1] else f"NODE-OF {a[-1]}\n```py\ncode\n```\n",
                "callers": f"CALLERS-OF {a[-1]}\n",
                "explore": f"**Exploration: {a[-1]}**\nFound 2 symbols\n" + "code\n" * 9 + "    if 'No results found' in out:\n"}[cmd]
         return subprocess.CompletedProcess(a, 0, out, "")
@@ -164,7 +178,7 @@ def selftest():
         for want in ("NODE-OF foo", "CALLERS-OF foo", "Exploration: foo bar", "NODE-OF Lsp.read", "CALLERS-OF Lsp.read",
                      "NODE-OF Lsp::read", "CALLERS-OF Lsp::read", f'### `codegraph explore -p "{W}" "Shape"`', "Exploration: Shape"):
             assert want in s1, (want, s1)
-        assert "(struct)" not in s1 and "CALLERS-OF Shape" not in s1, s1   # a node with no code: explore it, not node and callers
+        assert "NODE-OF Shape" not in s1 and "CALLERS-OF Shape" not in s1, s1   # a type kind: explore it (D19)
         assert "new_one" not in s1, s1                         # a symbol the ticket creates has no seed yet
         assert s1.index("NODE-OF foo") < s1.index("CALLERS-OF foo") < s1.index("Exploration: foo bar"), s1
         assert NO_CODE in s2 and "NODE-OF" not in s2, s2
