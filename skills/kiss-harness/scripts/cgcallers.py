@@ -46,6 +46,7 @@ JS = {"javascript", "typescript", "tsx", "jsx", "svelte"}
 # the language servers of the LSP pass, started over stdio when on PATH (D5); the whole pass stops after LSP_LIMIT s
 SERVERS = {"python": ["pyright-langserver", "--stdio"], "js": ["typescript-language-server", "--stdio"]}
 LSP_LIMIT = 120
+COLOUR = re.compile(r"\x1b\[[0-9;]*m")
 LSP_IDS = {"python": "python", "javascript": "javascript", "jsx": "javascriptreact", "typescript": "typescript",
            "tsx": "typescriptreact"}
 IMPORT_MODULE = re.compile(r"""import_module\(\s*['"]([\w.]+)['"]""")
@@ -352,12 +353,13 @@ def main(argv=None, cg=None, git=None, read=read_file, servers=SERVERS, clock=ti
         ap.error("NAME is required")
     git = git or (lambda args: run(["git"] + args, os.getcwd()))
     W = a.W or git(["rev-parse", "--show-toplevel"]).strip()
-    cg = cg or (lambda args: run(["codegraph"] + args, W))
+    runner = cg or (lambda args: run(["codegraph"] + args, W))
+    cg = lambda args: COLOUR.sub("", runner(args))        # FORCE_COLOR or CI puts colour codes around `Project:` and in sync's line
     status = cg(["status", W])
     named = re.search(r"Project: (.+)", status)
     index = "no index" if not named or "Not initialized" in status else named.group(1).strip()
     if os.path.realpath(index) != os.path.realpath(W):    # a folder inside another checkout reads that one's index
-        print("codegraph: no index of its own in %s: `codegraph status` names %s; run `codegraph init -y \"%s\"` first"
+        print("codegraph: no index of its own in %s: `codegraph status` names %s; run `codegraph init \"%s\" </dev/null` first"
               % (W, index, W))
         return 1
     said = [l.strip("│●└┌◇◆ ") for l in cg(["sync", W]).splitlines()]
@@ -564,9 +566,11 @@ def selftest():
     def fake_cg(args):
         calls.append(args[0])
         if args[0] == "status":
-            return "CodeGraph Status\n\nProject: %s\n" % project.get("is", args[1])
+            status = "CodeGraph Status\n\nProject: %s\n" % project.get("is", args[1])
+            return status.replace("Project:", "\x1b[36mProject:\x1b[0m") if project.get("colour") else status
         if args[0] == "sync":
-            return "┌  Syncing CodeGraph\n│\n●  Already up to date\n│\n└  Done\n"
+            said = "┌  Syncing CodeGraph\n│\n●  Already up to date\n│\n└  Done\n"
+            return said.replace("●", "\x1b[34m●\x1b[39m").replace("│", "\x1b[90m│\x1b[39m") if project.get("colour") else said
         if args[0] == "files":
             return json.dumps([{"path": f, "language": lang[os.path.splitext(f)[1]]} for f in files])
         name, only = args[-1], (args[args.index("-f") + 1] if "-f" in args else None)
@@ -613,6 +617,14 @@ def selftest():
         o = out("helper", "-p", W)
         assert "sync" not in calls and "definition" not in o, (calls, o)
         assert o.splitlines()[0].startswith("codegraph: no index of its own in %s: `codegraph status` names /elsewhere/main" % W), o
+        assert "`codegraph init \"%s\" </dev/null`" % W in o and "-y" not in o, o           # the new form, in the refusal
+        project["colour"] = True                                                           # D27: another checkout, coloured: refused
+        o = out("helper", "-p", W)
+        assert o.splitlines()[0].startswith("codegraph: no index of its own in %s: `codegraph status` names /elsewhere/main;" % W), o
+        project.clear()
+        project["colour"] = True                                                           # W's own, coloured: reads as W's
+        o = out("helper", "-p", W)
+        assert o.splitlines()[0] == "codegraph sync: Already up to date" and "no index" not in o and "definition" in o, o
         project.clear()
         assert "exit 3: it broke" in run(["sh", "-c", "echo it broke >&2; exit 3"], W)      # F8: a failed command says why
         o = out("fetchIt", "-p", W)

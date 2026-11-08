@@ -17,8 +17,8 @@
 Transcripts: under CLAUDE_CONFIG_DIR (default ~/.claude), projects/*/<session>/subagents/**/agent-<id>.jsonl, each
 beside agent-<id>.meta.json (its agentType gives the role). A controller session is a transcript whose Bash call ran
 `prompt.py` (any step) on R (a resumed run has two); a subagent counts when it is under one and its meta toolUseId is
-one of that session's Agent calls from its first such call to its last `metrics.py --record` of R (another run's
-`prompt.py start` ends it first).
+one of that session's Agent calls from its first such call to its last `metrics.py --record` of R (a `prompt.py start`
+that names another run ends it first).
 The controller is counted from the session's first message that names R. Each message id counts once. CodeGraph share (v2), subagents only: CodeGraph calls (the MCP tools, the CLI's
 read commands, cgcallers, and the seed scripts briefs.py and callcheck.py) over CodeGraph calls plus symbol searches
 plus code reads. A search (the Grep tool, grep, rg, git grep) is a symbol search when one alternative of its pattern,
@@ -88,7 +88,7 @@ def runs_script(cmd, script, arg=None):
 
 def agent_calls(session, name):
     """The ids of a session's Agent calls for the run `name`: from its first Bash call that ran `prompt.py` (any step)
-    on that run to its last `metrics.py --record` of it (another run's `prompt.py start` ends it first); none without
+    on that run to its last `metrics.py --record` of it (a `prompt.py start` that names another run ends it first); none without
     such a call. A run resumed in a second session has its own controller session there."""
     ids, pending, on, recorded = set(), set(), False, False
     with open(session, errors="replace") as fh:
@@ -112,7 +112,7 @@ def agent_calls(session, name):
                 if runs_script(cmd, "prompt.py"):
                     if name in runs:
                         on = True
-                    elif on and runs_script(cmd, "prompt.py", "start"):
+                    elif on and runs and runs_script(cmd, "prompt.py", "start"):
                         return ids if recorded else ids | pending
                 elif on and name in runs and runs_script(cmd, "metrics.py", "--record"):
                     ids, pending, recorded = ids | pending, set(), True
@@ -628,6 +628,11 @@ def selftest():
                                                          ("Bash", "python3 -I /h/prompt.py start /y/.kiss/runs/q2 W=/y"), agent])])
         assert agent_calls(S3 + ".jsonl", "q1") == {"p-1", "p-3"} and agent_calls(S3 + ".jsonl", "q2") == {"p-5"}, "a heredoc's text starts no run"
         assert agent_calls(S3 + ".jsonl", "q3") == set()
+        S4 = S3 + "-var"                             # a start with no literal name is no other run's: only a literal one ends the scan
+        put(S4 + ".jsonl", [said("p", 0, 0, 0, 0, tools=[("Bash", "python3 -I /h/prompt.py implementer /y/.kiss/runs/q1"), agent,
+                                                         ("Bash", 'python3 -I /h/prompt.py start "$R" W=/y'), agent,
+                                                         ("Bash", "python3 -I /h/prompt.py start /y/.kiss/runs/q2 W=/y"), agent])])
+        assert agent_calls(S4 + ".jsonl", "q1") == {"p-1", "p-3"} and agent_calls(S4 + ".jsonl", "q2") == {"p-5"}, agent_calls(S4 + ".jsonl", "q1")
         S2 = os.path.join(C, "projects", "-x", "s2")                       # another session whose agent names R: the 1.00 case
         put(S2 + ".jsonl", [said("d", 0, 0, 0, 0, tools=[agent])])
         put(os.path.join(S2, "subagents", "agent-a7.jsonl"), [user(f"You are the implementer. R = {R}"), late], "kiss:kiss-implementer", "d-0")
@@ -729,6 +734,8 @@ def selftest():
         a, b, c = (run_folder(os.path.join(t, "repo", ".kiss", "runs", n), f"# D\n\nFull check at {head}: pass\n")
                    for n in ("2026-01-02-a", "2026-01-03-b", "2026-01-01-c"))
         book = os.path.join(t, "repo", ".kiss", "runs", "metrics.md")      # beside the run folders (R1)
+        waited = "Metrics: subagents 2, minutes 95 of 330 (owner wait 30 left out)"
+        assert record(b, waited) == waited + "; " + NA and open(book).read() == "- 2026-01-03-b: " + waited + "; " + NA + "\n"
         assert record(b, "Metrics: subagents 2") == "Metrics: subagents 2; " + NA
         record(a, "Metrics: subagents 3")
         record(c, "Metrics: subagents\r\n5")                              # R3: one line; R4: a new run at the end

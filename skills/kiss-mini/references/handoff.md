@@ -1,8 +1,10 @@
 # Hand-off: the brief, the report and the worker's rules
 
 The kiss-mini skill, its mod, the `kiss-worker` agent and kiss-harness all read this file. `T` is a task's
-folder, `$TMPDIR/kiss-mini/<id>/` (`/tmp` when `TMPDIR` is unset), never in the checkout. It holds `brief.md` and,
-at the end, `report.md` (the full log), which the receiver of the report writes (a subagent may not write it).
+folder, `$TMPDIR/kiss-mini/<id>/` (`/tmp` when `TMPDIR` is unset), never in the checkout: the brief's `Task folder:`
+line. It holds `brief.md`, a worker's `scratch/` and, at the end, `report.md` (the full log), which the receiver of the
+report writes (a subagent may not write it). The mod's prune removes all of T when it forgets the task, 7 days after
+the task ends.
 
 ## Kinds and states
 
@@ -41,17 +43,18 @@ URL; do not copy them in. No secrets: no keys, passwords or personal data. Count
 
 ## The report
 
-The worker's final message. The receiver saves the whole message as `T/report.md` and passes on only these lines:
+The worker's final message. The receiver saves the whole message as `T/report.md` and passes on these lines:
 
 ```markdown
 State: ready | done | failed | waiting for you
 Summary: <at most 600 characters: what changed or the answer, or the question to the owner>
 Branch: mini/<id>    Commits: <sha> <subject>, ...
-Tests: <each acceptance check and its result>
+Tests: <each acceptance check and its result, all on this one line, separated by "; ">
+Mutants: <each new guard or changed test>: <the mutant and which test fails, or why none can>
 Full log: <T>/report.md
 ```
 
-A question task writes `Branch: none`. Below these lines comes the full text: the whole answer, the commands run
+The `Mutants:` line stays in `T/report.md`; the receiver does not pass it on. A question task writes `Branch: none`, and no `Mutants:` line. Below these lines comes the full text: the whole answer, the commands run
 and their output. A code or bug task's full text ends with a `## Pull request body` section, written with the `pr`
 skill when it is installed: a draft pull request takes it as its body.
 
@@ -72,8 +75,11 @@ skill when it is installed: a draft pull request takes it as its body.
    | a pull request body | `pr` |
 
 3. **Where to work:** a code or bug task works only in its worktree, on its branch, and ends with one commit
-   that adds the files the task changed by explicit path, never build or test output (`__pycache__`, `.pyc`,
-   `dist/`); it never pushes, merges or opens a pull request. The mod's guard denies its git command whose folder is
+   (one per item when the brief asks for it) that adds the files the task changed by explicit path, never build or test output (`__pycache__`, `.pyc`,
+   `dist/`); it never pushes, merges or opens a pull request. It leaves a page's `Reviewed` date as it is: the close's
+   Upkeep sets it after its read. A scratch copy (a mutant, a test copy) goes under `T/scratch/`, never a new temp folder
+   or the worktree: `git clone -q . "T/scratch/copy"` from the worktree (a clone holds only commits: commit first, or copy
+   your changed files into it); change it with Bash, because Edit, Write and `git init` are denied outside the worktree. The mod's guard denies its git command whose folder is
    outside the worktree (git reads such as status, log and diff pass), its `git stash` and `git worktree` changes
    anywhere (both reach every worktree), and its Edit, Write or NotebookEdit outside it,
    with "kiss-mini: a worker writes only in its worktree": commit in the worktree and report, never try again
@@ -88,6 +94,8 @@ skill when it is installed: a draft pull request takes it as its body.
    step of your plan.
 6. **End** with the report as your final message; write no report file. Before it says that no test covers a
    function, run `codegraph callers -p "$PWD" <name>` (when the repo has an index): a selftest in the same file counts.
+   In the report's `Mutants:` line, list each new guard and each test whose seam or expected value changed, each with a
+   mutant in a scratch copy that makes it fail (one mutant may serve several), or say why none can.
 
 ## Credit
 

@@ -16,8 +16,9 @@ project's instructions file (CLAUDE.md, AGENTS.md or GEMINI.md) already says.
 - Flake check: `<command> x <n>` (the tests to run n times in a row in the background beside the final review, when
   the run's tests add a time value; a failure, or a time bound under 2 times the slowest time seen, is a fix).
 - Shared test resources: what the tests and the full check start (a database, a server, the app), its memory or
-  connection limit, and how many agents or sessions may use it at once ("one at a time" holds the implementer's
-  product checks while a solo reviewer uses it).
+  connection limit, and how many agents or sessions may use it at once.
+- Models: implementer <model>, reviewer <model>, effort <level> (optional; with no line, the rule in the harness's
+  `references/agents.md` holds).
 - Build steps: which change needs which build, and what goes in the same commit (for example: a change under
   `web/` ends with `npm run build`, and the built files go in the same commit).
 - Commit trailer: the exact lines each commit message ends with, or "none".
@@ -27,6 +28,9 @@ project's instructions file (CLAUDE.md, AGENTS.md or GEMINI.md) already says.
   "merge" also covers a later commit that changes only tests, docs or built files).
 - Docs gate: `python3 -I tools/check_docs.py .` (a kiss-housekeeping First run installs it; the close runs its
   Upkeep), or `none (owner declined)`. With no line, the close asks once.
+
+The words "one at a time" in the `Shared test resources:` line hold the implementer's product checks while a solo
+reviewer uses the resource.
 
 ## Start the product for a reviewer
 

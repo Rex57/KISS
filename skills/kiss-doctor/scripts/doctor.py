@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Check this device for a KISS run (kiss-doctor/SKILL.md). Reads only, except `feedback on|off`, which sets
-env.KISS_FEEDBACK in Claude Code's user settings.
+"""Check this device for a KISS run (kiss-doctor/SKILL.md). Reads only, except `feedback on|off claude`, which
+sets env.KISS_FEEDBACK in Claude Code's user settings.
 
   python3 -I doctor.py [AGENT ...]    AGENT: claude, codex, gemini, antigravity (default: each one whose CLI is on PATH)
-  python3 -I doctor.py feedback on|off   set env.KISS_FEEDBACK in Claude Code's user settings ("1" or "0"), with a backup
+  python3 -I doctor.py feedback on|off <claude|codex|gemini|antigravity>   claude: set env.KISS_FEEDBACK in Claude Code's
+                                         user settings ("1" or "0"), with a backup; the others: change no file, and
+                                         print what to add by hand
   python3 -I doctor.py setup [AGENT ...]   the numbered plan of what is missing, from the install table (installs
                                          nothing); AGENT: only those agents on PATH (default: each one on PATH)
   python3 -I doctor.py setup [AGENT ...] --apply all|none|1,3 --plan <id>   run those items of the plan with that id,
@@ -23,6 +25,7 @@ import glob, hashlib, json, os, platform, re, shlex, shutil, subprocess, sys, ti
 KISS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 HOME = os.path.expanduser("~")
 CLI = {"claude": "claude", "codex": "codex", "gemini": "gemini", "antigravity": "agy"}
+FILE_BREAK = "\n\f\n"                                   # between two files of Claude Code's joined text: check_rule reads each on its own
 
 
 def read(path):
@@ -46,8 +49,8 @@ def markers(kiss=KISS):
     return [m.rstrip(":.") for m in re.findall(r"^\*\*(.+?)\*\*", read(os.path.join(kiss, "rules", "codegraph.md")), re.M)]
 
 
-def with_imports(path, depth=5, seen=None):
-    """The file's text plus every `@file` it imports (Claude Code's CLAUDE.md syntax, 5 hops deep)."""
+def with_imports(path, depth=4, seen=None):
+    """The file's text plus every `@file` it imports (Claude Code's CLAUDE.md syntax, 4 hops deep)."""
     seen = {} if seen is None else seen                 # the files read, in order
     path = os.path.realpath(os.path.expanduser(path))
     if path in seen or not os.path.isfile(path):
@@ -58,7 +61,7 @@ def with_imports(path, depth=5, seen=None):
         for ref in re.findall(r"(?:^|\s)@(\S+)", text):
             ref = os.path.join(os.path.dirname(path), os.path.expanduser(ref))
             if os.path.isfile(ref):
-                text += "\n" + with_imports(ref, depth - 1, seen)
+                text += FILE_BREAK + with_imports(ref, depth - 1, seen)
     return text
 
 
@@ -99,15 +102,15 @@ def agent_setup(agent):
         home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
         roots = [(p["id"], p["installPath"]) for p in json.loads(run(["claude", "plugin", "list", "--json"]) or "[]")
                  if p.get("enabled") and p.get("installPath")]
-        files = [os.path.join(home, "CLAUDE.md")]
-        return with_imports(files[0]), files, roots + [("~/.claude/skills", os.path.join(home, "skills"))], ""
+        files = [os.path.join(home, "CLAUDE.md")] + sorted(glob.glob(os.path.join(glob.escape(home), "rules", "**", "*.md"), recursive=True))
+        return FILE_BREAK.join(with_imports(f) for f in files), files, roots + [("~/.claude/skills", os.path.join(home, "skills"))], ""
     if agent == "codex":
         home = os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex")
         cfg = os.path.join(home, "config.toml")
         roots = []
         for pid in codex_enabled(read(cfg) if os.path.isfile(cfg) else ""):
             name, _, market = pid.partition("@")
-            versions = sorted(glob.glob(os.path.join(home, "plugins", "cache", market, name, "*")), key=os.path.getmtime)
+            versions = sorted(glob.glob(os.path.join(glob.escape(home), "plugins", "cache", market, name, "*")), key=os.path.getmtime)
             roots += [(pid, versions[-1])] if versions else []
         override = os.path.join(home, "AGENTS.override.md")
         files = [override if os.path.isfile(override) else os.path.join(home, "AGENTS.md")]
@@ -136,7 +139,7 @@ def unfenced(text):
 
 
 def section_end(text, at, level=2):
-    """Where the rule's section that holds `at` ends: the next heading of `level` or less (the replace: `#` or `##`)
+    """Where the rule's section that holds `at` ends: the next heading of `level` or less (rule_span gives the level)
     or the CODEGRAPH_START line of `codegraph install`'s block, out of fences; else the end."""
     return next((line.start() for line in unfenced(text)
                  if line.start() > at and re.match(r"#{1,%d} |\W*CODEGRAPH_START\W*$" % level, line.group())), len(text))
@@ -149,22 +152,41 @@ def section(text, first):
     return " ".join(text[at:section_end(text, at, 6)].split()) if at >= 0 else ""
 
 
+def holds(text, marks):
+    """Claude Code: one file holds the rule only with more than half of its bold lead-ins: an owner's own bold word is no copy."""
+    return 2 * sum("**" + m in text for m in marks) > len(marks)
+
+
+def differs(text, marks, rule):
+    """A holder file that lacks a bold lead-in, or whose own section is not KISS's rule text (when one is given)."""
+    return any("**" + m not in text for m in marks) or bool(rule) and section(text, marks[0]) != section(rule, marks[0])
+
+
 def check_rule(agent, text, files, marks, rule=""):
-    """The rule in an agent's instructions: every lead-in is OK, unless KISS's rule text is given and the copy differs."""
+    """The rule in an agent's instructions: every lead-in is OK, unless KISS's rule text is given and the copy differs. Claude
+    Code's rules/ folder holds the owner's own files too, so its files are read one by one: OK when no holder differs."""
     shown = " or ".join(f.replace(HOME, "~") for f in files)
-    have = [m for m in marks if m in text]
+    if agent == "claude":
+        found = [part for part in text.split(FILE_BREAK) if holds(part, marks)]
+        stale = next((part for part in found if differs(part, marks, rule)), None)
+        lacks = [m for m in marks if "**" + m not in stale] if stale else []
+        named = rule_file(files, marks, 4, rule)
+    else:                                               # D14: the other agents keep the read of the whole text
+        found = [m for m in marks if m in text]
+        lacks = [m for m in marks if m not in found]
+        stale = lacks or rule and section(text, marks[0]) != section(rule, marks[0])
+        named = rule_file(files, marks, 0)
+    named = (named or shown).replace(HOME, "~")
     if not text:
         out = [("FAIL", agent, f"CodeGraph rule: no {shown}", "The CodeGraph rule")]
-    elif len(have) == len(marks) and rule and section(text, marks[0]) != section(rule, marks[0]):
-        out = [("WARN", agent, f"CodeGraph rule in {shown} differs from KISS's text: replace the section with "
-                f"rules/codegraph.md", "The CodeGraph rule")]
-    elif len(have) == len(marks):
-        out = [("OK", agent, f"CodeGraph rule in {shown}", "")]
-    elif have:
-        lacks = ", ".join(m for m in marks if m not in have)
-        out = [("WARN", agent, f"CodeGraph rule in {shown} is an older or edited copy: lacks {lacks}", "The CodeGraph rule")]
-    else:
+    elif not found:
         out = [("FAIL", agent, f"CodeGraph rule: not in {shown}", "The CodeGraph rule")]
+    elif not stale:
+        out = [("OK", agent, f"CodeGraph rule in {shown}", "")]
+    elif lacks:
+        out = [("WARN", agent, f"CodeGraph rule in {named} is an older or edited copy: lacks {', '.join(lacks)}: run kiss-doctor setup", "The CodeGraph rule")]
+    else:
+        out = [("WARN", agent, f"CodeGraph rule in {named} differs from KISS's text: run kiss-doctor setup", "The CodeGraph rule")]
     if re.search(r"^\W*CODEGRAPH_START\W*$", text, re.M):  # the marker line, not the rule's own mention of it
         out.append(("WARN", agent, "a CODEGRAPH_START block from `codegraph install`: delete it", "The CodeGraph rule"))
     return out
@@ -172,7 +194,8 @@ def check_rule(agent, text, files, marks, rule=""):
 
 def rule_span(text, marks):
     """The rule's section in a text, (start, end): from the nearest heading above its first bold lead-in (the first in
-    the rule's order that the text holds, as section() reads it) to section_end. A line inside a fence is no heading. It
+    the rule's order that the text holds, as section() reads it) to section_end at that heading's level, at least `##`
+    (a `# ` heading's `##` are the owner's). A line inside a fence is no heading. It
     starts at the lead-in's line when that heading is the file's first and a `# ` one (its title: D23, D25), or when a
     CODEGRAPH_END line comes after it (codegraph install's block stays whole); start is None when no heading is above.
     None when the text holds no lead-in."""
@@ -185,16 +208,21 @@ def rule_span(text, marks):
     if not heads:
         return None, section_end(text, at)
     title = above[-1] is heads[0] and above[-1].group().startswith("# ")
-    return (text.rfind("\n", 0, at) + 1 if title or not above[-1].group().startswith("#") else above[-1].start()), section_end(text, at)
+    own = above[-1].group()
+    level = max(2, len(own) - len(own.lstrip("#")))
+    return (text.rfind("\n", 0, at) + 1 if title or not own.startswith("#") else above[-1].start()), section_end(text, at, level)
 
 
-def rule_file(files, marks, depth):
+def rule_file(files, marks, depth, rule=None):
     """The first of `files`, or of the files they `@`-import (as with_imports reads them), that holds the rule's first
-    bold lead-in: the first in the rule's order that any of them holds, as rule_span reads one file."""
+    bold lead-in: the first in the rule's order that any of them holds, as rule_span reads one file. With `rule` (Claude
+    Code): the first holder that differs from it."""
     seen = {}
     for f in files:
         with_imports(f, depth, seen)
     texts = [(p, read(p)) for p in seen]
+    if rule is not None:
+        return next((p for p, x in texts if holds(x, marks) and differs(x, marks, rule)), None)
     first = next(("**" + m for m in marks if any("**" + m in x for _, x in texts)), None)
     return next((p for p, x in texts if first and first in x), None)
 
@@ -235,23 +263,51 @@ def replace_section(path, rule):
     if not span or span[0] is None:
         why = "none of the rule's lead-ins" if not span else "no heading above the rule"
         return 1, f"{path}: {why}; nothing changed"
-    old, tmp = back_up(path), path + ".kiss-new"
+    old = back_up(path)
     rest = text[span[1]:]
     gap = "\n" * max(0, 2 - (len(new) - len(new.rstrip("\n")))) if rest else ""     # one blank line before what follows
     try:
-        with open(tmp, "w", encoding="utf-8", newline="") as f:
-            f.write(text[:span[0]] + new + gap + rest)
-            f.flush()
-            os.fsync(f.fileno())                        # on disk before the rename: a power loss leaves a whole file
-        shutil.copymode(path, tmp)
-        os.replace(tmp, path)
+        write_whole(path, text[:span[0]] + new + gap + rest)
     except OSError as e:
-        try:
-            os.remove(tmp)
-        except OSError:                                 # its own failure must not hide the backup's path
-            pass
         return 1, f"{e}; {path} is unchanged; its backup: {old}"
     return 0, f"backup: {old}"
+
+
+def write_copy(rule, copy):
+    """`copy` holds the rule file: a backup of a copy that differs (its name does not end in .md, so Claude Code does not
+    load it), then write_whole. (exit code, output)."""
+    try:
+        text = exact(rule)
+        os.makedirs(os.path.dirname(copy), exist_ok=True)
+        old = back_up(copy) if os.path.isfile(copy) and exact(copy) != text else None
+        write_whole(copy, text)
+    except (OSError, UnicodeDecodeError) as e:
+        return 1, f"{copy}: {e}"
+    return 0, f"wrote {copy}" + (f"; backup: {old}" if old else "")
+
+
+def move_rule(path, copy, rule):
+    """The rule file to `copy`, then the rule's section out of `path`, after a backup beside it; one blank line stays
+    between the lines around it. A re-run repeats it. (exit code, output)."""
+    try:
+        text = exact(path)
+    except (OSError, UnicodeDecodeError) as e:
+        return 1, f"{path}: {e}; nothing changed"
+    span = rule_span(text, markers(os.path.dirname(os.path.dirname(rule))))
+    if not span or span[0] is None:
+        return 1, f"{path}: {'none of the rule' + chr(39) + 's lead-ins' if not span else 'no heading above the rule'}; nothing changed"
+    code, said = write_copy(rule, copy)
+    if code:
+        return 1, f"{said}; {path} is unchanged"
+    old = ""
+    nl = "\r\n" if "\r\n" in text else "\n"
+    above, below = text[:span[0]].rstrip("\r\n"), text[span[1]:].lstrip("\r\n")
+    try:
+        old = back_up(path)
+        write_whole(path, above + nl + nl + below if above and below else above + nl if above else below)
+    except OSError as e:
+        return 1, f"{e}; {path} is as it was; {'its backup: ' + old if old else 'no backup'}; two copies load until a re-run of setup"
+    return 0, f"{said}; backup: {old}"
 
 
 def check_skills(agent, roots, need, note="", here=()):
@@ -397,8 +453,17 @@ def set_feedback(settings, on):
         data["env"]["KISS_FEEDBACK"] = "1" if on else "0"
     backup = edit_settings(settings, change)
     return ["feedback mode %s in %s%s" % ("on" if on else "off", settings, " (backup: %s)" % backup if backup else ""),
-            "Claude Code: start a new session for it to apply.",
-            "Codex, Gemini CLI, Antigravity: put this line in your shell profile yourself: export KISS_FEEDBACK=%s" % ("1" if on else "0")]
+            "Claude Code: start a new session for it to apply."]
+
+
+def feedback_by_hand(agent, on):
+    """The lines for an agent whose setting doctor does not write. Codex: its file is TOML, and a second table breaks it."""
+    value = "1" if on else "0"
+    if agent == "codex":
+        return ["Codex: add this to ~/.codex/config.toml yourself, then start a new session (if the table exists, add only "
+                "KISS_FEEDBACK to its set line):", "[shell_environment_policy]", 'set = { KISS_FEEDBACK = "%s" }' % value]
+    return ["%s: put this line in your shell profile yourself, then start a new session: export KISS_FEEDBACK=%s"
+            % ({"gemini": "Gemini CLI", "antigravity": "Antigravity"}[agent], value)]
 
 
 def back_up(path):
@@ -428,10 +493,29 @@ def edit_settings(settings, change):
         backup = None
         os.makedirs(os.path.dirname(settings), exist_ok=True)
     change(data)
-    with open(settings, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    write_whole(settings, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     return backup
+
+
+def write_whole(path, text):
+    """`text` into a temp file beside the file, then a rename, so a failure or an interrupt leaves the old file whole. A
+    link stays a link: its target gets the change."""
+    path = os.path.realpath(path)
+    tmp = path + ".kiss-new"
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())                        # on disk before the rename: a power loss leaves a whole file
+        if os.path.exists(path):
+            shutil.copymode(path, tmp)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:                                 # its own failure must not hide the first
+            pass
+        raise
 
 
 # The install table: the one home of every command `setup` shows (D6). A command is one string; {name} fills
@@ -458,7 +542,7 @@ INSTALL = [
      "changes": "copies cgcallers.py to {bin}/cgcallers (KISS_BIN sets the folder; put it on your PATH yourself)",
      "run": ["install -m 755 {kiss}/skills/kiss-harness/scripts/cgcallers.py {bin}/cgcallers"]},
     {"key": "index", "what": "the CodeGraph index of this repo", "source": "https://github.com/colbymchenry/codegraph",
-     "changes": "adds {repo}/.codegraph/", "run": ["codegraph init -y {repo}"]},
+     "changes": "adds {repo}/.codegraph/", "run": ["codegraph init {repo}"]},
     {"key": "pyright", "what": "pyright (optional: cgcallers' LSP pass for Python)", "source": "https://github.com/microsoft/pyright",
      "changes": "adds pyright-langserver to npm's global folder (npm prefix -g)", "run": ["npm install -g pyright"]},
     {"key": "typescript-language-server", "what": "typescript-language-server (optional: cgcallers' LSP pass for JS/TS)",
@@ -466,11 +550,19 @@ INSTALL = [
      "changes": "adds typescript-language-server and TypeScript 5 (TypeScript 7 has no tsserver.js) to npm's global folder",
      "run": ["npm install -g typescript-language-server typescript@5"]},
     {"key": "rule", "what": "the CodeGraph rule", "source": "https://github.com/Rex57/KISS (rules/codegraph.md)",
-     "changes": "appends the rule to {file}", "agents": {a: ["cat {kiss}/rules/codegraph.md >> {file}"] for a in CLI}},
+     "changes": "appends the rule to {file}", "agents": {a: ["cat {kiss}/rules/codegraph.md >> {file}"] for a in CLI if a != "claude"}},
+    {"key": "rule-new", "what": "the CodeGraph rule", "source": "https://github.com/Rex57/KISS (rules/codegraph.md)",
+     "changes": "writes {copy}, a copy of rules/codegraph.md, and no other file; start a new session for it to load",
+     "agents": {"claude": ["write {kiss}/rules/codegraph.md to {copy}"]}},
+    {"key": "rule-move", "what": "move the CodeGraph section of {file} to {copy}", "source": "https://github.com/Rex57/KISS (rules/codegraph.md)",
+     "changes": 'writes {copy}, a copy of rules/codegraph.md; removes the lines of {file} from "{first}" to {until}, after a backup'
+                " beside the file; your own lines inside that section are lost, and kept in the backup; start a new session for it to load",
+     "agents": {"claude": ["move the CodeGraph section of {file} to {copy} with {kiss}/rules/codegraph.md"]}},
     {"key": "rule-replace", "what": "replace the CodeGraph section of {file}", "source": "https://github.com/Rex57/KISS (rules/codegraph.md)",
      "changes": 'replaces the lines of {file} from "{first}" to {until} with all of rules/codegraph.md, after a backup'
                 " beside the file; your own lines inside that section are lost, and kept in the backup",
-     "agents": {a: ["replace the CodeGraph section of {file} with {kiss}/rules/codegraph.md"] for a in CLI}},
+     "agents": {a: ["replace the CodeGraph section of {file} with {kiss}/rules/codegraph.md"] for a in CLI},
+     "after": {"claude": "start a new session: a rule file loads when a session starts"}},
     {"key": "mcp", "what": "CodeGraph's MCP server", "source": "https://github.com/colbymchenry/codegraph",
      "changes": "adds the MCP server codegraph (codegraph serve --mcp) to {agent}'s user settings",
      "agents": {"claude": ["claude mcp add --scope user codegraph -- codegraph serve --mcp", "allow mcp__codegraph__* in {settings}"],
@@ -608,6 +700,10 @@ def execute(argv, timeout=TIMEOUT):
             return 0, ""
         if argv[:5] == ["replace", "the", "CodeGraph", "section", "of"] and argv[6:7] == ["with"]:
             return replace_section(argv[5], argv[7])
+        if argv[0] == "write" and argv[2:3] == ["to"]:
+            return write_copy(argv[1], argv[3])
+        if argv[:5] == ["move", "the", "CodeGraph", "section", "of"] and argv[6:7] == ["to"] and argv[8:9] == ["with"]:
+            return move_rule(argv[5], argv[7], argv[9])
         if argv[:3] == ["install", "-m", "755"]:
             os.makedirs(os.path.dirname(argv[4]), exist_ok=True)
             shutil.copyfile(argv[3], argv[4])
@@ -703,6 +799,20 @@ def detect():
             "path": os.environ.get("PATH", "")}
 
 
+def claude_rule_gap(level, files, marks, rule):
+    """Claude Code's rule item: none yet, a new copy; a stale section in CLAUDE.md, or a section beside a copy (a move
+    that stopped halfway), the move; another holder that differs (a stale copy, a hand-made import), its replace; else nothing."""
+    main, copy = files[0], os.path.join(os.path.dirname(files[0]), "rules", "kiss.md")
+    if level == "FAIL":
+        return {("claude", "rule-new"): {"copy": copy}}
+    real = os.path.realpath(main)
+    beside = os.path.isfile(copy) and os.path.isfile(main) and holds(read(main), marks)
+    holder = rule_file(files, marks, 4, rule)
+    if beside or level == "WARN" and holder == real:
+        return {("claude", "rule-move"): dict(replace_item(real, main, marks), copy=copy)}
+    return {("claude", "rule-replace"): replace_item(holder, main, marks)} if level == "WARN" else {}
+
+
 def gaps(system):
     """What the checks find missing on this machine, in plan()'s form."""
     out = {k: {} for k, missing in [("git", not shutil.which("git")), ("python", sys.version_info < (3, 9)),
@@ -718,10 +828,12 @@ def gaps(system):
     for agent in system["agents"]:
         text, files, roots, note = agent_setup(agent)
         level = check_rule(agent, text, files, marks, rule)[0][0]
-        if level == "FAIL":
+        if agent == "claude":
+            out.update(claude_rule_gap(level, files, marks, rule))
+        elif level == "FAIL":
             out[(agent, "rule")] = {"file": files[0]}
         elif level == "WARN":                   # an older or edited copy: its section replaced (D4)
-            out[(agent, "rule-replace")] = replace_item(rule_file(files, marks, 5 if agent == "claude" else 0), files[0], marks)
+            out[(agent, "rule-replace")] = replace_item(rule_file(files, marks, 0), files[0], marks)
         for level, _, _, fix in check_skills(agent, roots, need, note, loaded_here(agent)):
             if level == "FAIL" and fix.startswith("Install "):
                 out[(agent, fix)] = {}
@@ -762,7 +874,9 @@ def selftest():
         main = put("home/CLAUDE.md", "intro\n@rules.md\n@types/node is not a file\n")
         put("home/rules.md", "**Which index.** x\n**`callers` is incomplete** (my note): y\n")
         assert check_rule("claude", with_imports(main), [main], marks)[0][0] == "OK"
-        assert check_rule("claude", "**Which index.** only", [main], marks)[0][0] == "WARN"
+        assert check_rule("claude", "**Which index.** only", [main], marks)[0][0] == "FAIL"    # half of them is no copy
+        three = marks + ["Third"]                               # more than half, one lacking
+        assert check_rule("claude", "**Which index.** **`callers` is incomplete** only", [main], three)[0][0] == "WARN"
         assert check_rule("claude", "nothing", [main], marks)[0][0] == "FAIL"
         assert check_rule("claude", "", [main], marks)[0][0] == "FAIL"
         # T-4: a copy with every lead-in is compared with KISS's text (whitespace and the text around it aside)
@@ -770,8 +884,8 @@ def selftest():
         same = "# Mine\n\n## CodeGraph\n\n**Which index.**  a\n**`callers` is incomplete:** b\n\n## Other\nmore\n"
         assert check_rule("claude", same, [main], marks, rule) == [("OK", "claude", "CodeGraph rule in " + main, "")]
         old = check_rule("claude", "**Which index.** a\n**`callers` is incomplete:** older b\n", [main], marks, rule)
-        assert old[0][0] == "WARN" and "differs from KISS's text: replace the section" in old[0][2], old
-        assert check_rule("claude", "**Which index.** only", [main], marks, rule)[0][0] == "WARN"   # lacks a lead-in: as before
+        assert old[0][0] == "WARN" and "differs from KISS's text: run kiss-doctor setup" in old[0][2], old
+        assert check_rule("claude", "**Which index.** **`callers` is incomplete** only", [main], three, rule)[0][0] == "WARN"   # lacks a lead-in: as before
         assert check_rule("claude", "nothing", [main], marks, rule)[0][0] == "FAIL"
         assert len(check_rule("claude", "Which index `callers` is incomplete: delete a `CODEGRAPH_START` block", [main], marks)) == 1
         assert check_rule("claude", "Which index `callers` is incomplete\n<!-- CODEGRAPH_START -->\n", [main], marks)[1][0] == "WARN"
@@ -784,7 +898,7 @@ def selftest():
         code, out = replace(path)
         assert code == 0 and raw(path) == "# Mine\r\nintro\n\n" + rule + "\n## Other\nmore\n", (code, out, raw(path))
         assert backups(path) and out == "backup: " + backups(path)[0] and raw(backups(path)[0]) == mid, out
-        last = "# Mine\n\n### CodeGraph\n**`callers` is incomplete:** b\n### My note\nmine\n"        # the section is the file's last
+        last = "# Mine\n\n## CodeGraph\n**Which index.** a\n**`callers` is incomplete:** older\n### My note\nmine\n"        # the section is the file's last
         path = put("r/last.md", last)
         assert replace(path)[0] == 0 and read(path) == "# Mine\n\n" + rule, read(path)
         # Worked examples of where the section starts and ends; the next heading keeps one blank line before it.
@@ -803,7 +917,7 @@ def selftest():
             # A # line inside a ``` fence is no heading, inside the section or above it.
             "s5.md": ("# Me\n\n## CodeGraph\n**Which index.** a\n```sh\n# my sync alias\nalias s=sync\n```\n"
                       "**`callers` is incomplete:** old\n\n## Last\nz\n", "# Me\n\n" + rule + "\n## Last\nz\n"),
-            "s5-above.md": ("# Me\n\n## Tools\n```sh\n# a comment\n```\n**Which index.** a\n\n## Last\nz\n",
+            "s5-above.md": ("# Me\n\n## Tools\n```sh\n# a comment\n```\n**Which index.** a\n**`callers` is incomplete:** old\n\n## Last\nz\n",
                             "# Me\n\n" + rule + "\n## Last\nz\n"),
             # A ~~~ fence is a fence too.
             "r10.md": ("# Me\n\n## CodeGraph\n**Which index.** a\n~~~sh\n# my alias\nalias s=sync\n~~~\n"
@@ -928,7 +1042,7 @@ def selftest():
             assert json.load(open(os.path.join(t, "ccd", "settings.json"))) == {"env": {"KISS_FEEDBACK": "1"}}
         finally:
             os.environ.pop("CLAUDE_CONFIG_DIR") if old_cfg is None else os.environ.__setitem__("CLAUDE_CONFIG_DIR", old_cfg)
-        assert "new session" in " ".join(lines) and "export KISS_FEEDBACK=0" in " ".join(lines)
+        assert "new session" in " ".join(lines) and "export" not in " ".join(lines)
         put("fhome/cfg/settings.json", "{ not json")
         try:
             set_feedback(st, True)
@@ -945,6 +1059,59 @@ def selftest():
         assert feedback_mode(os.path.join(t, "none.json"), home, env={"KISS_FEEDBACK": "0"})[1].startswith("this session's environment only")
         put("proj/.claude/settings.local.json", json.dumps({"env": {"KISS_FEEDBACK": "0"}}))
         assert feedback_mode(os.path.join(t, "none.json"), home, env={"KISS_FEEDBACK": "0"}, project=os.path.join(t, "proj")) == (False, "the project's .claude/settings.local.json env")
+        # the feedback command as a user runs it: a scratch config, stdout, stderr and the exit code
+        cfg = os.path.join(t, "scratch cfg")
+        os.makedirs(cfg)
+
+        def switch(*args):
+            p = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "feedback", *args], capture_output=True, text=True,
+                               env=dict(os.environ, CLAUDE_CONFIG_DIR=cfg))
+            return p.returncode, p.stdout, p.stderr
+        last = "This run gives no block when the mode was off at its start.\n"
+        codex = ("Codex: add this to ~/.codex/config.toml yourself, then start a new session (if the table exists, add only "
+                 'KISS_FEEDBACK to its set line):\n[shell_environment_policy]\nset = { KISS_FEEDBACK = "%s" }\n' + last)
+        shell = "%s: put this line in your shell profile yourself, then start a new session: export KISS_FEEDBACK=%s\n" + last
+        for args, want in ((("on", "codex"), codex % "1"), (("off", "codex"), codex % "0"),
+                           (("on", "gemini"), shell % ("Gemini CLI", "1")), (("off", "gemini"), shell % ("Gemini CLI", "0")),
+                           (("on", "antigravity"), shell % ("Antigravity", "1")), (("off", "antigravity"), shell % ("Antigravity", "0"))):
+            assert switch(*args) == (0, want, ""), (args, switch(*args))
+            assert os.listdir(cfg) == [], (args, os.listdir(cfg))
+        usage = "usage: doctor.py feedback on|off <claude|codex|gemini|antigravity>\n"
+        for args in ((), ("on",), ("off",), ("on", "nosuch"), ("sideways", "claude"), ("on", "claude", "extra"), ("claude", "on")):
+            assert switch(*args) == (1, "", usage), (args, switch(*args))
+            assert os.listdir(cfg) == [], (args, os.listdir(cfg))
+        st = os.path.join(cfg, "settings.json")
+        code, said, err = switch("on", "claude")                                     # no file yet: created, no backup
+        assert (code, err) == (0, "") and json.load(open(st)) == {"env": {"KISS_FEEDBACK": "1"}} and os.listdir(cfg) == ["settings.json"], (code, err)
+        assert said == "feedback mode on in %s\nClaude Code: start a new session for it to apply.\n" % st + last, said
+        with open(st, "w") as f:
+            json.dump({"model": "x"}, f)
+        code, said, err = switch("off", "claude")
+        assert code == 0 and json.load(open(st)) == {"model": "x", "env": {"KISS_FEEDBACK": "0"}}, (code, err)
+        assert len(glob.glob(st + ".kiss-backup-*")) == 1 and "(backup: %s" % st in said, said
+        for other in ("Codex", "Gemini", "Antigravity", "export"):
+            assert other not in said, said
+        kept = open(st, "rb").read()
+        os.mkdir(st + ".kiss-new")                                                   # a failure after the first write: the temp file's path
+        code, said, err = switch("on", "claude")
+        assert code == 1 and said == "" and st in err and len(err.splitlines()) == 1 and "Traceback" not in err, (code, said, err)
+        assert open(st, "rb").read() == kept, "a failed write leaves the file as it was"
+        os.rmdir(st + ".kiss-new")
+        for bad in (b"\xff\xfe{", b"[1]", b"{ not json"):
+            with open(st, "wb") as f:
+                f.write(bad)
+            code, said, err = switch("on", "claude")
+            assert code == 1 and said == "" and st in err and len(err.splitlines()) == 1 and "Traceback" not in err, (bad, code, said, err)
+            assert open(st, "rb").read() == bad, bad
+        os.remove(st)
+        os.mkdir(st)                                                                 # a folder at the settings path
+        code, said, err = switch("on", "claude")
+        assert code == 1 and said == "" and st in err and len(err.splitlines()) == 1 and "Traceback" not in err and os.path.isdir(st), (code, said, err)
+        os.rmdir(st)
+        cfg = os.path.join(cfg, "a file")                                            # the config folder's path is a file
+        open(cfg, "w").close()
+        code, said, err = switch("on", "claude")
+        assert code == 1 and "a file" in err and len(err.splitlines()) == 1 and "Traceback" not in err, (code, said, err)
     cfg = '[plugins."kiss@kiss"]\nenabled = true\n\n[plugins."old@m"]\nenabled = false\n[tui]\nenabled = true\n'
     assert codex_enabled(cfg) == ["kiss@kiss"], codex_enabled(cfg)
     # setup: the plan on fake systems; each expected command is the README's or the upstream's own
@@ -967,13 +1134,13 @@ def selftest():
     assert "package manager" not in none[0]["changes"] and "the link" in none[0]["changes"], none     # F10
     known = {"codegraph": {}, "cgcallers": {}, "index": {}, ("claude", "Install ponytail"): {},
             ("codex", "Install ponytail"): {}, ("codex", "Install Matt Pocock's skills"): {},
-            ("claude", "rule"): {"file": "/h/.claude/CLAUDE.md"}, ("gemini", "Install ponytail"): {}}
+            ("claude", "rule-new"): {"copy": "/h/.claude/rules/kiss.md"}, ("gemini", "Install ponytail"): {}}
     got = show(plan(sysfor(), known))
     assert got == [
         ("CodeGraph", "device", ["npm install -g @colbymchenry/codegraph"], ""),
         ("cgcallers", "device", ["install -m 755 /k/skills/kiss-harness/scripts/cgcallers.py /b/cgcallers"], ""),
-        ("the CodeGraph index of this repo", "device", ["codegraph init -y /r/my app"], ""),
-        ("the CodeGraph rule", "claude", ["cat /k/rules/codegraph.md >> /h/.claude/CLAUDE.md"], ""),
+        ("the CodeGraph index of this repo", "device", ["codegraph init /r/my app"], ""),
+        ("the CodeGraph rule", "claude", ["write /k/rules/codegraph.md to /h/.claude/rules/kiss.md"], ""),
         ("ponytail", "claude", ["claude plugin marketplace add DietrichGebert/ponytail", "claude plugin install ponytail@ponytail"], ""),
         ("ponytail", "codex", ["codex plugin marketplace add DietrichGebert/ponytail", "codex plugin add ponytail@ponytail"], ""),
         ("Matt Pocock's skills", "codex", ["codex plugin marketplace add mattpocock/skills", "codex plugin add mattpocock-skills@mattpocock"], ""),
@@ -983,8 +1150,8 @@ def selftest():
     items = plan(sysfor(), known)
     assert [i["n"] for i in items] == [1, 2, 3, 4, 5, 6, 7] and all(i["source"] and i["changes"] for i in items), items
     assert "/hooks" in items[5]["after"] and items[4]["after"] == "", items
-    assert items[2]["run"] == [["codegraph", "init", "-y", "/r/my app"]]     # a path with a space stays one word
-    assert command(items[2]["run"][0]) == "codegraph init -y '/r/my app'"
+    assert items[2]["run"] == [["codegraph", "init", "/r/my app"]]     # a path with a space stays one word
+    assert command(items[2]["run"][0]) == "codegraph init '/r/my app'"
     shared = plan(sysfor(agents=["gemini", "antigravity"]), {("gemini", "rule"): {"file": "/h/.gemini/GEMINI.md"},
                                                              ("antigravity", "rule"): {"file": "/h/.gemini/GEMINI.md"},
                                                              ("gemini", "Install ponytail"): {}, ("antigravity", "Install ponytail"): {},
@@ -1026,7 +1193,7 @@ def selftest():
     go = lambda s, a, r, f: setup(s, a, r, f, checks, pid=plan_id(plan(s, f(s))))   # the id the plan showed
     find = lambda system: known                               # numbered: 1 CodeGraph, 2 cgcallers, 3 index, 4 rule, 5-7 plugins
     lines, ok = go(sysfor(os="linux", pm="apt"), "1,3", runner(), lambda system: dict(known, git={}))
-    assert ok and ran == ["npm install -g @colbymchenry/codegraph", "codegraph init -y /r/my app"], ran
+    assert ok and ran == ["npm install -g @colbymchenry/codegraph", "codegraph init /r/my app"], ran
     text = "\n".join(lines)
     assert "CHECKS AGAIN" in text and "sudo apt install -y git" in text and "start a new session" not in text, text
     ran.clear()
@@ -1035,12 +1202,12 @@ def selftest():
                           "codex plugin marketplace add DietrichGebert/ponytail", "codex plugin add ponytail@ponytail"], ran
     assert "/hooks" in "\n".join(lines) and "start a new session" in "\n".join(lines), lines
     ran.clear()
-    lines, ok = go(sysfor(), "all", runner(fail={"codegraph init -y /r/my app"}), find)
+    lines, ok = go(sysfor(), "all", runner(fail={"codegraph init /r/my app"}), find)
     text = "\n".join(lines)
     assert not ok and ran == ["npm install -g @colbymchenry/codegraph",
                               "install -m 755 /k/skills/kiss-harness/scripts/cgcallers.py /b/cgcallers",
-                              "codegraph init -y /r/my app"], ran              # stops at the first failure
-    for want in ("done 1. CodeGraph", "done 2. cgcallers", "FAIL 3.", "codegraph init -y '/r/my app'", "npm ERR! 404",
+                              "codegraph init /r/my app"], ran              # stops at the first failure
+    for want in ("done 1. CodeGraph", "done 2. cgcallers", "FAIL 3.", "codegraph init '/r/my app'", "npm ERR! 404",
                  "not run: 4, 5, 6, 7", "CHECKS AGAIN"):
         assert want in text, (want, text)
     for answer in ("8", "0", "1,x", "rm -rf /", "", "²", "٣"):   # outside the plan: refused, nothing runs (F6)
@@ -1242,6 +1409,275 @@ def selftest():
             assert ok and lines[1].startswith("   backup: ") and read(cmd) == "intro\n**Subagents**: brief them like a peer.\n@rules/cg.md\n", lines
             assert read(put_cg) == "# Me\n\n" + real + "\n## Mine\nx\n", read(put_cg)
             assert check_rule("claude", with_imports(cmd), [cmd], markers(), real)[0][0] == "OK"
+            # Claude Code's rule file: rules/kiss.md under the config folder (D13, D15, D16, D19, D28)
+            n_cfg = [0]
+
+            def fresh(main_text=None):
+                n_cfg[0] += 1
+                c = os.path.join(fx, "cfg %d" % n_cfg[0])
+                os.makedirs(c)
+                os.environ["CLAUDE_CONFIG_DIR"] = c
+                if main_text is not None:
+                    write_file(os.path.join(c, "CLAUDE.md"), main_text)
+                return c, os.path.join(c, "CLAUDE.md"), os.path.join(c, "rules", "kiss.md")
+
+            def write_file(path, text):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8", newline="") as f:
+                    f.write(text)
+
+            def rule_items():
+                claude_sys = dict(got, agents=["claude"])
+                return [i for i in plan(claude_sys, gaps(claude_sys)) if "CodeGraph rule" in i["what"] or "CodeGraph section" in i["what"]]
+
+            def level():
+                text, files, _, _ = agent_setup("claude")
+                return check_rule("claude", text, files, markers(), real)[0][0]
+            whole = lambda p: open(p, "rb").read().decode("utf-8") if os.path.isfile(p) else None
+            stale = real.replace("Decide once per checkout", "Decide per checkout")
+            # no rule anywhere, with and without an own CLAUDE.md
+            for own in (None, "mine\n"):
+                c, main_md, copy = fresh(own)
+                assert level() == "FAIL"
+                mine = rule_items()
+                assert len(mine) == 1 and mine[0]["run"] == [["write", os.path.join(KISS, "rules", "codegraph.md"), "to", copy]], mine
+                assert copy in mine[0]["changes"] and "CLAUDE.md" not in mine[0]["changes"] + mine[0]["what"], mine
+                assert "start a new session" in mine[0]["changes"], mine
+                lines, ok, *_ = apply(mine, "all")
+                assert ok and whole(copy) == real and whole(main_md) == own and level() == "OK" and rule_items() == [], lines
+            # a stale section with own lines above and below: the move
+            c, main_md, copy = fresh("# Me\n\nabove\n\n" + stale + "\n\n## Mine\nbelow\n")
+            old = whole(main_md)
+            assert level() == "WARN"
+            mine = rule_items()
+            assert len(mine) == 1 and mine[0]["what"] == "move the CodeGraph section of %s to %s" % (os.path.realpath(main_md), copy), mine
+            assert copy in mine[0]["changes"] and os.path.realpath(main_md) in mine[0]["changes"] and "backup" in mine[0]["changes"] and "start a new session" in mine[0]["changes"], mine
+            lines, ok, *_ = apply(mine, "all")
+            backups = glob.glob(main_md + ".kiss-backup-*")
+            assert ok and whole(copy) == real and whole(main_md) == "# Me\n\nabove\n\n## Mine\nbelow\n", (lines, whole(main_md))
+            assert len(backups) == 1 and whole(backups[0]) == old and backups[0] in " ".join(lines), lines
+            assert level() == "OK" and rule_items() == [], "a re-run after a move offers nothing"
+            # the section last in the file; a CODEGRAPH_START block stays whole; a CRLF file keeps its line ends
+            for before, after in (("# Me\n\nabove\n\n" + stale, "# Me\n\nabove\n"),
+                                  ("# Me\n\n" + stale + "\n<!-- CODEGRAPH_START -->\nb\n<!-- CODEGRAPH_END -->\n## Last\n",
+                                   "# Me\n\n<!-- CODEGRAPH_START -->\nb\n<!-- CODEGRAPH_END -->\n## Last\n"),
+                                  ("# Me\r\n\r\nabove\r\n\r\n" + stale + "\r\n## Mine\r\n", "# Me\r\n\r\nabove\r\n\r\n## Mine\r\n")):
+                c, main_md, copy = fresh(before)
+                lines, ok, *_ = apply(rule_items(), "all")
+                assert ok and whole(main_md) == after, (lines, whole(main_md))
+            # an exact section: no item, no write
+            c, main_md, copy = fresh("# Me\n\n" + real + "\n## Mine\n")
+            assert level() == "OK" and rule_items() == [] and not os.path.exists(copy) and sorted(os.listdir(c)) == ["CLAUDE.md"]
+            # a stale and an edited copy: the replace item, a backup whose name does not end in .md
+            for text in (real.split("**Subagents**")[0], stale):
+                c, main_md, copy = fresh("mine\n")
+                write_file(copy, text)
+                mine = rule_items()
+                assert [i["what"] for i in mine] == ["replace the CodeGraph section of " + os.path.realpath(copy)], mine
+                lines, ok, *_ = apply(mine, "all")
+                backups = glob.glob(copy + ".kiss-backup-*")
+                assert ok and whole(copy) == real and whole(main_md) == "mine\n" and len(backups) == 1 and whole(backups[0]) == text, lines
+                assert not backups[0].endswith(".md") and "start a new session" in mine[0]["after"], (backups, mine)
+                assert not glob.glob(os.path.join(c, "rules", "*.kiss-new")) and rule_items() == [] and level() == "OK"
+            # F11: the backup fails after the copy (a name too long for the backup): the message says two copies load
+            c, main_md, copy = fresh()
+            long_name = os.path.join(c, "C" * 240 + ".md")
+            write_file(long_name, "# Me\n\n" + stale + "\n## Mine\n")
+            code, said = execute(["move", "the", "CodeGraph", "section", "of", long_name, "to", copy, "with", os.path.join(KISS, "rules", "codegraph.md")])
+            assert code == 1 and "two copies load until a re-run" in said and whole(copy) == real and whole(long_name).endswith("## Mine\n") and stale in whole(long_name), said
+            # the first write fails: a folder at the copy's path
+            c, main_md, copy = fresh("# Me\n\n" + stale + "\n## Mine\n")
+            old = whole(main_md)
+            os.makedirs(copy)
+            lines, ok, *_ = apply(rule_items(), "all")
+            said = "\n".join(lines)
+            assert not ok and whole(main_md) == old and "unchanged" in said and os.path.isdir(copy) and not glob.glob(main_md + ".kiss-backup-*"), said
+            # the second write fails: a folder at CLAUDE.md's temp file; a re-run ends with one copy
+            c, main_md, copy = fresh("# Me\n\n" + stale + "\n## Mine\n")
+            old = whole(main_md)
+            os.mkdir(main_md + ".kiss-new")
+            lines, ok, *_ = apply(rule_items(), "all")
+            said = "\n".join(lines)
+            backups = glob.glob(main_md + ".kiss-backup-*")
+            assert not ok and whole(main_md) == old and whole(copy) == real and len(backups) == 1 and whole(backups[0]) == old, said
+            assert "two copies load until a re-run" in said and backups[0] in said, said
+            assert level() == "WARN", "two copies load: the check does not say OK"
+            os.rmdir(main_md + ".kiss-new")
+            lines, ok, *_ = apply(rule_items(), "all")
+            assert ok and whole(main_md) == "# Me\n\n## Mine\n" and level() == "OK" and rule_items() == [], lines
+            # an interrupt after the copy, before the section's removal: stale or exact, the next setup ends with one copy
+            for section_text in (stale, real):
+                c, main_md, copy = fresh("# Me\n\n" + section_text + "\n## Mine\n")
+                write_file(copy, real)
+                mine = rule_items()
+                assert [i["what"].startswith("move the CodeGraph section") for i in mine] == [True], mine
+                lines, ok, *_ = apply(mine, "all")
+                assert ok and whole(main_md) == "# Me\n\n## Mine\n" and whole(copy) == real and rule_items() == [], lines
+            # a section and a stale copy: the copy's old text goes to a backup too
+            c, main_md, copy = fresh("# Me\n\n" + stale + "\n## Mine\n")
+            write_file(copy, stale)
+            lines, ok, *_ = apply(rule_items(), "all")
+            backups = glob.glob(copy + ".kiss-backup-*")
+            assert ok and whole(copy) == real and len(backups) == 1 and whole(backups[0]) == stale and not backups[0].endswith(".md"), lines
+            # an interrupted write's temp file loads nothing
+            c, main_md, copy = fresh("mine\n")
+            write_file(copy + ".kiss-new", real)
+            assert level() == "FAIL"
+            # a CLAUDE.md with bad bytes stops before any write
+            c, main_md, copy = fresh()
+            with open(main_md, "wb") as f:
+                f.write(b"# Me\n\xe9t\xe9\n\n" + stale.encode() + b"\n## Mine\n")
+            old = open(main_md, "rb").read()
+            mine = rule_items()
+            assert [(i["n"], "UTF-8" in i["hand"]) for i in mine] == [(None, True)], mine
+            code, said = execute(["move", "the", "CodeGraph", "section", "of", main_md, "to", copy, "with", os.path.join(KISS, "rules", "codegraph.md")])
+            assert code == 1 and not os.path.exists(copy) and open(main_md, "rb").read() == old and not glob.glob(main_md + ".kiss-backup-*"), said
+            # a symlinked CLAUDE.md keeps its link, and the target holds the change
+            c, main_md, copy = fresh()
+            target = os.path.join(fx, "dotfiles", "CLAUDE.md")
+            write_file(target, "# Me\n\n" + stale + "\n## Mine\n")
+            os.symlink(target, main_md)
+            lines, ok, *_ = apply(rule_items(), "all")
+            assert ok and os.path.islink(main_md) and whole(target) == "# Me\n\n## Mine\n" and whole(copy) == real, lines
+            write_file(os.path.join(fx, "dotfiles", "settings.json"), "{}")     # a link stays a link in the settings write too
+            os.symlink(os.path.join(fx, "dotfiles", "settings.json"), settings_path())
+            set_feedback(settings_path(), True)
+            assert os.path.islink(settings_path()) and json.load(open(os.path.join(fx, "dotfiles", "settings.json"))) == {"env": {"KISS_FEEDBACK": "1"}}
+            # four hops load, a fifth does not; a rule in a subfolder of rules/ counts
+            c, main_md, copy = fresh("@a.md\n")
+            for this, nxt in (("a", "b"), ("b", "c"), ("c", "d")):
+                write_file(os.path.join(c, this + ".md"), "@%s.md\n" % nxt)
+            write_file(os.path.join(c, "d.md"), real)
+            assert level() == "OK", "the rule at hop 4"
+            write_file(os.path.join(c, "d.md"), "@e.md\n")
+            write_file(os.path.join(c, "e.md"), real)
+            assert level() == "FAIL", "the rule at hop 5"
+            c, main_md, copy = fresh()
+            write_file(os.path.join(c, "rules", "sub", "x.md"), real)
+            assert level() == "OK" and rule_items() == []
+            # F10: a ### rule ends at the next ###; the owner's next ### sections stay. Inside a ## section a ### stays with it
+            c, main_md, copy = fresh("# Me\n## Tools\n### CodeGraph\n" + stale.split("\n", 1)[1] + "### Python\nUse uv.\n### Git\nOwn.\n## Other\n")
+            mine = rule_items()
+            assert 'to just before "### Python"' in mine[0]["changes"], mine
+            lines, ok, *_ = apply(mine, "all")
+            assert ok and whole(main_md) == "# Me\n## Tools\n\n### Python\nUse uv.\n### Git\nOwn.\n## Other\n", whole(main_md)
+            c, main_md, copy = fresh("# Me\n\n" + stale + "### Inside\nx\n## Mine\n")
+            lines, ok, *_ = apply(rule_items(), "all")
+            assert ok and whole(main_md) == "# Me\n\n## Mine\n", whole(main_md)
+            md3 = os.path.join(fx, "codex", "AGENTS.md")                # the replace has the same end
+            mine, _ = items("codex", md3, "# Me\n### CodeGraph\n" + stale.split("\n", 1)[1] + "### Python\n## Other\n")
+            assert 'to just before "### Python"' in mine[0]["changes"], mine
+            lines, ok, *_ = apply(mine, "all")
+            assert ok and whole(md3) == "# Me\n" + real + "\n### Python\n## Other\n", whole(md3)
+            # F7: each file's own section is compared: an own file with no heading after an exact copy, or after an exact section
+            for files in ({"CLAUDE.md": "mine\n", "rules/kiss.md": real, "rules/zz.md": "Keep tests small.\n"},
+                          {"CLAUDE.md": "# Me\n\n" + real, "rules/style.md": "Keep tests small.\n"}):
+                c, main_md, copy = fresh()
+                for rel, text in files.items():
+                    write_file(os.path.join(c, rel), text)
+                assert level() == "OK" and rule_items() == [], files.keys()
+            # F8, F9: an own file with a bold word or a plain word of a lead-in holds no rule: FAIL, the new copy, the file untouched
+            for rel, text in (("rules/team.md", "## Team\n\n**Subagents** use a brief.\n\nOwn line.\n"),
+                              ("CLAUDE.md", "## Agents\n**Subagents** use a brief.\nOwn line.\n## Other\n"),
+                              ("CLAUDE.md", "Subagents get a brief.\n"), ("rules/team.md", "Subagents get a brief.\n")):
+                c, main_md, copy = fresh("mine\n")
+                write_file(os.path.join(c, rel), text)
+                assert level() == "FAIL", (rel, text)
+                mine = rule_items()
+                assert [i["run"] for i in mine] == [[["write", os.path.join(KISS, "rules", "codegraph.md"), "to", copy]]], mine
+                lines, ok, *_ = apply(mine, "all")
+                assert ok and whole(copy) == real and whole(os.path.join(c, rel)) == text and level() == "OK" and rule_items() == [], lines
+            # F9: an exact copy beside an own section with two bold lead-ins: OK, no item, no move
+            c, main_md, copy = fresh("## Notes\n**Subagents** a\n**Keep it fresh** b\nOwn line.\n")
+            write_file(copy, real)
+            assert level() == "OK" and rule_items() == []
+            # the holder test: more than half of the lead-ins, in one file, in bold
+            half = [m for m in markers()][:len(markers()) // 2]
+            bold = "".join("**%s** x\n" % m for m in half)
+            c, main_md, copy = fresh(bold)
+            assert level() == "FAIL", "half of the lead-ins"
+            c, main_md, copy = fresh(bold)
+            write_file(os.path.join(c, "rules", "b.md"), "**%s** x\n" % markers()[-1])
+            assert level() == "FAIL", "more than half only across two files"
+            c, main_md, copy = fresh("".join("%s x\n" % m for m in markers()))
+            assert level() == "FAIL", "every lead-in, in plain words"
+            c, main_md, copy = fresh(bold + "**%s** x\n" % markers()[-1])
+            assert level() == "WARN", "more than half"
+            # F19: OK only when no holder differs, each read on its own; the item goes to the first that differs
+            c, main_md, copy = fresh("# Me\n\n" + stale + "\n## Mine\n")
+            write_file(copy, real)
+            assert level() == "WARN" and [i["what"] for i in rule_items()] == ["move the CodeGraph section of %s to %s" % (os.path.realpath(main_md), copy)]
+            for own, rel in (("mine\n", "a-old.md"), ("# Me\n\n" + real, "old.md")):
+                c, main_md, copy = fresh(own)
+                if rel == "a-old.md":
+                    write_file(copy, real)
+                old_copy = os.path.join(c, "rules", rel)
+                write_file(old_copy, stale)
+                text, files, _, _ = agent_setup("claude")
+                said = check_rule("claude", text, files, markers(), real)[0]
+                assert said[0] == "WARN" and os.path.realpath(old_copy) in said[2], said
+                mine = rule_items()
+                assert [i["what"] for i in mine] == ["replace the CodeGraph section of " + os.path.realpath(old_copy)], mine
+                lines, ok, *_ = apply(mine, "all")
+                assert ok and whole(old_copy) == real and whole(main_md) == own and level() == "OK" and rule_items() == [], lines
+            # F13: the WARN names the one file that holds the rule, and setup does the rest: for all four agents
+            for agent, env, name in (("claude", "CLAUDE_CONFIG_DIR", "CLAUDE.md"), ("codex", "CODEX_HOME", "AGENTS.md")):
+                c, main_md, copy = fresh()
+                os.environ[env] = c
+                write_file(os.path.join(c, name), "# Me\n\n" + stale)
+                write_file(os.path.join(c, "rules", "a.md"), "Own.\n")
+                text, files, _, _ = agent_setup(agent)
+                said = check_rule(agent, text, files, markers(), real)[0]
+                assert said[0] == "WARN" and os.path.realpath(os.path.join(c, name)) in said[2] and "a.md" not in said[2], said
+                assert "run kiss-doctor setup" in said[2] and "replace the section" not in said[2], said
+                write_file(os.path.join(c, name), "# Me\n\n" + real.split("**Subagents**")[0])
+                text, files, _, _ = agent_setup(agent)
+                said = check_rule(agent, text, files, markers(), real)[0]
+                assert said[0] == "WARN" and "Subagents" in said[2] and os.path.realpath(os.path.join(c, name)) in said[2] and "run kiss-doctor setup" in said[2], said
+            # F12: a config folder with [ ] in its path finds its copy
+            c = os.path.join(fx, "D [x]")
+            write_file(os.path.join(c, "rules", "kiss.md"), real)
+            os.environ["CLAUDE_CONFIG_DIR"] = c
+            assert level() == "OK" and rule_items() == []
+            # T1: a Codex home with [ ] in its path finds its plugin
+            c = os.path.join(fx, "C [x]")
+            os.makedirs(os.path.join(c, "plugins", "cache", "m", "p", "1.0"))
+            write_file(os.path.join(c, "config.toml"), '[plugins."p@m"]\nenabled = true\n')
+            os.environ["CODEX_HOME"] = c
+            assert ("p@m", os.path.join(c, "plugins", "cache", "m", "p", "1.0")) in agent_setup("codex")[2], agent_setup("codex")[2]
+            # D14: the holder test is Claude Code's: the other agents' plans stay: any bold lead-in the replace, plain words by hand
+            home_was, three_bold = HOME, "## CodeGraph\n" + "".join("**%s** x\n" % m for m in markers()[:3]) + "Own line.\n## Other\n"
+            globals()["HOME"] = fx
+            try:
+                for agent, env, name in (("codex", "CODEX_HOME", "AGENTS.md"), ("gemini", None, ".gemini/GEMINI.md"), ("antigravity", None, ".gemini/GEMINI.md")):
+                    c = os.path.join(fx, "other " + agent)
+                    if env:
+                        os.environ[env] = c
+                    else:
+                        c = fx
+                    path = os.path.join(c, name)
+                    other_sys = dict(got, agents=[agent])
+                    for text, want in ((three_bold, "replace"), ("## Agents\n**Subagents** use a brief.\nOwn line.\n## Other\n", "replace"),
+                                       ("Subagents get a brief.\n", "hand"), ("".join("%s x\n" % m for m in markers()), "hand"), ("nothing\n", "append")):
+                        write_file(path, text)
+                        mine = [i for i in plan(other_sys, gaps(other_sys)) if "CodeGraph rule" in i["what"] or "CodeGraph section" in i["what"]]
+                        assert len(mine) == 1, (agent, text, mine)
+                        if want == "replace":
+                            assert mine[0]["n"] and mine[0]["what"] == "replace the CodeGraph section of " + os.path.realpath(path), (agent, text, mine)
+                        elif want == "hand":
+                            assert not mine[0]["n"] and mine[0]["hand"].startswith("by hand: no bold lead-in of the rule in "), (agent, text, mine)
+                        else:
+                            assert mine[0]["n"] and mine[0]["run"] == [["cat", os.path.join(KISS, "rules", "codegraph.md"), ">>", path]], (agent, text, mine)
+                        joined, files, _, _ = agent_setup(agent)
+                        said = check_rule(agent, joined, files, markers(), real)[0]
+                        assert said[0] == ("FAIL" if want == "append" else "WARN"), (agent, text, said)
+                        assert FILE_BREAK not in joined, (agent, "only Claude Code's read splits on it")
+            finally:
+                globals()["HOME"] = home_was
+            # another agent's plan names no path under the Claude config folder
+            c, main_md, copy = fresh("# Me\n\n" + stale)
+            other = dict(got, agents=["codex"])
+            assert c not in json.dumps(plan(other, gaps(other))), plan(other, gaps(other))
             os.makedirs(os.path.join(fx, "bin"))                       # F3: copied but its folder not on PATH
             with open(os.path.join(fx, "bin", "cgcallers"), "w") as f:
                 f.write("x")
@@ -1259,9 +1695,14 @@ def main(argv):
     if argv[1:] == ["--selftest"]:
         return selftest()
     if argv[1:2] == ["feedback"]:
-        if argv[2:] not in (["on"], ["off"]):
-            sys.exit("usage: doctor.py feedback on|off")
-        print("\n".join(set_feedback(settings_path(), argv[2] == "on")))
+        if len(argv) != 4 or argv[2] not in ("on", "off") or argv[3] not in CLI:
+            sys.exit("usage: doctor.py feedback on|off <%s>" % "|".join(CLI))
+        on, settings = argv[2] == "on", settings_path()
+        try:
+            lines = set_feedback(settings, on) if argv[3] == "claude" else feedback_by_hand(argv[3], on)
+        except OSError as e:
+            sys.exit("%s: cannot write it (%s); left as it was" % (settings, " ".join(str(e).split())))
+        print("\n".join(lines + ["This run gives no block when the mode was off at its start."]))
         return
     if argv[1:2] == ["setup"]:
         system = detect()

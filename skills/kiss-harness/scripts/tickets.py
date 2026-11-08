@@ -26,9 +26,10 @@ import briefs  # noqa: E402  (the index lookup is briefs.py's own)
 
 ID = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
 OPTIONAL = {"files": list, "symbols": list, "seeds": list, "depends_on": list, "risky": bool}
+JS = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx")
 # shortcut: a fixed list of code file types (check runs without W's index); add a type when a project needs it
-CODE = {".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".svelte", ".vue", ".go", ".rs", ".java", ".kt", ".swift",
-        ".rb", ".php", ".c", ".h", ".cc", ".cpp", ".cs", ".sh"}
+CODE = {".py", *JS, ".svelte", ".vue", ".go", ".rs", ".java", ".kt", ".kts", ".swift",
+        ".rb", ".php", ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".mm", ".cs", ".sh"}
 
 
 def load(run, name="tickets.json"):
@@ -112,12 +113,22 @@ def waits_for(rows, tid):
 
 
 def one_at_a_time(run):
-    """True when the facts file of run/run.json has a `Shared test resources:` line that says "one at a time" (D17)."""
+    """True when the facts file of run/run.json has a `Shared test resources:` list item that says "one at a time"
+    (D17), the whole item: up to a blank line, the next item or a heading (D20)."""
     try:
         with open(os.path.join(run, "run.json")) as f, open(json.load(f)["PROJECT"]) as p:
-            return any(re.match(r"\W*Shared test resources:", l) and "one at a time" in l.lower() for l in p)
+            lines = p.readlines()
     except (OSError, KeyError, ValueError, TypeError):
         return False
+    item = None
+    for l in lines:
+        if item is None:
+            item = l if re.match(r"\W*Shared test resources:", l) else None
+        elif not l.strip() or re.match(r"\s*(?:[-*+]\s|\d+[.)]\s|#)", l):
+            break
+        else:
+            item += " " + l
+    return "one at a time" in " ".join((item or "").lower().split())
 
 
 def continue_text(rows, elapsed=None, budget=None, review=None, hold=False):
@@ -198,7 +209,18 @@ def selftest():
             json.dump({"PROJECT": facts}, f)
         for body, held in (("- Shared test resources: one Postgres; One at a time.\n", True),
                            ("- Shared test resources: one Postgres, 3 sessions at once\n", False),
-                           ("- Merge: ask\n- Note: one at a time is fine\n", False), (None, False)):
+                           ("- Merge: ask\n- Note: one at a time is fine\n", False), (None, False),
+                           # D20: the whole list item, up to a blank line, the next item or a heading
+                           ("- Shared test resources: one Postgres, used\n  one at a time\n- Merge: ask\n", True),
+                           ("- Shared test resources: one Postgres, used\none at a time\n- Merge: ask\n", True),
+                           ("- Shared test resources: one Postgres, used one\n  at a\n  time.\n", True),
+                           ("- Shared test resources: one Postgres\n  - never one at a time\n", False),
+                           ("- Shared test resources: one Postgres\n  - 3 sessions\n  - the app: one at a time\n", False),
+                           ("- Tests:\n  - Shared test resources: one Postgres,\n    one at a time\n- Merge: ask\n", True),
+                           ("- Shared test resources: one Postgres\n\none at a time\n", False),
+                           ("- Shared test resources: one Postgres\n* one at a time\n", False),
+                           ("- Shared test resources: one Postgres\n1. one at a time\n", False),
+                           ("- Shared test resources: one Postgres\n## one at a time\n", False)):
             if body is not None:
                 with open(facts, "w") as f:
                     f.write(body)
@@ -210,6 +232,15 @@ def selftest():
                 with contextlib.redirect_stdout(out):
                     main(["tickets.py", "continue", run, *argv])
                 assert out.getvalue() == want + "\n", (body, argv, out.getvalue())
+        with open(os.path.join(run, "run.json"), "w") as f:              # the template's own words give no hold
+            json.dump({"PROJECT": os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "templates", "project.md")}, f)
+        assert not one_at_a_time(run), "the template's Shared test resources item says one at a time"
+        os.remove(os.path.join(run, "run.json"))                         # no run.json: no hold and no failure
+        assert one_at_a_time(run) is False
+    here = os.path.dirname(os.path.abspath(__file__))
+    tsx = '".ts' + 'x"'                                                  # written so this search does not find itself
+    found = [n for n in sorted(os.listdir(here)) if n.endswith(".py") and tsx in open(os.path.join(here, n)).read()]
+    assert found == ["tickets.py"] and set(JS) < CODE, found             # one list of JS/TS file types (R18)
     with tempfile.TemporaryDirectory() as root:                          # the repo that holds R
         os.makedirs(os.path.join(root, "app"))
         open(os.path.join(root, "app", "x.py"), "w").close()

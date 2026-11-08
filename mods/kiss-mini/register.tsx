@@ -270,14 +270,30 @@ async function seedFile($: $, t: Task, dir: string): Promise<boolean> {
   // The index sits at the repo's root, also when the task started in a subfolder.
   const top = (await $.process.run(['git', '-C', t.cwd, 'rev-parse', '--show-toplevel']).catch(() => undefined))?.stdout.trim() || t.cwd
   const w = t.worktree ?? top
-  // A missing or slow codegraph is no seed, never a failed task.
-  const cg = (...argv: string[]) => $.process.run(['codegraph', ...argv], { cwd: w, timeoutMs: 600_000 }).catch(() => undefined)
-  if (!(await cg('status', top))?.stdout.includes(`Project: ${top}\n`)) return false
-  if (w !== top && (await cg('init', '-y', w))?.exitCode !== 0) return false
+  // A missing or slow codegraph is no seed, never a failed task. Stdin is closed: `init` must not wait for an answer.
+  const cg = (...argv: string[]) => $.process.run(['codegraph', ...argv], { cwd: w, timeoutMs: 600_000, stdin: '' }).catch(() => undefined)
+  // FORCE_COLOR or CI puts colour codes around `Project:`.
+  if (!(await cg('status', top))?.stdout.replace(/\x1b\[[0-9;]*m/g, '').includes(`Project: ${top}\n`)) return false
+  if (w !== top && (await cg('init', w))?.exitCode !== 0) return false
   const r = await cg('explore', '-p', w, t.title.slice(0, 200))
   if (r?.exitCode !== 0 || !r.stdout.trim()) return false
   await $.fs.write(`${dir}/seed.md`, r.stdout)
   return true
+}
+
+/** The report's Tests field: its own line plus a list right under it (also after one blank line), a wrapped item joined, on one line, cut to the summary limit. */
+function reportTests(answer: string) {
+  const lines = answer.split('\n')
+  const at = lines.findIndex(l => l.startsWith('Tests:'))
+  if (at < 0) return 'not reported'
+  const parts = [lines[at]!.slice('Tests:'.length).trim()]
+  const item = /^\s*[-*+]\s+/
+  let i = at + 1 + (lines[at + 1]?.trim() === '' ? 1 : 0)
+  for (; /^\s+\S|^[-*+]\s/.test(lines[i] ?? ''); i++) {
+    if (item.test(lines[i]!)) parts.push(lines[i]!.replace(item, '').trim())
+    else parts[parts.length - 1] = `${parts[parts.length - 1]} ${lines[i]!.trim()}`.trim()
+  }
+  return parts.filter(Boolean).join('; ').slice(0, SUMMARY_MAX) || 'not reported'
 }
 
 /** The report as the sender reads it: the report format's lines, the summary cut to 600, the log in the task folder. */
@@ -288,7 +304,7 @@ function reportMessage(t: Task, answer: string) {
     `State: ${t.state}`,
     `Summary: ${t.report ?? ''}`,
     line('Branch', 'none'),
-    line('Tests', 'not reported'),
+    `Tests: ${reportTests(answer)}`,
     `Full log: ${t.log}`,
   ].join('\n')
 }
@@ -310,11 +326,20 @@ async function refresh($: $) {
   }
 }
 
-/** Host: the ledger forgets ended tasks after 7 days; one that still holds a worktree or a branch waits for its Discard. */
+/** Removes an ended task's folder; false when the removal failed and the entry must wait. A path not of the exact form removes nothing. */
+async function removeFolder($: $, t: Task) {
+  // shortcut: a task with no stored log is looked for under the current TMPDIR, so after a changed TMPDIR its folder stays; store the folder on the task when one is seen left behind.
+  const dir = t.log === undefined ? await folder($, t.id) : t.log.replace(/\/[^/]*$/, '')
+  const parts = dir.split('/')
+  if (!dir.startsWith('/') || parts.includes('..') || parts.slice(-2).join('/') !== `kiss-mini/${t.id}`) return true
+  return (await $.process.run(['rm', '-rf', '--', dir]).catch(() => undefined))?.exitCode === 0
+}
+
+/** Host: the ledger forgets ended tasks after 7 days, each with its folder; one that still holds a worktree or a branch waits for its Discard. */
 async function prune($: $) {
   const now = await $.clock.now()
   for (const t of await tasks($)) {
-    if (ENDED.includes(t.state) && !holds(t) && (t.finished ?? t.started) < now - KEEP_MS) await $.store.delete(TASK + t.id)
+    if (ENDED.includes(t.state) && !holds(t) && (t.deliveredAt ?? t.finished ?? t.started) < now - KEEP_MS && await removeFolder($, t)) await $.store.delete(TASK + t.id)
   }
 }
 
@@ -381,7 +406,7 @@ async function tick($: $) {
           .filter(l => l.trim() && l.trim() !== '?? .codegraph/').join('\n')
         if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
         else await $.process.run(['git', '-C', repo, 'worktree', 'remove', '--force', t.worktree])
-        await save($, { ...t, state: 'done', delivered: 'merge', ...(dirty ? {} : { worktree: undefined }) })
+        await save($, { ...t, state: 'done', delivered: 'merge', deliveredAt: now, ...(dirty ? {} : { worktree: undefined }) })
         continue
       }
     }
@@ -607,7 +632,7 @@ async function deliverOnce($: $, id: string, how: Delivery) {
       if (deleted.exitCode !== 0 && (list.exitCode !== 0 || list.stdout.trim())) return failed(deleted.stderr || deleted.stdout)
     }
     const { pr, diff, tests, ...rest } = left
-    await save($, { ...rest, state: 'done', delivered: how })
+    await save($, { ...rest, state: 'done', delivered: how, deliveredAt: await $.clock.now() })
     await refresh($)
   } catch (err) {
     await failed(String(err))
@@ -828,7 +853,7 @@ export const register: Register = on => {
       const stat = await $.process.run(['git', '-C', t.cwd, 'diff', '--shortstat', `${t.base}...${t.branch}`])
       fields.diff = stat.stdout.trim() || 'no change'
       fields.ahead = Number((await $.process.run(['git', '-C', t.cwd, 'rev-list', '--count', `${t.base}..${t.branch}`])).stdout.trim()) || 0
-      fields.tests = /^Tests:\s*(.*)$/m.exec(e.answer)?.[1]?.trim() ?? 'not reported'
+      fields.tests = reportTests(e.answer)
       fields.pr = /^## Pull request body\s*\n([\s\S]*)/m.exec(e.answer)?.[1]?.trim() || summary
     }
     // A stop may have landed while the report was written: it stands.
@@ -881,7 +906,7 @@ export const register: Register = on => {
     // Mobile draws no Input: there the owner answers from another surface.
     const Input = e.surface === 'mobile' ? undefined : ($.ui.resolve(e) as { Input?: any }).Input
     const all = await read($, ledger)
-    const ended = all.filter(t => ENDED.includes(t.state)).sort((a, b) => (b.finished ?? 0) - (a.finished ?? 0))
+    const ended = all.filter(t => ENDED.includes(t.state)).sort((a, b) => (b.deliveredAt ?? b.finished ?? 0) - (a.deliveredAt ?? a.finished ?? 0))
     // An ended task that still holds a worktree or a branch stays in view until its Discard.
     // Waiting for the owner first, then working, ready, watching; then the ended ones, newest first.
     const open = all.filter(t => !ENDED.includes(t.state)).sort((a, b) => ORDER.indexOf(a.state) - ORDER.indexOf(b.state))

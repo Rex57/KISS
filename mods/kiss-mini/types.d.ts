@@ -41,6 +41,8 @@ export type Task = {
   state: State
   started: number
   finished?: number
+  /** When a ready task was merged or delivered: prune's 7 days run from here; `finished` stays the report's time. */
+  deliveredAt?: number
   host?: string
   agentId?: string
   report?: string

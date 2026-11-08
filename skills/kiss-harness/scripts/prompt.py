@@ -23,7 +23,9 @@ import json, os, re, string, sys
 HB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.dirname(os.path.dirname(HB))   # the plugin; in a plugin cache, its version folder
 MANIFESTS = (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "gemini-extension.json", ".antigravity-plugin/plugin.json")
-FACTS = ("Full check time:", "Smoke check", "Merge:", "After merge:", "Flake check:", "Shared test resources:")
+FACTS = {"Full check time:": "the budget adds no time for the full check", "Smoke check": "the SMOKE value is the only smoke check",
+         "Merge:": "the merge gate asks", "After merge:": "a later commit asks", "Flake check:": "the close starts no flake check",
+         "Shared test resources:": "product checks are not held"}   # each line start warns on, and what no line means (D8)
 T = os.path.join(HB, "templates")
 PER_TICKET_S, REVIEW_S = 600, 7200
 STEPS = ("implementer", "reviewer", "severity", "fix", "recheck")
@@ -108,7 +110,7 @@ def start(R, values, root=ROOT):
     try:
         with open(values.get("PROJECT", "")) as p:
             text = p.read()
-        out += [f"WARN: the facts file has no `{line}` line" for line in FACTS
+        out += [f"WARN: the facts file has no `{line}` line: {meaning}" for line, meaning in FACTS.items()
                 if not re.search(r"^\W*" + re.escape(line), text, re.M)]
     except OSError:
         out.append(f"WARN: no facts file at {values.get('PROJECT', '(no PROJECT)')}")
@@ -257,6 +259,15 @@ def selftest():
             o, e = call(root, "start", R, "PROJECT=" + facts, *start_keys)
             warns = [l for l in o.splitlines() if l.startswith("WARN")]
             assert len(warns) == len(warned) and all(sum(w in l for l in warns) == 1 for w in warned), (body, o)
+            assert "Models" not in o, o                                     # an optional line: no WARN
+            if warned == list(six):
+                assert warns == [
+                    "WARN: the facts file has no `Full check time:` line: the budget adds no time for the full check",
+                    "WARN: the facts file has no `Smoke check` line: the SMOKE value is the only smoke check",
+                    "WARN: the facts file has no `Merge:` line: the merge gate asks",
+                    "WARN: the facts file has no `After merge:` line: a later commit asks",
+                    "WARN: the facts file has no `Flake check:` line: the close starts no flake check",
+                    "WARN: the facts file has no `Shared test resources:` line: product checks are not held"], warns
             assert json.load(open(os.path.join(R, "run.json")))["VERSION"] == "2.1.1" and e == "", (body, o, e)
         quiet = call(root, "implementer", R, "ELAPSED=1")
         assert quiet[1] == "" and "Run 9" in quiet[0], "an older version and a folder that is not one: nothing"
@@ -299,7 +310,19 @@ def selftest():
             and "offers them as one kiss-mini task" in sv and "any other finding left asks a gate" in sv), "low leftovers go to one kiss-mini task, the rest to a gate"
     assert 'A finding of medium or higher severity that fits none of these is a "fix"' in sv, "every finding has a bucket"
     assert "Start no subagent of your own" in rv, "the reviewer starts no subagent"
+    assert "Leave a page's `Reviewed` date as it is" in out, "the date is the close's (D25)"
     fx, rc = loop["fix"], loop["recheck"]
+    assert "round 1 of your findings, or work from an owner decision, with the commits a1..b2" in rc, "the recheck's round: findings or decision work (D21)"
+    assert re.search(r"For each owner decision in \S+/fix-1\.md: judge its commits in that range by your rubric A to G, and check each of its `\(reviewer\)` lines in the running product\.", rc), rc
+    assert sv.count("touches an owner rule only when it breaks that ruling or its acceptance line") == 1, "one definition (D2)"
+    assert re.search(r"Never touch the main checkout /m, a live system \(except the exact read-only commands a ruling in \S+/decisions\.md names\), ssh or a git remote\.", rv), "D7"
+    assert "with no ruling, report that line in cannot_check and do not run it" in rv and "names its `D<n>`" in rv, "a live read, with a ruling and with none"
+    assert rv.count("Read and run the code at def from your own clone under /s, because the implementer may still build in W; CodeGraph on W may then show newer code, so check a line against your clone.") == 1, rv
+    assert "so check a line against your clone. Where the start command names W, use your clone in its place." in rv, rv
+    assert "Read and run the code at b2 from a fresh clone under /s, because a clone at an older head reports a fixed item as not fixed." in loop["recheck"], loop["recheck"]
+    assert 'git clone -q "/w" "/s/<name>"' in rv and 'git -C "/s/<name>" checkout -q --detach def' in rv, "the reviewer's copy is a clone (D24)"
+    for name in sorted(os.listdir(T)) + ["../SKILL.md"]:
+        assert "archive" not in open(os.path.join(T, name)).read(), name       # no template or step tells a reviewer to use git archive
     assert 'codegraph sync -q "/w"' in fx and fx.index("Fix each one") < fx.index("codegraph sync -q") < fx.index("Run the acceptance"), "the fix prompt syncs CodeGraph after its edits"
     assert 'codegraph sync -q "/w"' in rc and rc.index("codegraph sync -q") < rc.index("CodeGraph"), "the recheck syncs before it reads with CodeGraph"
     print("prompt selftest ok")

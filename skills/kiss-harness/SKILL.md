@@ -42,8 +42,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    docs are on or off. Write each answer into the file.
 3. **Runs** go in `<repo>/.kiss/runs/` and their worktrees in `<repo>/.kiss/worktrees/`: add both folders (or all
    of `.kiss/`) to `.gitignore` or `.git/info/exclude`, as the owner says.
-4. **CodeGraph** indexes the repo: `codegraph status "<repo>"` prints `Project: <repo>`. The global CodeGraph rule
-   (`rules/codegraph.md` in the KISS repo) is in your instructions file.
+4. **CodeGraph** indexes the repo: `codegraph status "<repo>"` prints `Project: <repo>`. Your agent loads the global CodeGraph
+   rule (`rules/codegraph.md` in the KISS repo); `kiss-doctor setup` puts it in place.
 
 ## A run
 
@@ -74,16 +74,18 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    it, the rule as stated here: cut each line that no person asked for, and record the cut in `decisions.md`. Then the **tickets gate**: ask about the breakdown and show the defaults you took; change it until
    the owner says yes, then `tickets.py render R`.
 3. **Worktree** `W = <repo>/.kiss/worktrees/<run>/` (git-ignored; never a session scratch folder, which a session
-   restart can delete) on a new branch from the main branch; `codegraph init -y "W"`; `tickets.py freeze R` (from then
+   restart can delete) on a new branch from the main branch; `codegraph init "W" </dev/null`; `tickets.py freeze R` (from then
    on `check` refuses any change but `passes`); `R/progress.md` with one line: the skills of the table above that the
    run uses and their plugin versions (the version folder in each skill's base path).
 4. **Implementer:** write the run's values once: `prompt.py start R W=W BR=<branch> SCR=<scratch folder>
    MAIN=<main checkout> PROJECT=<facts file> TITLE=<title> BASE=<base sha> SMOKE="<a fast end-to-end test>"
-   APP="<how to start the product, and its test data>"` (R/run.json, with the running KISS `VERSION`). Show the owner
-   each WARN it prints for a facts line the file lacks, before the build. Any `prompt.py` call that prints "KISS <new>
+   APP="<how to start the product, and its test data>"` (R/run.json, with the running KISS `VERSION`). Write R's path in
+   full in each `prompt.py` command, not a variable: `metrics.py` finds the run by it. Show the owner
+   each WARN it prints for a facts line the file lacks, before the build: it says what no line means, and the file needs
+   no edit unless the owner wants another behaviour. Any `prompt.py` call that prints "KISS <new>
    is installed" on stderr: tell the owner to start the run in a new session. Then `prompt.py implementer R ELAPSED=0` →
-   start ONE subagent with that text: your strongest model at medium effort, in the background. Give every path
-   absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
+   start ONE subagent with that text, on the model and effort of the Models rule (`references/agents.md`), in the
+   background. Give every path absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` (empty) and `git -C MAIN
    status` (empty for the files the run's diff `git -C W diff --name-only BASE..HEAD` names; another session's files
    do not stop the run), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). **Triage** each new
@@ -108,11 +110,13 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    resources:` says "one at a time"), send the implementer "product free" as soon as the solo reviewer stops; it then
    runs its held checks (step 5: a stop on a held check waits for it).
 7. **Review once at the end:** `prompt.py reviewer R HEAD=<head> ELAPSED=<s>` (a risky ticket's review adds
-   `BASE=<the commit before it>`) → a NEW subagent on your strongest model at medium effort. Save its last message
+   `BASE=<the commit before it>`) → a NEW subagent on the model and effort of the Models rule. Save its last message
    to `R/review-<n>.md` (n = this round's number, from 1). **Flake check:** when the run's test diff (`git -C W diff
    BASE..HEAD` of the test files) adds a time value (a timeout, a sleep, a wall-clock bound), start the facts file's
    `Flake check: <command> x <n>` in the background beside the final review. A failure, or a time bound under 2 times
-   the slowest time seen, is a fix before the merge gate.
+   the slowest time seen, is a fix before the merge gate. A final review may start while a solo review's fix round
+   still runs, because it works in its own clone of the head (the fix round keeps its own recheck); with "one at a time"
+   in the facts file, only after the solo reviewer stops.
 8. **Sort:** you sort (no subagent) by the rules `prompt.py severity R ROUND=<n>` prints, into `R/sort-<n>.json`
    (with the triage fix-now lines found after that review, each with a severity; a guard or data change is high),
    then go on. Each owner finding is a decision.
@@ -120,7 +124,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    it with the ticket rules of [references/spec-and-tickets.md](references/spec-and-tickets.md) (its failure-path
    lines, and a message to an agent checked against that agent's standing prompt). Then `prompt.py fix R ROUND=<n>
    ELAPSED=<s>` → the SAME implementer. Check each test its answer names from the diff and the test output (run the
-   test). Save the answer to `R/answer-<n>.md`; when the round fixed a critical, high or reproduced-in-app finding, `prompt.py recheck R
+   test). Save the answer to `R/answer-<n>.md`; when the round fixed a critical, high or reproduced-in-app finding, or holds work from an owner decision, `prompt.py recheck R
    ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha>` → the SAME reviewer (its findings, if any, become `R/review-<n+1>.md`).
    Before each one, the context check of step 5: a marked implementer or reviewer is replaced by the handoff.
    At most 2 fix rounds per review and 3 per run; then a gate. At the cap, when only low or medium findings that
@@ -136,20 +140,21 @@ is in your skill list; a skill that is not there is skipped, and the step does w
     3. `ponytail-debt` on `git -C W diff <base>..<head>`: each new `shortcut:` comment with its limit.
     4. **Look back** by [references/retro.md](references/retro.md): the candidates for the owner, most severe first
        (a mechanical mistake → a proposed check, a judgement call → a facts-file rule), each a yes/no line in the
-       merge gate's questions; change no product file.
+       merge gate's questions, with its evidence and your recommended answer; change no product file.
     5. **Later commits:** `git -C W log --oneline <the full-check sha>..HEAD`, before the metrics line (and again at
        the merge gate for any commit made after it). A later commit that changes product code gets the full check
        again and its own `Full check at` line. One that changes only tests, docs or built files gets the build step,
        those tests and the docs gate; on a pass, write `Full check at <HEAD>: pass (after <sha>: build step, <tests>,
        docs gate)`.
     6. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
-       <used> of <budget>` (headless sessions: the `claude -p` or `claude --bg` sessions the run starts for tests;
+       <used> of <budget> (owner wait <n> left out)` (headless sessions: the `claude -p` or `claude --bg` sessions the run starts for tests;
        subagents and kiss-mini workers do not count), given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it prints the full
        line (with the tokens per role and the `CodeGraph share (v2)`) and records it in `<repo>/.kiss/runs/metrics.md`, one line
        per run (a rerun of the close replaces the run's line), and saves each subagent tool call in `R/calls.jsonl`
        (the share's evidence after a tidy-up moves the transcripts). It refuses when the last `Full check at` line is not a
        pass at W's HEAD.
-    7. The **merge gate**, with the log findings, the look-back questions, and each later commit with the checks it
+    7. The **merge gate**: each logged item in one table row (the item; its state: done later, nothing to fix, or
+       fixable; your recommendation) and their count, the look-back questions, and each later commit with the checks it
        got. A push, a pull request or any write to a remote is its own gate; `pr` writes a pull request's body.
     8. **The merge**, beside the main checkout, never in it (another session may use MAIN):
        1. `git -C MAIN worktree add --detach <tmp> main` (`<tmp>` in the scratch folder), then `git -C <tmp> merge
@@ -180,7 +185,8 @@ the clock starts again from the elapsed time.
 **The clock:** the budget is 10 minutes per ticket plus 2 hours for the reviews and fix rounds, plus the facts
 file's `Full check time:`. Put "Time: elapsed
 Ns of a Ms budget." in each message to a subagent (`prompt.py` does it with `ELAPSED`). Past the budget, a gate comes
-before the next round.
+before the next round. The time the owner takes to answer a gate or a decision is off the clock, and the metrics line
+says how much was left out.
 
 ## Side tasks
 

@@ -24,12 +24,14 @@ type Opts = {
   plugins?: { id: string; enabled: boolean; installPath: string; readFromFolder?: string }[]
   /** The checkout has a CodeGraph index: `codegraph status <it>` names it as its project. */
   indexed?: boolean
+  /** `codegraph status` prints colour codes, as with FORCE_COLOR or CI set. */
+  colour?: boolean
   /** The repo's root, as `git rev-parse --show-toplevel` answers it (default: cwd). */
   top?: string
   /** How long `codegraph explore` (the seed) takes, on the mock clock. */
   seedMs?: number
 }
-function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, top = cwd, seedMs = 0 }: Opts = {}) {
+function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, colour = false, top = cwd, seedMs = 0 }: Opts = {}) {
   const w = {
     session: 's1',
     branch,
@@ -63,6 +65,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     branchGone: false,
     /** What `git worktree list --porcelain` prints. */
     worktrees: '',
+    /** The stdin each `codegraph init` got: '' is closed at once. */
+    initStdin: [] as (string | undefined)[],
   }
   w.clock = mock.clock(on, { now: NOW })
   // The store in memory, readable by the test: the ledger is the contract every session reads.
@@ -100,7 +104,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     if (e.argv[0] === 'codegraph' && e.argv[1] === 'explore' && seedMs) await w.clock.advance(seedMs)
     if (hang.includes(e.argv[0] ?? '') || hang.includes(`${e.argv[3]} ${e.argv[4]}`)) throw new Error(`${e.argv[0]}: timed out after 120000 ms`)
     if (e.argv[0] === 'codegraph') {
-      const out = e.argv[1] === 'status' ? (indexed ? `CodeGraph Status\n\nProject: ${top}\n` : 'CodeGraph not initialized\n') : e.argv[1] === 'explore' ? 'SEED: calc.py add()\n' : ''
+      if (e.argv[1] === 'init') w.initStdin.push(e.init?.stdin)
+      const out = e.argv[1] === 'status' ? (indexed ? `CodeGraph Status\n\n${colour ? '\x1b[36mProject:\x1b[0m' : 'Project:'} ${top}\n` : 'CodeGraph not initialized\n') : e.argv[1] === 'explore' ? 'SEED: calc.py add()\n' : ''
       return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (e.argv[0] === 'gh' && e.argv[2] === 'view') {
@@ -672,6 +677,130 @@ test('the host forgets a task ended over 7 days ago, keeps a newer one and one t
   expect(list).toContain('wt code failed')
 })
 
+// D4: the host's prune removes an ended task's folder first, and only a path of the exact form.
+const DAY = 24 * 3600_000
+const ended = (id: string, extra: object = {}) => ({
+  id, kind: 'question', title: 'q', sender: 's0', cwd: '/repo', state: 'done', started: NOW - 9 * DAY, finished: NOW - 8 * DAY,
+  log: `/tmp/kiss-mini/${id}/report.md`, ...extra,
+})
+const rmRuns = (w: ReturnType<typeof world>) => w.runs.filter(a => a[0] === 'rm')
+const entry = (w: ReturnType<typeof world>, id: string) => w.store[`kiss-mini/task/${id}`]
+
+test('prune: a task ended 8 days ago that holds nothing loses its folder and all it holds, and then its entry; no log: the folder by its id', async ($, on) => {
+  const w = world(on, { store: { 'kiss-mini/task/old': ended('old'), 'kiss-mini/task/nolog': ended('nolog', { log: undefined }) } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(rmRuns(w)).toHaveLength(2)
+  expect(rmRuns(w)).toContainEqual(['rm', '-rf', '--', '/tmp/kiss-mini/old'])
+  expect(rmRuns(w)).toContainEqual(['rm', '-rf', '--', '/tmp/kiss-mini/nolog'])
+  expect(entry(w, 'old')).toBeUndefined()
+  expect(entry(w, 'nolog')).toBeUndefined()
+})
+
+test('prune: a task ended 6 days ago, one that holds a worktree or a branch, and a running task keep their folders and entries', async ($, on) => {
+  const w = world(on, {
+    store: {
+      'kiss-mini/task/new': ended('new', { finished: NOW - 6 * DAY }),
+      'kiss-mini/task/wt': ended('wt', { kind: 'code', worktree: '/tmp/kiss-mini/wt/wt' }),
+      'kiss-mini/task/br': ended('br', { kind: 'code', state: 'failed', branch: 'mini/br' }),
+      'kiss-mini/task/run': ended('run', { state: 'working', finished: undefined }),
+    },
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(rmRuns(w)).toEqual([])
+  for (const id of ['new', 'wt', 'br', 'run']) expect(entry(w, id)).toBeDefined()
+})
+
+for (const [name, log] of [
+  ['an empty path', ''],
+  ['the root', '/report.md'],
+  ['a path with ..', '/tmp/x/../kiss-mini/bad/report.md'],
+  ['a .. as the last parts', '/tmp/kiss-mini/bad/../report.md'],
+  ["another task's id", '/tmp/kiss-mini/other/report.md'],
+  ['another parent folder', '/tmp/not-kiss/bad/report.md'],
+  ['a relative path', 'kiss-mini/bad/report.md'],
+] as const) {
+  test(`prune: a stored path that is ${name} removes nothing`, async ($, on) => {
+    const w = world(on, { store: { 'kiss-mini/task/bad': ended('bad', { log }) } })
+    await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+    expect(rmRuns(w)).toEqual([])
+    // Such a path cannot get better, so the entry does not wait for it.
+    expect(entry(w, 'bad')).toBeUndefined()
+  })
+}
+
+for (const how of ['a merge', 'a press'] as const) {
+  test(`prune: a task delivered by ${how} long after its report keeps its folder and entry for 7 more days`, async ($, on) => {
+    const w = world(on)
+    if (how === 'a merge') await handoff($, w, false)
+    else await ready($, w)
+    w.store[`kiss-mini/task/${ID}`].finished = NOW - 8 * DAY
+    if (how === 'a merge') w.merged = true
+    else {
+      const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+      await ui.press({ key: `push-${ID}` })
+      await ui.unmount()
+    }
+    await w.clock.advance(120_000)
+    expect(entry(w, ID).state).toBe('done')
+    expect(rmRuns(w)).toEqual([])
+    expect(entry(w, ID)).toBeDefined()
+    // The window runs from the delivery: 6 days on it holds, 8 days on it is over. (The 5 s timer forbids a real advance of days.)
+    entry(w, ID).deliveredAt -= 6 * DAY
+    await w.clock.advance(120_000)
+    expect(rmRuns(w)).toEqual([])
+    entry(w, ID).deliveredAt -= 2 * DAY
+    await w.clock.advance(120_000)
+    expect(rmRuns(w)).toHaveLength(1)
+    expect(entry(w, ID)).toBeUndefined()
+  })
+}
+
+test('a late merge leaves the pane\'s time at the worker\'s, and the task sorts by its delivery', async ($, on) => {
+  const store: Record<string, unknown> = {}
+  for (let i = 0; i < 12; i++) store[`kiss-mini/task/q${i}`] = { ...ended(`q${i}`), finished: NOW - i }
+  const w = world(on, { store })
+  await handoff($, w, false)
+  Object.assign(entry(w, ID), { started: NOW - 2 * DAY - 240_000, finished: NOW - 2 * DAY })
+  w.merged = true
+  await w.clock.advance(60_000)
+  expect(entry(w, ID).state).toBe('done')
+  expect(entry(w, ID).finished).toBe(NOW - 2 * DAY)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: new RegExp(`${ID} .*done.*· 4m`) })).toBeDefined()
+  await ui.unmount()
+})
+
+test('prune: a removal that fails keeps the entry, and a later prune removes both', async ($, on) => {
+  const fail: Record<string, { stderr: string }> = { rm: { stderr: 'rm: Operation not permitted' } }
+  const w = world(on, { fail, store: { 'kiss-mini/task/old': ended('old') } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(rmRuns(w)).toHaveLength(1)
+  expect(entry(w, 'old')).toBeDefined()
+  delete fail.rm
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(rmRuns(w)).toHaveLength(2)
+  expect(entry(w, 'old')).toBeUndefined()
+})
+
+test('prune: an rm that cannot run keeps the entry and raises nothing; the session starts', async ($, on) => {
+  const w = world(on, { hang: ['rm'], store: { 'kiss-mini/task/old': ended('old'), 'kiss-mini/task/next': ended('next', { state: 'working', finished: undefined }) } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(entry(w, 'old')).toBeDefined()
+  // The host's start goes on past the prune: the waiting task gets its worker.
+  expect(w.spawned).toHaveLength(1)
+})
+
+test('a scratch copy: from the worktree a clone to T/scratch passes, and git init in that copy is denied', async ($, on) => {
+  const { ran } = await worker($, on)
+  const T = `/tmp/kiss-mini/${ID}`
+  const clone = `cd '${WT}' && git clone -q . "${T}/scratch/copy"`
+  await call($, 'Bash', { command: clone })
+  expect(ran).toEqual([`Bash ${clone}`])
+  expect(JSON.stringify(await call($, 'Bash', { command: `cd '${T}/scratch/copy' && git init` }))).toContain(ONLY)
+  expect(JSON.stringify(await call($, 'Bash', { command: `git -C '${T}/scratch/copy' init` }))).toContain(ONLY)
+  expect(ran).toHaveLength(1)
+})
+
 test('Merge is refused while the checkout has a merge of its own under way: no merge, no abort, one toast', async ($, on) => {
   const w = world(on)
   await ready($, w)
@@ -863,14 +992,52 @@ const HANDOFF_BRIEF = [
   'Suggested skills: diagnosing-bugs, tdd',
 ].join('\n')
 
-async function handoff($: any, w: ReturnType<typeof world>, back: boolean) {
+async function handoff($: any, w: ReturnType<typeof world>, back: boolean, answer = READY) {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const r = await $.tool.call({ tool: 'mcp__kiss__handoff', kind: 'bug', title: 'add subtracts', brief: HANDOFF_BRIEF, base: 'kiss-run', return: back })
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' })
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
-  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1000, isAborted: false, turnId: 't1' })
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer, durationMs: 1000, isAborted: false, turnId: 't1' })
   return r
 }
+
+// The report's Tests field: the relayed line and the pane's tests value are the same text (D23).
+const reported = (tests: string) => [
+  'State: ready', 'Summary: add(a, b) now returns the sum.', `Branch: mini/${ID}    Commits: abc1234 fix`, tests,
+  `Full log: /tmp/kiss-mini/${ID}/report.md`, '', '- a line of the full text', '## Pull request body', 'Fixes add.',
+].join('\n')
+const LONG = Array.from({ length: 100 }, (_, i) => `- check ${i}: passed`).join('\n')
+const CUT = Array.from({ length: 100 }, (_, i) => `check ${i}: passed`).join('; ').slice(0, 600)
+for (const [name, tests, want] of [
+  ['a list', 'Tests:\n- pytest: 3 passed\n- mutant: caught', 'pytest: 3 passed; mutant: caught'],
+  ['a list after one blank line', 'Tests:\n\n- pytest: 3 passed\n- mutant: caught', 'pytest: 3 passed; mutant: caught'],
+  ['an indented star list', 'Tests:\n  * pytest: 3 passed\n  * mutant: caught', 'pytest: 3 passed; mutant: caught'],
+  ['text on the line and a list', 'Tests: all ran\n- pytest: 3 passed', 'all ran; pytest: 3 passed'],
+  ['one line', 'Tests: pytest: 3 passed', 'pytest: 3 passed'],
+  ['no line', 'Note: nothing', 'not reported'],
+  ['an empty line with no list', 'Tests:', 'not reported'],
+  ['a very long list', `Tests:\n${LONG}`, CUT],
+  ['a wrapped bullet', 'Tests:\n- pytest: 3 passed\n  on Python 3.12\n- mutant: caught', 'pytest: 3 passed on Python 3.12; mutant: caught'],
+  ['a wrap on the last bullet, then a blank line', 'Tests:\n- pytest: 3 passed\n  on Python 3.12\n\n  not this', 'pytest: 3 passed on Python 3.12'],
+  ['a list, then the next field', 'Tests:\n- pytest: 3 passed\nMutants: the guard: its test fails', 'pytest: 3 passed'],
+] as const) {
+  test(`a report's Tests field relays and shows the same text: ${name}`, async ($, on) => {
+    const w = world(on)
+    await handoff($, w, true, reported(tests))
+    const text = w.sent.filter(m => !m.text.startsWith('KISS-MINI task'))[0]?.text ?? ''
+    expect(text.split('\n')).toContain(`Tests: ${want}`)
+    expect(w.store[`kiss-mini/task/${ID}`].tests).toBe(want)
+  })
+}
+
+test('a list under Summary stays with the summary, and the next field joins no Tests line', async ($, on) => {
+  const w = world(on)
+  await handoff($, w, true, ['State: ready', 'Summary: did two things', '- one', '- two', 'Tests:', '- pytest: 3 passed', 'Branch: none', '- not a test'].join('\n'))
+  const text = w.sent.filter(m => !m.text.startsWith('KISS-MINI task'))[0]?.text ?? ''
+  expect(text).toContain('Summary: did two things\n- one\n- two\n')
+  expect(text.split('\n')).toContain('Tests: pytest: 3 passed')
+  expect(w.store[`kiss-mini/task/${ID}`].tests).toBe('pytest: 3 passed')
+})
 
 test('a hand-off from the harness branches from the base it names and returns one report in the report format', async ($, on) => {
   const w = world(on, { branch: 'dev' })
@@ -1363,7 +1530,17 @@ test('in an indexed repo a code task\'s brief names W, the CodeGraph commands wi
   expect(w.files[`${dir}/seed.md`]).toBe('SEED: calc.py add()\n')
   // The new worktree gets its own index before the seed reads it.
   const cg = w.runs.filter(a => a[0] === 'codegraph').map(a => a.slice(0, 4).join(' '))
-  expect(cg).toEqual([`codegraph status ${cwd}`, `codegraph init -y ${dir}/wt`, `codegraph explore -p ${dir}/wt`])
+  expect(cg).toEqual([`codegraph status ${cwd}`, `codegraph init ${dir}/wt`, `codegraph explore -p ${dir}/wt`])
+})
+
+test('a coloured `codegraph status` of the checkout gives the worker its seed, and the worktree\'s index starts with no -y and stdin closed', async ($, on) => {
+  const w = world(on, { indexed: true, colour: true })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(w.files[`/tmp/kiss-mini/${ID}/seed.md`]).toBe('SEED: calc.py add()\n')
+  expect(w.runs.filter(a => a[1] === 'init')).toEqual([['codegraph', 'init', `/tmp/kiss-mini/${ID}/wt`]])
+  expect(w.initStdin).toEqual([''])
 })
 
 test('a code task\'s brief names ponytail first, as handoff.md\'s skill rows do', async ($, on) => {

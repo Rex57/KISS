@@ -11,15 +11,18 @@ You check the setup and report it. KISS installs only on the owner's request, fr
 owner sees each command. `KD` is this skill's folder (the folder of this file).
 
 **Feedback on or off.** When the owner asks `kiss-doctor feedback on` (or `feedback off`), run only
-`python3 -I "$KD/scripts/doctor.py" feedback on` (or `off`), report the lines it prints (the file it changed, its
-backup, that a new session is needed, the export line for the other agents), and stop. It sets only
-`env.KISS_FEEDBACK` in Claude Code's user settings (`"1"` or `"0"`) and edits no shell profile.
+`python3 -I "$KD/scripts/doctor.py" feedback on <agent>` (or `off <agent>`), with your own agent's name as `<agent>`
+(`claude`, `codex`, `gemini` or `antigravity`), and report the lines it prints: what changed or what the owner must add,
+and that a new session is needed. Then end the run; the block comes only when the mode was on when this run began. Only
+`claude` writes a file: `env.KISS_FEEDBACK` in Claude Code's user settings (`"1"` or `"0"`), after a backup. No form edits
+a shell profile or Codex's `config.toml`.
 
 **Setup.** When the owner asks `kiss-doctor setup`:
 
-- S1. **Run** only `python3 -I "$KD/scripts/doctor.py" setup`, followed by the agents the owner names (`setup claude`),
-  if any: then the plan and the checks cover only those. It finds the OS, the shell, the package manager and the
-  agents on PATH, runs the checks, and prints a numbered plan of what is missing: each item with its command, its
+- S1. **Run** only `python3 -I "$KD/scripts/doctor.py" setup <agents>`, with the agents the owner names (`setup claude`),
+  or, when the owner names none, your own agent's name (`claude`, `codex`, `gemini` or `antigravity`), and say that
+  `kiss-doctor setup <others>` covers the rest. The plan and the checks cover only those. It finds the OS, the shell and
+  the package manager, runs the checks, and prints a numbered plan of what is missing: each item with its command, its
   source and what it changes; then the steps by hand, which setup never runs (a `sudo` command, Antigravity's copy
   steps, Codex's `/hooks` trust, a new session and its login); then the optional links. Optional items: `pyright`
   and `typescript-language-server` (only for a language the repo has files of) and CodeGraph's MCP server for each
@@ -40,9 +43,11 @@ backup, that a new session is needed, the export line for the other agents), and
   with the line of the agents left out, and the steps by hand.
 
 1. **Run the checks:** `python3 -I "$KD/scripts/doctor.py"`. It checks each agent whose CLI is on PATH; name
-   agents to check fewer (`claude`, `codex`, `gemini`, `antigravity`). Per agent: the CodeGraph rule in the global
-   instructions file (KISS's `rules/codegraph.md`, found by its bold lead-ins, `@` imports followed; a copy with every
-   lead-in but other words is a WARN: replace the section), each skill in
+   agents to check fewer (`claude`, `codex`, `gemini`, `antigravity`). Per agent: the CodeGraph rule (KISS's
+   `rules/codegraph.md`, found by its bold lead-ins) in the global instructions file; for Claude Code also in
+   `rules/**/*.md` under its config folder, with `@` imports followed for 4 hops, where a file holds it only with more
+   than half of its bold lead-ins, and each such file must equal the rule. A copy with every lead-in but other
+   words is a WARN. Then each skill in
    the skill table of each KISS skill that has one and KISS's own (installed, enabled, once, callable by the model), and the tools.
    Done when it prints its summary line.
 2. **Compare with your own skill list.** The script reads the disk; your skill list is what this session loaded.
@@ -56,9 +61,11 @@ backup, that a new session is needed, the export line for the other agents), and
    (`$KD/../../README.md`). End the report with one line: "Ready for a KISS run" when no line is FAIL, else the FAIL lines to
    fix first. Done when each WARN and FAIL line has its fix.
 4. **Fix on the owner's yes.** The owner installs tools, skills and the CodeGraph rule with `kiss-doctor setup`
-   (or the README links); never append or replace the rule by hand. A WARN copy of the rule (it differs from KISS's
-   text, or is an older or edited copy) gets the setup item "replace the CodeGraph section of <file>": show it with
-   its changes line (the owner's own lines in that section are lost and kept in the backup), and on the owner's yes
+   (or the README links); never append or replace the rule by hand. On Claude Code a missing rule gets the item that writes
+   a copy to `rules/kiss.md` under the config folder, and a section in `CLAUDE.md` that is older or edited gets the item
+   "move the CodeGraph section of <file> to <copy>". A WARN copy of the rule elsewhere (it differs from KISS's text, or is
+   an older or edited copy) gets the setup item "replace the CodeGraph section of <file>". Show the item with its
+   changes line (the owner's own lines in that section are lost and kept in the backup), say to start a new session after it, and on the owner's yes
    run only that item, with the plan's call `setup [<agents>] --apply <its number> --plan <id>`. With a yes, your
    one file fix is to delete a `CODEGRAPH_START` block (read the file first). Then run step 1 again.
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 5 kiss-doctor`

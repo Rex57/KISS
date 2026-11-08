@@ -67,7 +67,7 @@ What KISS adds:
 | Skill | What it does |
 |---|---|
 | `kiss-harness` | The questions (decisions recorded in `decisions.md`), the spec, the tickets, then one implementer, one review that uses the product, at most 2 fix rounds per review and 3 per run, a metrics line, and the owner's merge. Its scripts check the tickets, fill the prompts, seed each ticket with CodeGraph and keep the time budget (10 minutes per ticket, plus 2 hours for reviews and fixes, plus the full check time from the facts file). |
-| `kiss-doctor` | Checks a device for a run: the CodeGraph rule in each agent's global instructions file, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix. `kiss-doctor setup` shows a numbered plan of what is missing, and KISS installs only on your request, from the official sources, after you see each command. |
+| `kiss-doctor` | Checks a device for a run: the CodeGraph rule that each agent loads, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix. `kiss-doctor setup` shows a numbered plan of what is missing, and KISS installs only on your request, from the official sources, after you see each command. |
 | `kiss-mini` | A small side task in a background worker: a code change on its own `mini/<id>` branch, a read-only question, or a watch on a pull request, a CI run or a test command. kiss-harness hands off work outside its tickets to it. On Claude Code a mod answers `/kiss-mini` (`/kiss-mini <task>`, `/kiss-mini --now <task>` to skip the worker's checks, `/kiss-mini ask <question>`, `/kiss-mini watch pr <n>` / `run <id>` / `<test command>`, `/kiss-mini stop <id>`, `/kiss-mini status`, `/kiss-mini` alone opens the pane), a band with the counts, and the delivery buttons (Merge into the base, Push, Draft PR, Discard); only your press delivers. |
 | `kiss-housekeeping` | "Clean up the docs": a First run, on your ask, gives each fact one home, sorts pages by kind (living, log, record, history), builds a map, retires stale pages, fixes old names, moves files without breaking code or tests, installs a docs gate in your tests (`tools/check_docs.py`, your own copy) and proves the result with a routing test. After that, each harness close runs its Upkeep when your facts file names the gate. |
 | `kiss-system-design` | First version. From a new product idea to a plan of harness runs: a product brief, a decision map (decisions so far, open decisions typed research / prototype / grilling / task, not yet clear, out of scope), one decision at a time with you (research in the background), then a system design document and an ordered run plan in your docs. Its working files stay in the git-ignored `.kiss/design/<name>/`; continue a design by its name. An idea that fits one run goes to `kiss-harness`. |
@@ -89,11 +89,11 @@ On every agent you can also just say it: "build <feature> with the KISS harness"
 ## Tools you need
 
 KISS installs only on your request, from the official sources, after you see each command. Run
-`kiss-doctor setup` (`/kiss:kiss-doctor setup` in Claude Code): it finds your OS, shell, package manager and the
-agents on your PATH, and shows a numbered plan of what is missing, each item with its command, its source and what
+`kiss-doctor setup` (`/kiss:kiss-doctor setup` in Claude Code): it finds your OS, shell and package manager, and, for the
+agent you run it from, shows a numbered plan of what is missing, each item with its command, its source and what
 it changes. You answer all, none or the numbers: it installs those, one at a time, stops at the first failure,
 runs the checks again and lists the steps only you can do. It never runs `sudo` and never edits your shell profile:
-it shows those lines for you to run. Name agents to set up only those (`kiss-doctor setup claude`). The plan also
+it shows those lines for you to run. Name agents to set up those instead (`kiss-doctor setup claude codex`). The plan also
 offers two optional kinds of item: the language servers for `cgcallers`' LSP pass (only for a language your repo has
 files of), and CodeGraph's MCP server for each agent, added through the agent's own command (Claude Code also gets the
 permission `mcp__codegraph__*`; Antigravity: a step by hand). It never runs `codegraph install`. Or install each tool
@@ -105,7 +105,7 @@ yourself from its link, once per device, then run `kiss-doctor`: it checks each 
 | git | Worktrees, one commit per ticket | `kiss-doctor setup` (your package manager), or [git-scm.com](https://git-scm.com/downloads) |
 | Python 3.9 or later | The scripts (standard library only) | `kiss-doctor setup` (your package manager), or [python.org](https://www.python.org) or [uv](https://docs.astral.sh/uv/) |
 | Node.js and npm | CodeGraph runs on Node | `kiss-doctor setup` (your package manager), or [nodejs.org](https://nodejs.org) |
-| [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `kiss-doctor setup`, or `npm install -g @colbymchenry/codegraph`, then `codegraph init -y <repo>` in each project |
+| [CodeGraph](https://github.com/colbymchenry/codegraph) | The ticket seeds, the reviewer's caller checks, the global rule | `kiss-doctor setup`, or `npm install -g @colbymchenry/codegraph`, then `codegraph init "<repo>" </dev/null` in each project |
 | [ponytail](https://github.com/DietrichGebert/ponytail) | `ponytail`: the smallest complete change per ticket and the reviewer's rubric F; `ponytail-review`: the reviewer's rubric G (risk, load, speed); `ponytail-debt`: the list of new `shortcut:` comments at the close; `ponytail-audit` and `ponytail-debt`: `kiss-code-clean`'s audit report and debt ledger | `kiss-doctor setup`, or see "Install ponytail" below |
 | [Matt Pocock's skills](https://github.com/mattpocock/skills) | `grilling`: the questions; `domain-modeling`: a glossary and ADRs, when the project turns domain docs on; `tdd`: the implementer's red-green loop; `codebase-design` and `prototype`: step 1, for an interface change and a decision the owner can try; `diagnosing-bugs`: the implementer, a failure it cannot explain; `pr`: a pull request body at the push gate; `research`: `kiss-system-design`'s research decisions and `kiss-mini`'s question task | `kiss-doctor setup`, or see "Install Matt Pocock's skills" below |
 | `cgcallers` (in this repo) | CodeGraph's callers plus a word search of the importing files, before a delete or rename | `kiss-doctor setup` (into `~/.local/bin`, or the folder `KISS_BIN` names), or `install -m 755 skills/kiss-harness/scripts/cgcallers.py ~/.local/bin/cgcallers` (that folder on your `PATH`) |
@@ -117,7 +117,7 @@ yourself from its link, once per device, then run `kiss-doctor`: it checks each 
 
 ### Install ponytail
 
-`kiss-doctor setup` installs it for each agent on your PATH (Codex: then open `/hooks`, trust its two hooks and
+`kiss-doctor setup` installs it for the agent you run it from, or each agent you name (Codex: then open `/hooks`, trust its two hooks and
 start a new thread; Antigravity: by hand). Upstream steps: [INSTALL.md](https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md).
 
 ### Install Matt Pocock's skills
@@ -126,7 +126,7 @@ KISS uses eight of them: `grilling`, `domain-modeling`, `tdd`, `codebase-design`
 `pr` and `research`. Install them once per agent, in one way only: two installs give you every skill twice. KISS
 needs no `/setup-matt-pocock-skills`, because it does not use his issue-tracker skills.
 
-`kiss-doctor setup` installs them for each agent on your PATH (Antigravity: copy the eight skill folders from a
+`kiss-doctor setup` installs them for the agent you run it from, or each agent you name (Antigravity: copy the eight skill folders from a
 clone into `~/.gemini/config/skills/`, by hand). Upstream steps: [mattpocock/skills](https://github.com/mattpocock/skills).
 
 ### User-only skills
@@ -157,7 +157,7 @@ the first line of the run's `progress.md` records which skills the run used.
    a rule of yours is always fixed; a low finding with no effect on a user, data or a rule goes to the log, which
    you see at the merge gate. The same implementer fixes each one and names the test that failed before and passes
    now; the controller checks those, and the same reviewer rechecks in the product only critical, high or
-   reproduced findings. At most 2 fix rounds per review and 3 per run, then a gate (none when only low or medium
+   reproduced findings, and work from a decision of yours. At most 2 fix rounds per review and 3 per run, then a gate (none when only low or medium
    findings that touch no guard, data or rule of yours are left: the merge gate offers them as one `/kiss-mini`
    task). A risky ticket gets its own review only when it guards real data or later tickets build on its guard;
    meanwhile the implementer builds the tickets that do not depend on it.
@@ -221,26 +221,31 @@ Each agent reads the same `skills/` folder. The manifests are `.claude-plugin/` 
 `.codex-plugin/` and `.agents/plugins/marketplace.json` (Codex), `gemini-extension.json` (Gemini CLI) and
 `.antigravity-plugin/` (Antigravity).
 
-## The CodeGraph rule: add it to your global instructions
+## The CodeGraph rule: one per device, for each agent
 
 [`rules/codegraph.md`](rules/codegraph.md) tells every agent how to use CodeGraph: which index, a `-p` on every
-call, the gaps of `callers`, and how to brief a subagent. Add it once per device to the global instructions file
-of each agent you use:
+call, the gaps of `callers`, and how to brief a subagent. Each agent you use needs it once per device:
 
-| Agent | Global instructions file | Command (from this repo's folder) |
+| Agent | Where it goes | Command (from this repo's folder) |
 |---|---|---|
-| Claude Code | `~/.claude/CLAUDE.md` | `cat rules/codegraph.md >> ~/.claude/CLAUDE.md` |
+| Claude Code | its own file, `~/.claude/rules/kiss.md` (`CLAUDE_CONFIG_DIR` moves it) | `mkdir -p ~/.claude/rules && cp rules/codegraph.md ~/.claude/rules/kiss.md` |
 | Codex | `~/.codex/AGENTS.md` | `cat rules/codegraph.md >> ~/.codex/AGENTS.md` |
 | Gemini CLI and Antigravity | `~/.gemini/GEMINI.md` (both read it) | `cat rules/codegraph.md >> ~/.gemini/GEMINI.md` |
 
-`kiss-doctor setup` appends it for you, on your answer, and replaces an older or edited copy: the section that holds
+`kiss-doctor setup` does this for you, on your answer. For Claude Code it writes the copy and leaves your `CLAUDE.md`
+alone. A later update changes only that file: an older or edited copy is replaced, after a backup whose name does not end in `.md`, so
+keep your own lines in your own file, not in the copy. An exact section already in `CLAUDE.md` stays. An older or edited section moves: setup writes
+the copy, backs up `CLAUDE.md` beside it, and removes the section, with your other lines kept. A hand-edited section with half or fewer of the rule's bold lead-ins counts as your own: it stays beside the new copy. Claude Code loads the file when a session
+starts, so start a new session. **When you uninstall KISS:** `rm ~/.claude/rules/kiss.md*`; a `CLAUDE.md.kiss-backup-*` beside `CLAUDE.md` is yours to remove too.
+
+For the other agents, setup appends the rule, and replaces an older or edited copy: the section that holds
 it (from the heading above it, or from its first line under the file's `# ` title or after a `CODEGRAPH_END` line, to
-the next `#` or `##` heading or a `CODEGRAPH_START` line) becomes `rules/codegraph.md`, after a backup beside the file that keeps your own lines. Read the file first: append it once, not again on each update. If `codegraph install` added a
+the next heading of the same or a higher level, at least the next `#` or `##`, or a `CODEGRAPH_START` line) becomes `rules/codegraph.md`, after a backup beside the file that keeps your own lines. Read the file first: append it once, not again on each update. If `codegraph install` added a
 `CODEGRAPH_START`/`CODEGRAPH_END` block to the same file, delete that block.
 
 ## Use it in a project
 
-1. Index the repo: `codegraph init -y <repo>`.
+1. Index the repo: `codegraph init "<repo>" </dev/null`.
 2. On the first run, the controller drafts `<repo>/.kiss/project.md` from the repo (from
    [`templates/project.md`](skills/kiss-harness/templates/project.md)) and asks you only about the gaps: how to run
    and test the project, how to start it for a reviewer, the rules a reviewer checks, the traps, and whether
@@ -265,9 +270,12 @@ Turn it on with the environment variable `KISS_FEEDBACK=1`, in one of these plac
 - your shell profile, for every agent: `export KISS_FEEDBACK=1`;
 - a project's `.claude/settings.local.json`, for that project only: `"env": { "KISS_FEEDBACK": "1" }`.
 
-`kiss-doctor` reports the mode and where it is set in every run. `kiss-doctor feedback on` and
-`kiss-doctor feedback off` set it in Claude Code's user settings (`"1"` or `"0"`, so off wins over a shell
-profile), with a timestamped backup beside the file at each switch; for the other agents it prints the export line for your shell profile.
+`kiss-doctor` reports the mode and where it is set in every run. Ask your agent for `kiss-doctor feedback on` or
+`kiss-doctor feedback off`; the skill runs `doctor.py feedback on|off <claude|codex|gemini|antigravity>` with its own
+agent's name. `claude` sets the mode in Claude Code's user settings (`"1"` or `"0"`, so off wins over a shell profile),
+with a timestamped backup beside the file at each switch. The others change no file: `codex` prints the
+`shell_environment_policy` lines for `config.toml`, and `gemini` and `antigravity` print the export line for your shell
+profile. Start a new session after it. A run that turns the mode on gives no block, because the mode was off at its start.
 
 Unset it, or set any other value, to turn it off. Each skill's last line runs `rules/feedback.py` when the skill
 loads (a Claude Code inline command): with the mode off it prints nothing, so the skill has no feedback step and the
@@ -287,7 +295,7 @@ agent session in a KISS checkout to apply it. Read it before you post: the repo 
 .agents/plugins/             Codex marketplace
 .antigravity-plugin/         Antigravity manifest
 gemini-extension.json        Gemini CLI manifest
-rules/codegraph.md           the CodeGraph rule for the global instructions file
+rules/codegraph.md           the CodeGraph rule: copied to ~/.claude/rules/kiss.md for Claude Code, a section of the global instructions file for the others
 LICENSE, NOTICE              Apache-2.0 and the author credit; THIRD_PARTY_NOTICES.md: Matt Pocock's MIT license
 rules/feedback.md            the feedback mode: the block each skill ends with when KISS_FEEDBACK=1
 rules/feedback.py            prints a skill's feedback step, only when KISS_FEEDBACK=1
