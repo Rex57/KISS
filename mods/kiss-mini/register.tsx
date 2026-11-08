@@ -9,6 +9,8 @@ type $ = EngineInterface
 
 const TASK = 'kiss-mini/task/'
 const HOST = 'kiss-mini/host'
+// One beat per host session, so a second live host never reads as a gone one.
+const BEAT = 'kiss-mini/beat/'
 const HOST_NAME = 'kiss-mini'
 const TOAST: State[] = ['done', 'ready', 'waiting for you', 'failed']
 const ENDED: State[] = ['done', 'failed']
@@ -370,7 +372,9 @@ async function look($: $, t: Task): Promise<{ state: State; status: string }> {
 
 /** Host: ends a task's worker by denying its every tool call; its last report is ignored. A slot frees. */
 async function stop($: $, t: Task, why: string) {
-  await save($, { ...t, state: 'failed', report: why, stopped: true, finished: await $.clock.now() })
+  const stopped: Task = { ...t, state: 'failed', report: why, stopped: true, finished: await $.clock.now() }
+  await save($, stopped)
+  if (t.return) await $.session.send({ to: { sessionId: t.sender }, text: reportMessage({ ...stopped, log: t.log ?? 'none' }, '') }).catch(() => {})
   for (const x of await tasks($)) if (!x.host) await run($, x.id)
   await refresh($)
 }
@@ -442,8 +446,18 @@ async function tick($: $) {
  * fails (its worker ended with its session) and frees its slot. */
 async function orphans($: $) {
   const me = await $.session.id()
+  const now = await $.clock.now()
+  // A host is live while its own beat (or the shared key's, for the host that wrote it last) is under HOST_GONE old.
+  const beats = new Map<string, number>()
+  for (const k of (await $.store.keys()).filter(k => k.startsWith(BEAT))) {
+    const beat = ((await $.store.get(k)) as { beat: number } | undefined)?.beat ?? 0
+    if (now - beat < HOST_GONE) beats.set(k.slice(BEAT.length), beat)
+    else await $.store.delete(k)
+  }
+  const shared = (await $.store.get(HOST)) as { sessionId: string; beat: number } | undefined
+  if (shared && now - shared.beat < HOST_GONE) beats.set(shared.sessionId, shared.beat)
   for (const t of await tasks($)) {
-    if (!t.host || t.host === me || ENDED.includes(t.state)) continue
+    if (!t.host || t.host === me || beats.has(t.host) || ENDED.includes(t.state)) continue
     // A watch and a ready task go on under the live host (its merged check reaches the ready one).
     if (t.kind === 'watch' || t.state === 'ready') await save($, { ...t, host: me })
     else await stop($, t, 'its host session ended')
@@ -639,6 +653,14 @@ async function deliverOnce($: $, id: string, how: Delivery) {
   }
 }
 
+/** Host: the shared key (for `wake`) and this session's own beat. */
+async function beat($: $) {
+  const me = await $.session.id()
+  const b = { sessionId: me, beat: await $.clock.now() }
+  await $.store.set(HOST, b)
+  await $.store.set(BEAT + me, b)
+}
+
 async function newId($: $) {
   const d = new Date(await $.clock.now()).toISOString()
   const base = `${d.slice(5, 7)}${d.slice(8, 10)}-${d.slice(11, 13)}${d.slice(14, 16)}${d.slice(17, 19)}`
@@ -676,11 +698,11 @@ export const register: Register = on => {
         inputSchema: { type: 'object', properties: { step: { type: 'number' }, total: { type: 'number' } }, required: ['step', 'total'] },
         isDeferred: false,
       })
-      await $.store.set(HOST, { sessionId: await $.session.id(), beat: await $.clock.now() })
+      await beat($)
       await prune($)
       await orphans($)
       $.clock.every(60_000, async () => {
-        await $.store.set(HOST, { sessionId: await $.session.id(), beat: await $.clock.now() })
+        await beat($)
         await prune($)
         await tick($)
       })
@@ -774,7 +796,7 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     if (e.agentId === undefined || !(await isHost($))) return next(e)
     const t = (await tasks($)).find(x => x.agentId === e.agentId)
-    if (t?.stopped) return { deny: `kiss-mini: the owner stopped this task (${t.report}). Make no more tool calls; end now.` }
+    if (t?.stopped) return { deny: `kiss-mini: this task was stopped (${t.report}). Make no more tool calls; end now.` }
     if (t && GITHUB_WRITES.test(String(e.tool))) return { deny: 'kiss-mini: only the owner\'s press in the /kiss-mini pane writes to GitHub. Commit on your branch and report.' }
     // Monitor's shell command would start in the host's folder, past the cd below and the worktree guard.
     if (t && isCode(t) && String(e.tool) === 'Monitor') return { deny: 'kiss-mini: a code worker runs shell commands only with Bash, in its worktree. Use Bash.' }
