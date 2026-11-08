@@ -5,11 +5,12 @@
     python3 -I callcheck.py [-p W] <base>..<head>    a commit range (the controller, at each stop)
     python3 -I callcheck.py --selftest
 
-It compares the definitions of each changed Python or JS/TS file on both sides of the diff (Python by its AST,
-JS/TS by a pattern for `function f(`, `f = (...) =>` and a method `f(...) {`). For each name it prints the
-cgcallers block of that file's definition; for a name no definition holds any more (removed, renamed) it prints
-the word hits cgcallers' search finds in the tracked files of that language. The last line counts the names checked
-and the caller lines to read.
+It compares the definitions of each changed file in Python, JS/TS, Swift, Go, Rust, Java, Kotlin, Ruby, PHP, C# or
+C/C++ on both sides of the diff (Python by its AST, JS/TS by a pattern for `function f(`, `f = (...) =>` and a method
+`f(...) {`, the others by a generic pattern). For each name it prints the cgcallers block of that file's definition;
+for a name no definition holds any more (removed, renamed) it prints the word hits cgcallers' search finds in the
+tracked files of that language. The count line counts the names checked and the caller lines to read. After it, a diff
+with any other code file prints a "language not covered" line that names those files.
 """
 import ast
 import os
@@ -20,15 +21,32 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cgcallers  # noqa: E402  (the word search and the marks are cgcallers' own)
+from tickets import CODE, JS  # noqa: E402  (the one list of code file types)
 
 PY = (".py",)
-JS = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx")
 # shortcut: a JS/TS signature is read from one line; a parameter list over several lines is not compared
 JS_DEF = [re.compile(p, re.M) for p in (
     r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)",
     r"^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function\b[^(]*)?\(([^)]*)\)",
-    r"^[ \t]+(?:(?:public|private|protected|static|async|override|readonly)\s+)*(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)\s*(?::\s*[^{;]+)?\{")]
-NOT_NAMES = {"if", "for", "while", "switch", "catch", "function", "return", "constructor", "with"}
+    r"^[ \t]+(?:(?:public|private|protected|static|async|override|readonly)\s+)*(\w+)\s*(?:<[^>]*>)?\s*\(([^()]*)\)\s*(?::\s*[^{;]+)?\{")]
+NOT_NAMES = {"if", "for", "while", "switch", "catch", "function", "return", "constructor", "with", "foreach", "using", "lock",
+             "synchronized", "fixed"}
+# shortcut: a generic pattern, not a parser: of two overloads only the first is compared, a parenthesis nested two deep ends
+# the match, a function a macro makes is not seen, and a prose line that reads like a declaration can give a false name;
+# use a language's parser when a project's stops miss real names.
+PARAMS = r"\s*\(((?:[^()]|\([^()]*\))*)\)"
+WORDS = r"^[ \t]*(?:[\w@()\"]+[ \t]+)*?"
+KEYWORD_DEF = re.compile(WORDS + r"(?:func|fn|fun|function)[ \t]+(?:\([^)]*\)\s*)?(?:<[^>]*>\s*)?(?:[\w<>?,]+\.)?&?(\w+)\s*(?:<[^(]*>)?" + PARAMS, re.M)
+SWIFT_INIT = re.compile(r"^[ \t]*(?:[\w@()]+[ \t]+)*?(init)[?!]?\s*(?:<[^(]*>)?" + PARAMS, re.M)
+RUBY_DEF = re.compile(r"^[ \t]*def[ \t]+(?:self\.)?(\w+[?!=]?)[ \t]*\(?([^)\n]*)", re.M)
+TYPED_DEF = re.compile(r"^[ \t]*(?!(?:return|new|throw|else|case|await|yield|delete|goto|assert|do|in|using|typedef|co_return|co_await|co_yield)\b)"
+                       r"(?:[\w\[@][\w:<>,\[\]*&.?~]*[ \t*&]+)+(?:\w+::)*(~?\w+)" + PARAMS
+                       + r"\s*(?:const\b\s*|noexcept\b\s*|override\b\s*|final\b\s*)*(?:throws\s+[\w., ]+)?\s*(?:\{|=>|:|;|$)", re.M)
+C_FAMILY = (".c", ".h", ".cc", ".cpp")
+OTHER_DEF = {".swift": (KEYWORD_DEF, SWIFT_INIT), ".go": (KEYWORD_DEF,), ".rs": (KEYWORD_DEF,), ".kt": (KEYWORD_DEF,),
+             ".php": (KEYWORD_DEF,), ".rb": (RUBY_DEF,),
+             **{e: (TYPED_DEF, JS_DEF[2]) for e in (".java", ".cs") + C_FAMILY}}
+COMPARED = PY + JS + tuple(OTHER_DEF)
 
 
 def git(W, *args, missing_ok=False):
@@ -57,7 +75,7 @@ def defs(src, path):
                     walk(n, prefix + n.name + ".")
         walk(tree, "")
         return out
-    for rx in JS_DEF:
+    for rx in OTHER_DEF.get(os.path.splitext(path)[1], JS_DEF):
         for m in rx.finditer(src):
             if m.group(1) not in NOT_NAMES:
                 out.setdefault(m.group(1), "(%s)" % " ".join(m.group(2).split()))
@@ -65,16 +83,19 @@ def defs(src, path):
 
 
 def changes(W, spec):
-    """[(kind, name, file, note)] for each removed, renamed or re-signed function in the diff."""
+    """([(kind, name, file, note)] for each removed, renamed or re-signed function in the diff, [the code files of the
+    diff in a language not compared])."""
     cached = spec == "--cached"
     base, head = ("HEAD", "") if cached else spec.split("..", 1)
     diff = git(W, "diff", "--name-status", "-M", *(["--cached"] if cached else [base, head]))
-    out = []
+    out, other = [], []
     for row in diff.splitlines():
         parts = row.split("\t")
         status, old = parts[0], parts[1]
         new = parts[-1]
-        if not old.endswith(PY + JS) or status.startswith("A"):
+        if not old.endswith(COMPARED) and os.path.splitext(new)[1] in CODE and not new.endswith(COMPARED):
+            other.append(new)
+        if not old.endswith(COMPARED) or status.startswith("A"):
             continue
         before = defs(git(W, "show", "%s:%s" % (base, old), missing_ok=True), old)
         after = {} if status.startswith("D") else defs(git(W, "show", "%s:%s" % (head, new), missing_ok=True), new)
@@ -86,7 +107,7 @@ def changes(W, spec):
                 continue
             twin = [n for n, s in added.items() if s == sig and n.rsplit(".", 1)[0:-1] == name.rsplit(".", 1)[0:-1]]
             out.append(("renamed", name, old, "to " + twin[0]) if len(twin) == 1 else ("removed", name, old, ""))
-    return out
+    return out, other
 
 
 def run_cgcallers(W, name, path, script=os.path.join(HERE, "cgcallers.py")):
@@ -97,8 +118,9 @@ def run_cgcallers(W, name, path, script=os.path.join(HERE, "cgcallers.py")):
 def word_hits(W, name, path):
     """The code lines that still name a function no definition holds, by cgcallers' own rules: the word search in
     its file and the files that import its module (any file for a method), with no namesake's def line."""
-    word, ext = name.rsplit(".", 1)[-1], (PY if path.endswith(PY) else JS)
-    lang = "python" if ext == PY else "typescript"
+    suffix = os.path.splitext(path)[1]
+    word, ext = name.rsplit(".", 1)[-1], next((g for g in (PY, JS, C_FAMILY) if suffix in g), (suffix,))
+    lang = "python" if ext == PY else "typescript" if ext == JS else suffix
     mod, pkg = cgcallers.module_of(path), os.path.basename(os.path.dirname(path))
     wanted = {"mod:" + mod, "name:" + mod, "imp:" + pkg, "from:%s:%s" % (pkg, word)}
     method = "." in name
@@ -109,18 +131,18 @@ def word_hits(W, name, path):
                 src = cgcallers.read_file(os.path.join(W, f))
             except OSError:
                 continue
-            if f != path and not method and not wanted & cgcallers.imported(src, lang):
+            if f != path and not method and ext in (PY, JS) and not wanted & cgcallers.imported(src, lang):
                 continue
             body = src.splitlines()
             for ln in cgcallers.word_lines(src, lang, word):
                 line = body[ln - 1].strip()
-                if not re.search(r"\b(def|function)\s*\*?\s*%s\b" % re.escape(word), line):
+                if not re.search(r"\b(def|function|func|fun|fn)\s*\*?\s*%s\b" % re.escape(word), line):
                     rows.append("[grep only] %s:%d  %s" % (f, ln, line[:110]))
     return rows
 
 
 def check(W, spec, callers=run_cgcallers):
-    found = changes(W, spec)
+    found, other = changes(W, spec)
     lines = []
     for kind, name, path, note in found:
         lines.append("\n== %s: %s (%s)%s" % (kind, name, path, " " + note if note else ""))
@@ -130,6 +152,8 @@ def check(W, spec, callers=run_cgcallers):
         lines.append(text.rstrip())
     to_read = sum(l.startswith("[") for t in lines for l in t.splitlines())
     lines.append("\ncallcheck: %d names checked (removed, renamed or re-signed), %d caller lines to read" % (len(found), to_read))
+    if other:
+        lines.append("callcheck: language not covered, not compared: %s; run cgcallers by hand on what they remove or re-sign" % ", ".join(other))
     return "\n".join(lines)
 
 
@@ -195,8 +219,88 @@ def selftest():
             fh.write("import sys\nprint('partial')\nsys.exit('Traceback: boom')\n")
         out = run_cgcallers(W, "x", "a.py", script=boom)                             # R2: a crashed cgcallers is a line to read
         assert "partial" in out and "[cgcallers failed] exit 1: Traceback: boom" in out, out
+    selftest_languages()
     print("callcheck selftest ok")
     return 0
+
+
+def selftest_languages():
+    """Other languages, the not-covered line and the JS method read, on a scratch repo with a fake cgcallers."""
+    import tempfile
+    # every keyword form a body holds: a name from one of them shows up as a removed name
+    body = ("    if (a) {\n    for (a) {\n    switch (a) {\n    catch (a) {\n    while (a) {\n    return other(a);\n"
+            "    return other(a)\n    else if (a) {\n    } else if (a) {\n    } catch (a) {\n    throw new Oops(a);\n"
+            "    new Thing(a) {\n    other(a);\n    other(a)\n    let x = other(a);\n    // int notReal(int a) {\n")
+    gone = {"g.go": ("func goneGo(a int) int {\n%s}\nfunc (s *Srv) goneMethod(b int) {\n}\n" % body, "goneGo goneMethod"),
+            "r.rs": ("pub(crate) async fn gone_rust<T>(a: T) -> i32 {\n%s}\n" % body, "gone_rust"),
+            "J.java": ("class J {\n  public static int goneJava(int a) throws Oops {\n%s  }\n}\n" % body, "goneJava"),
+            "k.kt": ("suspend fun <T> String.goneKotlin(a: T): Int {\n%s}\n" % body, "goneKotlin"),
+            "o.rb": ("class O\n  def self.gone_ruby?(a, b)\n    if (a)\n    end\n    return other(a)\n    while (a)\n    end\n  end\n"
+                     "  def gone_bare\n  end\nend\n", "gone_ruby? gone_bare"),
+            "p.php": ("<?php\nclass P {\n  public static function gonePhp($a) {\n%s  }\n}\n" % body, "gonePhp"),
+            "c.cs": ("class C {\n  public async Task<int> GoneSharp(int a)\n  {\n%s  }\n}\n" % body, "GoneSharp"),
+            "v.cpp": ("std::vector<int> Klass::gone_cpp(int a) const {\n%s}\nstatic int gone_c(void)\n{\n}\n" % body, "gone_cpp gone_c")}
+    swift = {"s.swift": ("class S {\n  init(name: String) {\n    self.init(a: 1)\n  }\n  func oldHelper(a: Int) -> Int {\n%s  }\n"
+                         "  public func goodbye(to who: String, cb: () -> Void) -> String { who }\n"
+                         "  private static func same<T>(\n    a: T\n  ) {\n  }\n}\n" % body,
+                         "class S {\n  init(name: String, age: Int) {\n  }\n  public func goodbye(to who: String, cb: (Int) -> Void, loud: Bool) -> String { who }\n"
+                         "  private static func same<T>(\n    a: T\n  ) {\n  }\n}\n")}
+    js = {"w.js": ("describe('a', function () {\n  describe('b', function () {\n  })\n})\nclass W {\n  realMethod(x) {\n    return x\n  }\n}\n",
+                   "class W {\n}\n")}
+
+    def names(before, after):
+        """(the names, the output) of a commit that turns `before` into `after`, each {file: text}; a None text deletes."""
+        with tempfile.TemporaryDirectory() as W:
+            g = lambda *a: subprocess.run(["git", "-C", W] + list(a), check=True, capture_output=True)
+            g("init", "-q"), g("config", "user.name", "t"), g("config", "user.email", "t@example.com")
+            def put(files):
+                for f, body_ in files.items():
+                    if body_ is None:
+                        os.remove(os.path.join(W, f))
+                    else:
+                        with open(os.path.join(W, f), "w") as fh:
+                            fh.write(body_)
+                g("add", "-A")
+                g("commit", "-qm", "x", "--allow-empty")
+            put(before)
+            put(after)
+            asked = []
+            fake = lambda W_, name, path: asked.append(name) or "definition  %s:1  function %s" % (path, name)
+            out = check(W, "HEAD~1..HEAD", fake)
+            return asked, out
+
+    asked, out = names({f: s[0] for f, s in swift.items()}, {f: s[1] for f, s in swift.items()})
+    assert sorted(asked) == ["goodbye", "init", "oldHelper"], (asked, out)
+    assert "== removed: oldHelper (s.swift)" in out and "== signature: init (s.swift) (name: String) -> (name: String, age: Int)" in out, out
+    assert "== signature: goodbye (s.swift)" in out and out.splitlines()[-1].startswith("callcheck: 3 names checked"), out
+    for f, (src, want) in gone.items():
+        asked, out = names({f: src}, {f: "\n"})
+        assert sorted(asked) == sorted(want.split()), (f, asked, out)
+    asked, out = names({f: s[0] for f, s in js.items()}, {f: s[1] for f, s in js.items()})
+    assert asked == ["realMethod"], (asked, out)                           # R12: describe('a', function () { is no method
+    sw = {f: s[0] for f, s in swift.items()}
+    words = "callcheck: language not covered, not compared: %s; run cgcallers by hand on what they remove or re-sign"
+    asked, out = names(dict(sw, **{"run.sh": "a\n", "a.vue": "a\n", "n.md": "a\n", "d.xyz": "a\n", "z.py": "x = 1\n"}),
+                       {"s.swift": swift["s.swift"][1], "run.sh": "b\n", "n.md": "b\n", "d.xyz": "b\n", "z.py": "x = 2\n", "a.vue": None})
+    lines = out.splitlines()
+    assert lines[-2].startswith("callcheck: 3 names checked") and lines[-1] == words % "a.vue, run.sh", out
+    asked, out = names({"n.md": "a\n"}, {"n.md": "b\n"})
+    assert asked == [] and out == "\ncallcheck: 0 names checked (removed, renamed or re-signed), 0 caller lines to read", out
+    asked, out = names({"z.py": "def f():\n    return 1\n"}, {"z.py": "x = 1\n"})
+    assert "not covered" not in out and asked == ["f"], out
+    asked, out = names({"new.sh": "a\n"}, {"new2.sh": "a\n"})               # a new code file: nothing compared, so named
+    assert out.splitlines()[-1] == words % "new2.sh", out
+    # the word search for a removed name covers the file type, and a namesake's def is no caller
+    with tempfile.TemporaryDirectory() as W:
+        g = lambda *a: subprocess.run(["git", "-C", W] + list(a), check=True, capture_output=True)
+        g("init", "-q")
+        for f, text in (("a.swift", "func other() {\n  oldHelper(1)\n}\n"), ("b.swift", "func oldHelper(a: Int) {\n}\n"),
+                        ("c.go", "oldHelper()\n"), ("h.h", "int gone_c(int a);\n"), ("i.cpp", "gone_c(1);\n")):
+            with open(os.path.join(W, f), "w") as fh:
+                fh.write(text)
+        g("add", "-A")
+        assert word_hits(W, "oldHelper", "gone.swift") == ["[grep only] a.swift:2  oldHelper(1)"], "only Swift files; no def line"
+        assert "[grep only] i.cpp:1  gone_c(1);" in word_hits(W, "gone_c", "v.c"), "a C name: the C family's files"
 
 
 def main(argv):

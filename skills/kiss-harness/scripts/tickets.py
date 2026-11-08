@@ -26,8 +26,9 @@ import briefs  # noqa: E402  (the index lookup is briefs.py's own)
 
 ID = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
 OPTIONAL = {"files": list, "symbols": list, "seeds": list, "depends_on": list, "risky": bool}
+JS = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx")
 # shortcut: a fixed list of code file types (check runs without W's index); add a type when a project needs it
-CODE = {".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".svelte", ".vue", ".go", ".rs", ".java", ".kt", ".swift",
+CODE = {".py", *JS, ".svelte", ".vue", ".go", ".rs", ".java", ".kt", ".swift",
         ".rb", ".php", ".c", ".h", ".cc", ".cpp", ".cs", ".sh"}
 
 
@@ -233,6 +234,10 @@ def selftest():
                 assert out.getvalue() == want + "\n", (body, argv, out.getvalue())
         os.remove(os.path.join(run, "run.json"))                         # no run.json: no hold and no failure
         assert one_at_a_time(run) is False
+    here = os.path.dirname(os.path.abspath(__file__))
+    tsx = '".ts' + 'x"'                                                  # written so this search does not find itself
+    found = [n for n in sorted(os.listdir(here)) if n.endswith(".py") and tsx in open(os.path.join(here, n)).read()]
+    assert found == ["tickets.py"] and set(JS) < CODE, found             # one list of JS/TS file types (R18)
     with tempfile.TemporaryDirectory() as root:                          # the repo that holds R
         os.makedirs(os.path.join(root, "app"))
         open(os.path.join(root, "app", "x.py"), "w").close()
