@@ -11,9 +11,11 @@ You check the setup and report it. KISS installs only on the owner's request, fr
 owner sees each command. `KD` is this skill's folder (the folder of this file).
 
 **Feedback on or off.** When the owner asks `kiss-doctor feedback on` (or `feedback off`), run only
-`python3 -I "$KD/scripts/doctor.py" feedback on` (or `off`), report the lines it prints (the file it changed, its
-backup, that a new session is needed, the export line for the other agents), and stop. It sets only
-`env.KISS_FEEDBACK` in Claude Code's user settings (`"1"` or `"0"`) and edits no shell profile.
+`python3 -I "$KD/scripts/doctor.py" feedback on <agent>` (or `off <agent>`), with your own agent's name as `<agent>`
+(`claude`, `codex`, `gemini` or `antigravity`), and report the lines it prints: what changed or what the owner must add,
+and that a new session is needed. Then end the run; the block comes only when the mode was on when this run began. Only
+`claude` writes a file: `env.KISS_FEEDBACK` in Claude Code's user settings (`"1"` or `"0"`), after a backup. No form edits
+a shell profile or Codex's `config.toml`.
 
 **Setup.** When the owner asks `kiss-doctor setup`:
 

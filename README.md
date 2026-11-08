@@ -265,9 +265,12 @@ Turn it on with the environment variable `KISS_FEEDBACK=1`, in one of these plac
 - your shell profile, for every agent: `export KISS_FEEDBACK=1`;
 - a project's `.claude/settings.local.json`, for that project only: `"env": { "KISS_FEEDBACK": "1" }`.
 
-`kiss-doctor` reports the mode and where it is set in every run. `kiss-doctor feedback on` and
-`kiss-doctor feedback off` set it in Claude Code's user settings (`"1"` or `"0"`, so off wins over a shell
-profile), with a timestamped backup beside the file at each switch; for the other agents it prints the export line for your shell profile.
+`kiss-doctor` reports the mode and where it is set in every run. Ask your agent for `kiss-doctor feedback on` or
+`kiss-doctor feedback off`; the skill runs `doctor.py feedback on|off <claude|codex|gemini|antigravity>` with its own
+agent's name. `claude` sets the mode in Claude Code's user settings (`"1"` or `"0"`, so off wins over a shell profile),
+with a timestamped backup beside the file at each switch. The others change no file: `codex` prints the
+`shell_environment_policy` lines for `config.toml`, and `gemini` and `antigravity` print the export line for your shell
+profile. Start a new session after it. A run that turns the mode on gives no block, because the mode was off at its start.
 
 Unset it, or set any other value, to turn it off. Each skill's last line runs `rules/feedback.py` when the skill
 loads (a Claude Code inline command): with the mode off it prints nothing, so the skill has no feedback step and the

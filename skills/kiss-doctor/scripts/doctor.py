@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Check this device for a KISS run (kiss-doctor/SKILL.md). Reads only, except `feedback on|off`, which sets
-env.KISS_FEEDBACK in Claude Code's user settings.
+"""Check this device for a KISS run (kiss-doctor/SKILL.md). Reads only, except `feedback on|off claude`, which
+sets env.KISS_FEEDBACK in Claude Code's user settings.
 
   python3 -I doctor.py [AGENT ...]    AGENT: claude, codex, gemini, antigravity (default: each one whose CLI is on PATH)
-  python3 -I doctor.py feedback on|off   set env.KISS_FEEDBACK in Claude Code's user settings ("1" or "0"), with a backup
+  python3 -I doctor.py feedback on|off <claude|codex|gemini|antigravity>   claude: set env.KISS_FEEDBACK in Claude Code's
+                                         user settings ("1" or "0"), with a backup; the others: change no file, and
+                                         print what to add by hand
   python3 -I doctor.py setup [AGENT ...]   the numbered plan of what is missing, from the install table (installs
                                          nothing); AGENT: only those agents on PATH (default: each one on PATH)
   python3 -I doctor.py setup [AGENT ...] --apply all|none|1,3 --plan <id>   run those items of the plan with that id,
@@ -235,21 +237,12 @@ def replace_section(path, rule):
     if not span or span[0] is None:
         why = "none of the rule's lead-ins" if not span else "no heading above the rule"
         return 1, f"{path}: {why}; nothing changed"
-    old, tmp = back_up(path), path + ".kiss-new"
+    old = back_up(path)
     rest = text[span[1]:]
     gap = "\n" * max(0, 2 - (len(new) - len(new.rstrip("\n")))) if rest else ""     # one blank line before what follows
     try:
-        with open(tmp, "w", encoding="utf-8", newline="") as f:
-            f.write(text[:span[0]] + new + gap + rest)
-            f.flush()
-            os.fsync(f.fileno())                        # on disk before the rename: a power loss leaves a whole file
-        shutil.copymode(path, tmp)
-        os.replace(tmp, path)
+        write_whole(path, text[:span[0]] + new + gap + rest)
     except OSError as e:
-        try:
-            os.remove(tmp)
-        except OSError:                                 # its own failure must not hide the backup's path
-            pass
         return 1, f"{e}; {path} is unchanged; its backup: {old}"
     return 0, f"backup: {old}"
 
@@ -397,8 +390,17 @@ def set_feedback(settings, on):
         data["env"]["KISS_FEEDBACK"] = "1" if on else "0"
     backup = edit_settings(settings, change)
     return ["feedback mode %s in %s%s" % ("on" if on else "off", settings, " (backup: %s)" % backup if backup else ""),
-            "Claude Code: start a new session for it to apply.",
-            "Codex, Gemini CLI, Antigravity: put this line in your shell profile yourself: export KISS_FEEDBACK=%s" % ("1" if on else "0")]
+            "Claude Code: start a new session for it to apply."]
+
+
+def feedback_by_hand(agent, on):
+    """The lines for an agent whose setting doctor does not write. Codex: its file is TOML, and a second table breaks it."""
+    value = "1" if on else "0"
+    if agent == "codex":
+        return ["Codex: add this to ~/.codex/config.toml yourself, then start a new session (if the table exists, add only "
+                "KISS_FEEDBACK to its set line):", "[shell_environment_policy]", 'set = { KISS_FEEDBACK = "%s" }' % value]
+    return ["%s: put this line in your shell profile yourself, then start a new session: export KISS_FEEDBACK=%s"
+            % ({"gemini": "Gemini CLI", "antigravity": "Antigravity"}[agent], value)]
 
 
 def back_up(path):
@@ -428,10 +430,29 @@ def edit_settings(settings, change):
         backup = None
         os.makedirs(os.path.dirname(settings), exist_ok=True)
     change(data)
-    with open(settings, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    write_whole(settings, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     return backup
+
+
+def write_whole(path, text):
+    """`text` into a temp file beside the file, then a rename, so a failure or an interrupt leaves the old file whole. A
+    link stays a link: its target gets the change."""
+    path = os.path.realpath(path)
+    tmp = path + ".kiss-new"
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())                        # on disk before the rename: a power loss leaves a whole file
+        if os.path.exists(path):
+            shutil.copymode(path, tmp)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:                                 # its own failure must not hide the first
+            pass
+        raise
 
 
 # The install table: the one home of every command `setup` shows (D6). A command is one string; {name} fills
@@ -928,7 +949,7 @@ def selftest():
             assert json.load(open(os.path.join(t, "ccd", "settings.json"))) == {"env": {"KISS_FEEDBACK": "1"}}
         finally:
             os.environ.pop("CLAUDE_CONFIG_DIR") if old_cfg is None else os.environ.__setitem__("CLAUDE_CONFIG_DIR", old_cfg)
-        assert "new session" in " ".join(lines) and "export KISS_FEEDBACK=0" in " ".join(lines)
+        assert "new session" in " ".join(lines) and "export" not in " ".join(lines)
         put("fhome/cfg/settings.json", "{ not json")
         try:
             set_feedback(st, True)
@@ -945,6 +966,59 @@ def selftest():
         assert feedback_mode(os.path.join(t, "none.json"), home, env={"KISS_FEEDBACK": "0"})[1].startswith("this session's environment only")
         put("proj/.claude/settings.local.json", json.dumps({"env": {"KISS_FEEDBACK": "0"}}))
         assert feedback_mode(os.path.join(t, "none.json"), home, env={"KISS_FEEDBACK": "0"}, project=os.path.join(t, "proj")) == (False, "the project's .claude/settings.local.json env")
+        # the feedback command as a user runs it: a scratch config, stdout, stderr and the exit code
+        cfg = os.path.join(t, "scratch cfg")
+        os.makedirs(cfg)
+
+        def switch(*args):
+            p = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "feedback", *args], capture_output=True, text=True,
+                               env=dict(os.environ, CLAUDE_CONFIG_DIR=cfg))
+            return p.returncode, p.stdout, p.stderr
+        last = "This run gives no block when the mode was off at its start.\n"
+        codex = ("Codex: add this to ~/.codex/config.toml yourself, then start a new session (if the table exists, add only "
+                 'KISS_FEEDBACK to its set line):\n[shell_environment_policy]\nset = { KISS_FEEDBACK = "%s" }\n' + last)
+        shell = "%s: put this line in your shell profile yourself, then start a new session: export KISS_FEEDBACK=%s\n" + last
+        for args, want in ((("on", "codex"), codex % "1"), (("off", "codex"), codex % "0"),
+                           (("on", "gemini"), shell % ("Gemini CLI", "1")), (("off", "gemini"), shell % ("Gemini CLI", "0")),
+                           (("on", "antigravity"), shell % ("Antigravity", "1")), (("off", "antigravity"), shell % ("Antigravity", "0"))):
+            assert switch(*args) == (0, want, ""), (args, switch(*args))
+            assert os.listdir(cfg) == [], (args, os.listdir(cfg))
+        usage = "usage: doctor.py feedback on|off <claude|codex|gemini|antigravity>\n"
+        for args in ((), ("on",), ("off",), ("on", "nosuch"), ("sideways", "claude"), ("on", "claude", "extra"), ("claude", "on")):
+            assert switch(*args) == (1, "", usage), (args, switch(*args))
+            assert os.listdir(cfg) == [], (args, os.listdir(cfg))
+        st = os.path.join(cfg, "settings.json")
+        code, said, err = switch("on", "claude")                                     # no file yet: created, no backup
+        assert (code, err) == (0, "") and json.load(open(st)) == {"env": {"KISS_FEEDBACK": "1"}} and os.listdir(cfg) == ["settings.json"], (code, err)
+        assert said == "feedback mode on in %s\nClaude Code: start a new session for it to apply.\n" % st + last, said
+        with open(st, "w") as f:
+            json.dump({"model": "x"}, f)
+        code, said, err = switch("off", "claude")
+        assert code == 0 and json.load(open(st)) == {"model": "x", "env": {"KISS_FEEDBACK": "0"}}, (code, err)
+        assert len(glob.glob(st + ".kiss-backup-*")) == 1 and "(backup: %s" % st in said, said
+        for other in ("Codex", "Gemini", "Antigravity", "export"):
+            assert other not in said, said
+        kept = open(st, "rb").read()
+        os.mkdir(st + ".kiss-new")                                                   # a failure after the first write: the temp file's path
+        code, said, err = switch("on", "claude")
+        assert code == 1 and said == "" and st in err and len(err.splitlines()) == 1 and "Traceback" not in err, (code, said, err)
+        assert open(st, "rb").read() == kept, "a failed write leaves the file as it was"
+        os.rmdir(st + ".kiss-new")
+        for bad in (b"\xff\xfe{", b"[1]", b"{ not json"):
+            with open(st, "wb") as f:
+                f.write(bad)
+            code, said, err = switch("on", "claude")
+            assert code == 1 and said == "" and st in err and len(err.splitlines()) == 1 and "Traceback" not in err, (bad, code, said, err)
+            assert open(st, "rb").read() == bad, bad
+        os.remove(st)
+        os.mkdir(st)                                                                 # a folder at the settings path
+        code, said, err = switch("on", "claude")
+        assert code == 1 and said == "" and st in err and len(err.splitlines()) == 1 and "Traceback" not in err and os.path.isdir(st), (code, said, err)
+        os.rmdir(st)
+        cfg = os.path.join(cfg, "a file")                                            # the config folder's path is a file
+        open(cfg, "w").close()
+        code, said, err = switch("on", "claude")
+        assert code == 1 and "a file" in err and len(err.splitlines()) == 1 and "Traceback" not in err, (code, said, err)
     cfg = '[plugins."kiss@kiss"]\nenabled = true\n\n[plugins."old@m"]\nenabled = false\n[tui]\nenabled = true\n'
     assert codex_enabled(cfg) == ["kiss@kiss"], codex_enabled(cfg)
     # setup: the plan on fake systems; each expected command is the README's or the upstream's own
@@ -1259,9 +1333,14 @@ def main(argv):
     if argv[1:] == ["--selftest"]:
         return selftest()
     if argv[1:2] == ["feedback"]:
-        if argv[2:] not in (["on"], ["off"]):
-            sys.exit("usage: doctor.py feedback on|off")
-        print("\n".join(set_feedback(settings_path(), argv[2] == "on")))
+        if len(argv) != 4 or argv[2] not in ("on", "off") or argv[3] not in CLI:
+            sys.exit("usage: doctor.py feedback on|off <%s>" % "|".join(CLI))
+        on, settings = argv[2] == "on", settings_path()
+        try:
+            lines = set_feedback(settings, on) if argv[3] == "claude" else feedback_by_hand(argv[3], on)
+        except OSError as e:
+            sys.exit("%s: cannot write it (%s); left as it was" % (settings, " ".join(str(e).split())))
+        print("\n".join(lines + ["This run gives no block when the mode was off at its start."]))
         return
     if argv[1:2] == ["setup"]:
         system = detect()
