@@ -318,6 +318,8 @@ def selftest():
     assert re.search(r"Never touch the main checkout /m, a live system \(except the exact read-only commands a ruling in \S+/decisions\.md names\), ssh or a git remote\.", rv), "D7"
     assert "with no ruling, report that line in cannot_check and do not run it" in rv and "names its `D<n>`" in rv, "a live read, with a ruling and with none"
     assert rv.count("Read and run the code at def from your own clone under /s, because the implementer may still build in W; CodeGraph on W may then show newer code, so check a line against your clone.") == 1, rv
+    assert "so check a line against your clone. Where the start command names W, use your clone in its place." in rv, rv
+    assert "Read and run the code at b2 from a fresh clone under /s, because a clone at an older head reports a fixed item as not fixed." in loop["recheck"], loop["recheck"]
     assert 'git clone -q "/w" "/s/<name>"' in rv and 'git -C "/s/<name>" checkout -q --detach def' in rv, "the reviewer's copy is a clone (D24)"
     for name in sorted(os.listdir(T)) + ["../SKILL.md"]:
         assert "archive" not in open(os.path.join(T, name)).read(), name       # no template or step tells a reviewer to use git archive
