@@ -43,7 +43,7 @@ a shell profile or Codex's `config.toml`.
 
 1. **Run the checks:** `python3 -I "$KD/scripts/doctor.py"`. It checks each agent whose CLI is on PATH; name
    agents to check fewer (`claude`, `codex`, `gemini`, `antigravity`). Per agent: the CodeGraph rule (KISS's
-   `rules/codegraph.md`, found by its bold lead-ins) in the global instructions file; for Claude Code also in
+   `rules/codegraph.md`; a file holds it with more than half of its bold lead-ins) in the global instructions file; for Claude Code also in
    `rules/**/*.md` under its config folder, with `@` imports followed for 4 hops. A copy with every lead-in but other
    words is a WARN. Then each skill in
    the skill table of each KISS skill that has one and KISS's own (installed, enabled, once, callable by the model), and the tools.
