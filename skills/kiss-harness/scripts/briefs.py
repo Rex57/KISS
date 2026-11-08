@@ -22,7 +22,9 @@ def exts(paths):
 
 
 def run(*a, timeout=120):
-    return subprocess.run(a, capture_output=True, text=True, timeout=timeout)
+    p = subprocess.run(a, capture_output=True, text=True, timeout=timeout)
+    p.stdout = re.sub(r"\x1b\[[0-9;]*m", "", p.stdout)    # FORCE_COLOR or CI colours CodeGraph's output
+    return p
 
 
 def file_types(W, run=run):
@@ -104,7 +106,7 @@ def seed(W, t, indexed, run=run):
 
 def main(R, W, branch, ids, run=run):
     tickets = {t["id"]: t for t in json.load(open(os.path.join(R, "tickets.json")))}
-    status = re.sub(r"\x1b\[[0-9;]*m", "", run("codegraph", "status", W).stdout)      # FORCE_COLOR or CI colours it
+    status = run("codegraph", "status", W).stdout
     assert f"Project: {W}" in status, f"wrong or missing index for {W}:\n{status}"
     stale = sync(W, run)
     indexed, unindexed = file_types(W, run)
@@ -195,9 +197,10 @@ def selftest():
         got = [list(a[4:-1]) for a in calls if a[1] == "explore"]
         assert got == [flag] * n, (n, got)
     colour = lambda path: f"\x1b[1m\nCodeGraph Status\n\x1b[0m\n\x1b[36mProject:\x1b[0m {path}\n"     # D27: FORCE_COLOR or CI set
+    assert run(sys.executable, "-c", "print(%r)" % "\x1b[2mfunction\x1b[0m \x1b[36mcaller\x1b[0m").stdout == "function caller\n", "the seed holds no colour"
     with tempfile.TemporaryDirectory() as R:
         json.dump([], open(os.path.join(R, "tickets.json"), "w"))
-        painted = lambda path: lambda *a, timeout=120: (subprocess.CompletedProcess(a, 0, colour(path), "") if a[1] == "status"
+        painted = lambda path: lambda *a, timeout=120: (run(sys.executable, "-c", "print(%r)" % colour(path)) if a[1] == "status"
                                                         else fake(*a, timeout=timeout))
         main(R, W, "br", [], run=painted(W))                  # W's own coloured status passes the index check
         try:
