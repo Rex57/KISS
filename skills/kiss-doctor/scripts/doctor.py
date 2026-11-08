@@ -25,7 +25,7 @@ import glob, hashlib, json, os, platform, re, shlex, shutil, subprocess, sys, ti
 KISS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 HOME = os.path.expanduser("~")
 CLI = {"claude": "claude", "codex": "codex", "gemini": "gemini", "antigravity": "agy"}
-FILE_BREAK = "\n\f\n"                                   # between two files of a joined text: check_rule reads each on its own
+FILE_BREAK = "\n\f\n"                                   # between two files of Claude Code's joined text: check_rule reads each on its own
 
 
 def read(path):
@@ -124,7 +124,7 @@ def agent_setup(agent):
     roots = [("~/.gemini/config/skills", os.path.join(gemini, "config", "skills")),
              ("~/.gemini/antigravity-cli/skills", os.path.join(gemini, "antigravity-cli", "skills"))] + shared
     note = "; plugin folders are not known to this script: check your skill list"
-    return FILE_BREAK.join(with_imports(f, 0) for f in files), files, roots, note
+    return "\n".join(with_imports(f, 0) for f in files), files, roots, note
 
 
 def unfenced(text):
@@ -1671,6 +1671,7 @@ def selftest():
                         joined, files, _, _ = agent_setup(agent)
                         said = check_rule(agent, joined, files, markers(), real)[0]
                         assert said[0] == ("FAIL" if want == "append" else "WARN"), (agent, text, said)
+                        assert FILE_BREAK not in joined, (agent, "only Claude Code's read splits on it")
             finally:
                 globals()["HOME"] = home_was
             # another agent's plan names no path under the Claude config folder
