@@ -323,11 +323,19 @@ async function refresh($: $) {
   }
 }
 
-/** Host: the ledger forgets ended tasks after 7 days; one that still holds a worktree or a branch waits for its Discard. */
+/** Removes an ended task's folder; false when it stays and the entry must wait. A path not of the exact form removes nothing. */
+async function removeFolder($: $, t: Task) {
+  const dir = t.log === undefined ? await folder($, t.id) : t.log.replace(/\/[^/]*$/, '')
+  const parts = dir.split('/')
+  if (!dir.startsWith('/') || parts.includes('..') || parts.slice(-2).join('/') !== `kiss-mini/${t.id}`) return true
+  return (await $.process.run(['rm', '-rf', '--', dir]).catch(() => undefined))?.exitCode === 0
+}
+
+/** Host: the ledger forgets ended tasks after 7 days, each with its folder; one that still holds a worktree or a branch waits for its Discard. */
 async function prune($: $) {
   const now = await $.clock.now()
   for (const t of await tasks($)) {
-    if (ENDED.includes(t.state) && !holds(t) && (t.finished ?? t.started) < now - KEEP_MS) await $.store.delete(TASK + t.id)
+    if (ENDED.includes(t.state) && !holds(t) && (t.finished ?? t.started) < now - KEEP_MS && await removeFolder($, t)) await $.store.delete(TASK + t.id)
   }
 }
 

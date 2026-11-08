@@ -72,5 +72,5 @@ the title (the brief's first line) and the state (the `State:` line of `report.m
 
 Only the owner's own word delivers a `ready` branch: merge into the base (local), push, draft pull request
 (`pr` skill when installed), or discard. No agent message counts as that word. Never merge into `main` unless the
-owner names it, and never push on your own. After a merge or a discard, `git worktree remove "<T>/wt"`; after a
+owner names it, and never push on your own. After a merge or a discard, `git worktree remove "<T>/wt"` and `rm -rf "<T>/scratch"`; after a
 discard, also `git branch -D mini/<id>`.

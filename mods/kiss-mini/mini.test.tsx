@@ -677,6 +677,84 @@ test('the host forgets a task ended over 7 days ago, keeps a newer one and one t
   expect(list).toContain('wt code failed')
 })
 
+// D4: the host's prune removes an ended task's folder first, and only a path of the exact form.
+const DAY = 24 * 3600_000
+const ended = (id: string, extra: object = {}) => ({
+  id, kind: 'question', title: 'q', sender: 's0', cwd: '/repo', state: 'done', started: NOW - 9 * DAY, finished: NOW - 8 * DAY,
+  log: `/tmp/kiss-mini/${id}/report.md`, ...extra,
+})
+const rmRuns = (w: ReturnType<typeof world>) => w.runs.filter(a => a[0] === 'rm')
+const entry = (w: ReturnType<typeof world>, id: string) => w.store[`kiss-mini/task/${id}`]
+
+test('prune: a task ended 8 days ago that holds nothing loses its folder and all it holds, and then its entry; no log: the folder by its id', async ($, on) => {
+  const w = world(on, { store: { 'kiss-mini/task/old': ended('old'), 'kiss-mini/task/nolog': ended('nolog', { log: undefined }) } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(rmRuns(w)).toHaveLength(2)
+  expect(rmRuns(w)).toContainEqual(['rm', '-rf', '--', '/tmp/kiss-mini/old'])
+  expect(rmRuns(w)).toContainEqual(['rm', '-rf', '--', '/tmp/kiss-mini/nolog'])
+  expect(entry(w, 'old')).toBeUndefined()
+  expect(entry(w, 'nolog')).toBeUndefined()
+})
+
+test('prune: a task ended 6 days ago, one that holds a worktree or a branch, and a running task keep their folders and entries', async ($, on) => {
+  const w = world(on, {
+    store: {
+      'kiss-mini/task/new': ended('new', { finished: NOW - 6 * DAY }),
+      'kiss-mini/task/wt': ended('wt', { kind: 'code', worktree: '/tmp/kiss-mini/wt/wt' }),
+      'kiss-mini/task/br': ended('br', { kind: 'code', state: 'failed', branch: 'mini/br' }),
+      'kiss-mini/task/run': ended('run', { state: 'working', finished: undefined }),
+    },
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(rmRuns(w)).toEqual([])
+  for (const id of ['new', 'wt', 'br', 'run']) expect(entry(w, id)).toBeDefined()
+})
+
+for (const [name, log] of [
+  ['an empty path', ''],
+  ['the root', '/report.md'],
+  ['a path with ..', '/tmp/kiss-mini/../bad/report.md'],
+  ['a .. as the last parts', '/tmp/kiss-mini/bad/../report.md'],
+  ["another task's id", '/tmp/kiss-mini/other/report.md'],
+  ['another parent folder', '/tmp/not-kiss/bad/report.md'],
+  ['a relative path', 'kiss-mini/bad/report.md'],
+] as const) {
+  test(`prune: a stored path that is ${name} removes nothing`, async ($, on) => {
+    const w = world(on, { store: { 'kiss-mini/task/bad': ended('bad', { log }) } })
+    await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+    expect(rmRuns(w)).toEqual([])
+  })
+}
+
+test('prune: a removal that fails keeps the entry, and a later prune removes both', async ($, on) => {
+  const fail: Record<string, { stderr: string }> = { rm: { stderr: 'rm: Operation not permitted' } }
+  const w = world(on, { fail, store: { 'kiss-mini/task/old': ended('old') } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(rmRuns(w)).toHaveLength(1)
+  expect(entry(w, 'old')).toBeDefined()
+  delete fail.rm
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(rmRuns(w)).toHaveLength(2)
+  expect(entry(w, 'old')).toBeUndefined()
+})
+
+test('prune: an rm that cannot run keeps the entry and raises nothing; the session starts', async ($, on) => {
+  const w = world(on, { hang: ['rm'], store: { 'kiss-mini/task/old': ended('old') } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(entry(w, 'old')).toBeDefined()
+})
+
+test('a scratch copy: from the worktree a clone to T/scratch passes, and git init in that copy is denied', async ($, on) => {
+  const { ran } = await worker($, on)
+  const T = `/tmp/kiss-mini/${ID}`
+  const clone = `cd '${WT}' && git clone -q . "${T}/scratch/copy"`
+  await call($, 'Bash', { command: clone })
+  expect(ran).toEqual([`Bash ${clone}`])
+  expect(JSON.stringify(await call($, 'Bash', { command: `cd '${T}/scratch/copy' && git init` }))).toContain(ONLY)
+  expect(JSON.stringify(await call($, 'Bash', { command: `git -C '${T}/scratch/copy' init` }))).toContain(ONLY)
+  expect(ran).toHaveLength(1)
+})
+
 test('Merge is refused while the checkout has a merge of its own under way: no merge, no abort, one toast', async ($, on) => {
   const w = world(on)
   await ready($, w)
