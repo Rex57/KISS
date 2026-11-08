@@ -9,6 +9,7 @@ A project's own traps are in its facts file (`.kiss/project.md`).
 - A test that reads the clock twice flakes at a second boundary: read it once per stamp.
 - A ticket with a time window (freshness, a timeout, staleness) needs a test that runs the clock past that window:
   a test inside the window passes while the feature fails later.
+- A test that reads what a fake server recorded waits for that record, not only for the client's answer.
 - A worktree has no CodeGraph watcher: `codegraph sync -q "W"` after each commit.
 - A seed or a sync can run for minutes: give it a 10-minute timeout (Claude Code: the Bash tool's
   `timeout: 600000`), or a short default timeout kills it and the agent runs it again.

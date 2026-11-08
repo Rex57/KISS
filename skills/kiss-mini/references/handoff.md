@@ -73,7 +73,8 @@ skill when it is installed: a draft pull request takes it as its body.
 
 3. **Where to work:** a code or bug task works only in its worktree, on its branch, and ends with one commit
    that adds the files the task changed by explicit path, never build or test output (`__pycache__`, `.pyc`,
-   `dist/`); it never pushes, merges or opens a pull request. The mod's guard denies its git command whose folder is
+   `dist/`); it never pushes, merges or opens a pull request. It leaves a page's `Reviewed` date as it is: the close's
+   Upkeep sets it after its read. The mod's guard denies its git command whose folder is
    outside the worktree (git reads such as status, log and diff pass), its `git stash` and `git worktree` changes
    anywhere (both reach every worktree), and its Edit, Write or NotebookEdit outside it,
    with "kiss-mini: a worker writes only in its worktree": commit in the worktree and report, never try again

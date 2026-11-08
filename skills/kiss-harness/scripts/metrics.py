@@ -729,6 +729,8 @@ def selftest():
         a, b, c = (run_folder(os.path.join(t, "repo", ".kiss", "runs", n), f"# D\n\nFull check at {head}: pass\n")
                    for n in ("2026-01-02-a", "2026-01-03-b", "2026-01-01-c"))
         book = os.path.join(t, "repo", ".kiss", "runs", "metrics.md")      # beside the run folders (R1)
+        waited = "Metrics: subagents 2, minutes 95 of 330 (owner wait 30 left out)"
+        assert record(b, waited) == waited + "; " + NA and open(book).read() == "- 2026-01-03-b: " + waited + "; " + NA + "\n"
         assert record(b, "Metrics: subagents 2") == "Metrics: subagents 2; " + NA
         record(a, "Metrics: subagents 3")
         record(c, "Metrics: subagents\r\n5")                              # R3: one line; R4: a new run at the end

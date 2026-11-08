@@ -138,20 +138,21 @@ is in your skill list; a skill that is not there is skipped, and the step does w
     3. `ponytail-debt` on `git -C W diff <base>..<head>`: each new `shortcut:` comment with its limit.
     4. **Look back** by [references/retro.md](references/retro.md): the candidates for the owner, most severe first
        (a mechanical mistake → a proposed check, a judgement call → a facts-file rule), each a yes/no line in the
-       merge gate's questions; change no product file.
+       merge gate's questions, with its evidence and your recommended answer; change no product file.
     5. **Later commits:** `git -C W log --oneline <the full-check sha>..HEAD`, before the metrics line (and again at
        the merge gate for any commit made after it). A later commit that changes product code gets the full check
        again and its own `Full check at` line. One that changes only tests, docs or built files gets the build step,
        those tests and the docs gate; on a pass, write `Full check at <HEAD>: pass (after <sha>: build step, <tests>,
        docs gate)`.
     6. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
-       <used> of <budget>` (headless sessions: the `claude -p` or `claude --bg` sessions the run starts for tests;
+       <used> of <budget> (owner wait <n> left out)` (headless sessions: the `claude -p` or `claude --bg` sessions the run starts for tests;
        subagents and kiss-mini workers do not count), given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it prints the full
        line (with the tokens per role and the `CodeGraph share (v2)`) and records it in `<repo>/.kiss/runs/metrics.md`, one line
        per run (a rerun of the close replaces the run's line), and saves each subagent tool call in `R/calls.jsonl`
        (the share's evidence after a tidy-up moves the transcripts). It refuses when the last `Full check at` line is not a
        pass at W's HEAD.
-    7. The **merge gate**, with the log findings, the look-back questions, and each later commit with the checks it
+    7. The **merge gate**: each logged item in one table row (the item; its state: done later, nothing to fix, or
+       fixable; your recommendation) and their count, the look-back questions, and each later commit with the checks it
        got. A push, a pull request or any write to a remote is its own gate; `pr` writes a pull request's body.
     8. **The merge**, beside the main checkout, never in it (another session may use MAIN):
        1. `git -C MAIN worktree add --detach <tmp> main` (`<tmp>` in the scratch folder), then `git -C <tmp> merge
@@ -182,7 +183,8 @@ the clock starts again from the elapsed time.
 **The clock:** the budget is 10 minutes per ticket plus 2 hours for the reviews and fix rounds, plus the facts
 file's `Full check time:`. Put "Time: elapsed
 Ns of a Ms budget." in each message to a subagent (`prompt.py` does it with `ELAPSED`). Past the budget, a gate comes
-before the next round.
+before the next round. The time the owner takes to answer a gate or a decision is off the clock, and the metrics line
+says how much was left out.
 
 ## Side tasks
 

@@ -19,7 +19,7 @@ messages you sent. Look for these candidates:
 - **A lesson about KISS** itself goes to the KISS owner as file, line and new text (in the feedback block when the
   feedback mode is on), never into the project.
 
-List the candidates for the owner, most severe first, each with its evidence (the progress line or finding), each
+List the candidates for the owner, most severe first, each with its evidence (the progress line or finding) and your recommended answer, each
 as a yes/no line in the merge gate's questions. This joins kiss-housekeeping's fold-back and replaces nothing there.
 On the owner's yes, write a facts-file rule yourself; a new rule names the line it replaces, and you remove that
 line. A proposed check becomes a `/kiss-mini` task or a ticket of the next run, never product code of yours. A

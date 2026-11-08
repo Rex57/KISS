@@ -310,6 +310,7 @@ def selftest():
             and "offers them as one kiss-mini task" in sv and "any other finding left asks a gate" in sv), "low leftovers go to one kiss-mini task, the rest to a gate"
     assert 'A finding of medium or higher severity that fits none of these is a "fix"' in sv, "every finding has a bucket"
     assert "Start no subagent of your own" in rv, "the reviewer starts no subagent"
+    assert "Leave a page's `Reviewed` date as it is" in out, "the date is the close's (D25)"
     fx, rc = loop["fix"], loop["recheck"]
     assert "round 1 of your findings, or work from an owner decision, with the commits a1..b2" in rc, "the recheck's round: findings or decision work (D21)"
     assert re.search(r"For each owner decision in \S+/fix-1\.md: judge its commits in that range by your rubric A to G, and check each of its `\(reviewer\)` lines in the running product\.", rc), rc
