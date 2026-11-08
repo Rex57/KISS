@@ -184,9 +184,9 @@ def check_rule(agent, text, files, marks, rule=""):
     elif not stale:
         out = [("OK", agent, f"CodeGraph rule in {shown}", "")]
     elif lacks:
-        out = [("WARN", agent, f"CodeGraph rule in {named} is an older or edited copy: lacks {', '.join(lacks)}: run kiss-doctor setup", "The CodeGraph rule")]
+        out = [("WARN", agent, f"CodeGraph rule in {named} is an older or edited copy: lacks {', '.join(lacks)}: run kiss-doctor setup {agent}", "The CodeGraph rule")]
     else:
-        out = [("WARN", agent, f"CodeGraph rule in {named} differs from KISS's text: run kiss-doctor setup", "The CodeGraph rule")]
+        out = [("WARN", agent, f"CodeGraph rule in {named} differs from KISS's text: run kiss-doctor setup {agent}", "The CodeGraph rule")]
     if re.search(r"^\W*CODEGRAPH_START\W*$", text, re.M):  # the marker line, not the rule's own mention of it
         out.append(("WARN", agent, "a CODEGRAPH_START block from `codegraph install`: delete it", "The CodeGraph rule"))
     return out
@@ -884,7 +884,7 @@ def selftest():
         same = "# Mine\n\n## CodeGraph\n\n**Which index.**  a\n**`callers` is incomplete:** b\n\n## Other\nmore\n"
         assert check_rule("claude", same, [main], marks, rule) == [("OK", "claude", "CodeGraph rule in " + main, "")]
         old = check_rule("claude", "**Which index.** a\n**`callers` is incomplete:** older b\n", [main], marks, rule)
-        assert old[0][0] == "WARN" and "differs from KISS's text: run kiss-doctor setup" in old[0][2], old
+        assert old[0][0] == "WARN" and "differs from KISS's text: run kiss-doctor setup claude" in old[0][2], old
         assert check_rule("claude", "**Which index.** **`callers` is incomplete** only", [main], three, rule)[0][0] == "WARN"   # lacks a lead-in: as before
         assert check_rule("claude", "nothing", [main], marks, rule)[0][0] == "FAIL"
         assert len(check_rule("claude", "Which index `callers` is incomplete: delete a `CODEGRAPH_START` block", [main], marks)) == 1
