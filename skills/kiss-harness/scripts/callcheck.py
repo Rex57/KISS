@@ -29,14 +29,14 @@ JS_DEF = [re.compile(p, re.M) for p in (
     r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)",
     r"^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function\b[^(]*)?\(([^)]*)\)",
     r"^[ \t]+(?:(?:public|private|protected|static|async|override|readonly)\s+)*(\w+)\s*(?:<[^>]*>)?\s*\(([^()]*)\)\s*(?::\s*[^{;]+)?\{")]
-# the words a bare-word form (TYPED_DEF, JS_DEF[2]) must not read as a name: a keyword before a name makes no statement
-NOT_NAMES = {"if", "for", "while", "switch", "catch", "function", "return", "constructor", "with"}
+# the words the bare-word form (JS_DEF[2]) must not read as a name; TYPED_DEF has a type word before the name, so it is not tested
+NOT_NAMES = {"if", "for", "while", "switch", "catch", "function", "return", "constructor"}
 # a statement's keyword in this file type, which cannot be a function's name there; elsewhere the same word can
 NOT_NAMES_IN = {".cs": {"lock", "fixed", "using", "foreach"}, ".java": {"synchronized", "try"}}
 # shortcut: a generic pattern, not a parser: of two overloads only the first is compared, a parenthesis nested two deep ends
 # the match, a function a macro makes is not seen, a return type's change is not compared, a Swift `init`'s callers write the
 # type's name, so its word search finds none, and a prose line or a C++ or Java local variable (`Widget w(parent);`) that
-# reads like a declaration can give a false name; use a language's parser when a project's stops miss real names.
+# reads like a declaration can give a false name (also JS `with (x) {`, C# `unsafe fixed (...) {`; a TS `catch(fn) {` method gives no name); use a language's parser when a project's stops miss real names.
 PARAMS = r"\s*\(((?:[^()]|\([^()]*\))*)\)"
 WORDS = r"^[ \t]*(?:[\w@()\"]+[ \t]+)*?"
 KEYWORD_DEF = re.compile(WORDS + r"(?:func|fn|fun|function)[ \t]+(?:\([^)]*\)\s*)?(?:<[^>]*>\s*)?(?:[\w<>?,]+\.)?&?(\w+)\s*(?:<[^(]*>)?" + PARAMS, re.M)
@@ -84,7 +84,7 @@ def defs(src, path):
     suffix = os.path.splitext(path)[1]
     for rx in OTHER_DEF.get(suffix, JS_DEF):
         for m in rx.finditer(src):
-            if rx not in (TYPED_DEF, JS_DEF[2]) or m.group(1) not in NOT_NAMES | NOT_NAMES_IN.get(suffix, set()):
+            if rx is not JS_DEF[2] or m.group(1) not in NOT_NAMES | NOT_NAMES_IN.get(suffix, set()):
                 out.setdefault(m.group(1), "(%s)" % " ".join(m.group(2).split()))
     return out
 
@@ -355,6 +355,13 @@ def selftest_languages():
         assert list(defs(line + "\n}\n", path)) == [name], (path, line)
     for path, line in (("a.cs", "  lock (x) {"), ("a.cs", "  fixed (x) {"), ("a.cs", "  using (x) {"), ("a.cs", "  foreach (x) {"), ("A.java", "  synchronized (x) {"),
                        ("a.php", "  return function ($a) use ($b) {"), ("a.php", "  foreach ($a as $b) {")):
+        assert defs(line + "\n}\n", path) == {}, (path, line)
+    # F500: a statement's word after a type or modifier is a method's name; a bare `if`-like chain stays unnamed
+    for path, line, name in (("A.java", "  public Foo with(int a) {", "with"), ("A.java", "  void function(int a) {", "function"),
+                             ("A.java", "  void constructor(int a) {", "constructor"), ("a.cpp", "void function(int a) {", "function"),
+                             ("a.cpp", "void with(int a) {", "with"), ("a.ts", "  public with(a: number): this {", "with"), ("a.ts", "  with(a) {", "with")):
+        assert list(defs(line + "\n}\n", path)) == [name], (path, line)
+    for path, line in (("a.js", "  else while (x) {"), ("a.js", "  do if (x) {"), ("a.cpp", "  else while (x) {"), ("A.java", "  do if (x) {")):
         assert defs(line + "\n}\n", path) == {}, (path, line)
     # F306: a Ruby endless method's body is no signature; a default value in parentheses still is
     asked, out = names({"e.rb": "def foo = 1\ndef bar(a = 1) = 2\n"}, {"e.rb": "def foo = 2\ndef bar(a = 3) = 2\n"})

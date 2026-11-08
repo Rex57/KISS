@@ -27,7 +27,8 @@ a shell profile or Codex's `config.toml`.
   steps, Codex's `/hooks` trust, a new session and its login); then the optional links. Optional items: `pyright`
   and `typescript-language-server` (only for a language the repo has files of) and CodeGraph's MCP server for each
   agent (through the agent's own `mcp add`; Claude Code also gets the permission `mcp__codegraph__*`; Antigravity: a
-  step by hand).
+  step by hand). When the script says that your agent is not on PATH, show that line and offer
+  `kiss-doctor setup <the agents it lists>`.
 - S2. **Show and ask.** Show the plan as printed, ask "all, none, or the numbers?", and wait. The owner's answer is
   the go.
 - S3. **Apply.** Run only the call the plan's last line names, `python3 -I "$KD/scripts/doctor.py" setup [<agents>]
