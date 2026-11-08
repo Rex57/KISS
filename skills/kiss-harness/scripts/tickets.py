@@ -232,6 +232,9 @@ def selftest():
                 with contextlib.redirect_stdout(out):
                     main(["tickets.py", "continue", run, *argv])
                 assert out.getvalue() == want + "\n", (body, argv, out.getvalue())
+        with open(os.path.join(run, "run.json"), "w") as f:              # the template's own words give no hold
+            json.dump({"PROJECT": os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "templates", "project.md")}, f)
+        assert not one_at_a_time(run), "the template's Shared test resources item says one at a time"
         os.remove(os.path.join(run, "run.json"))                         # no run.json: no hold and no failure
         assert one_at_a_time(run) is False
     here = os.path.dirname(os.path.abspath(__file__))
