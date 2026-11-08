@@ -42,8 +42,8 @@ RUBY_DEF = re.compile(r"^[ \t]*def[ \t]+(?:self\.)?(\w+[?!=]?)[ \t]*\(?([^)\n]*)
 TYPED_DEF = re.compile(r"^[ \t]*(?!(?:return|new|throw|else|case|await|yield|delete|goto|assert|do|in|using|typedef|co_return|co_await|co_yield)\b)"
                        r"(?:[\w\[@][\w:<>,\[\]*&.?~]*[ \t*&]+)+(?:\w+::)*(~?\w+)" + PARAMS
                        + r"\s*(?:const\b\s*|noexcept\b\s*|override\b\s*|final\b\s*)*(?:throws\s+[\w., ]+)?\s*(?:\{|=>|:|;|$)", re.M)
-C_FAMILY = (".c", ".h", ".cc", ".cpp")
-OTHER_DEF = {".swift": (KEYWORD_DEF, SWIFT_INIT), ".go": (KEYWORD_DEF,), ".rs": (KEYWORD_DEF,), ".kt": (KEYWORD_DEF,),
+C_FAMILY = (".c", ".h", ".cc", ".cpp", ".hpp")
+OTHER_DEF = {".swift": (KEYWORD_DEF, SWIFT_INIT), ".go": (KEYWORD_DEF,), ".rs": (KEYWORD_DEF,), ".kt": (KEYWORD_DEF,), ".kts": (KEYWORD_DEF,),
              ".php": (KEYWORD_DEF,), ".rb": (RUBY_DEF,),
              **{e: (TYPED_DEF, JS_DEF[2]) for e in (".java", ".cs") + C_FAMILY}}
 COMPARED = PY + JS + tuple(OTHER_DEF)
@@ -288,6 +288,10 @@ def selftest_languages():
     assert asked == [] and out == "\ncallcheck: 0 names checked (removed, renamed or re-signed), 0 caller lines to read", out
     asked, out = names({"z.py": "def f():\n    return 1\n"}, {"z.py": "x = 1\n"})
     assert "not covered" not in out and asked == ["f"], out
+    asked, out = names({"o.m": "a\n"}, {"o.m": "b\n"})                       # a code type no pattern covers is named
+    assert asked == [] and out.splitlines()[-1] == words % "o.m", out
+    asked, out = names({"p.hpp": "int gone_hpp(int a) {\n}\n", "s.kts": "fun goneKts(a: Int) {\n}\n"}, {"p.hpp": "\n", "s.kts": "\n"})
+    assert sorted(asked) == ["goneKts", "gone_hpp"] and "not covered" not in out, out
     asked, out = names({"new.sh": "a\n"}, {"new2.sh": "a\n"})               # a new code file: nothing compared, so named
     assert out.splitlines()[-1] == words % "new2.sh", out
     # the word search for a removed name covers the file type, and a namesake's def is no caller

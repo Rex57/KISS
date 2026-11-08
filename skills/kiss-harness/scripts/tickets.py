@@ -28,8 +28,8 @@ ID = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
 OPTIONAL = {"files": list, "symbols": list, "seeds": list, "depends_on": list, "risky": bool}
 JS = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx")
 # shortcut: a fixed list of code file types (check runs without W's index); add a type when a project needs it
-CODE = {".py", *JS, ".svelte", ".vue", ".go", ".rs", ".java", ".kt", ".swift",
-        ".rb", ".php", ".c", ".h", ".cc", ".cpp", ".cs", ".sh"}
+CODE = {".py", *JS, ".svelte", ".vue", ".go", ".rs", ".java", ".kt", ".kts", ".swift",
+        ".rb", ".php", ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".mm", ".cs", ".sh"}
 
 
 def load(run, name="tickets.json"):
