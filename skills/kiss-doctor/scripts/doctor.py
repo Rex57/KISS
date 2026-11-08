@@ -102,7 +102,7 @@ def agent_setup(agent):
         home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
         roots = [(p["id"], p["installPath"]) for p in json.loads(run(["claude", "plugin", "list", "--json"]) or "[]")
                  if p.get("enabled") and p.get("installPath")]
-        files = [os.path.join(home, "CLAUDE.md")] + sorted(glob.glob(os.path.join(home, "rules", "**", "*.md"), recursive=True))
+        files = [os.path.join(home, "CLAUDE.md")] + sorted(glob.glob(os.path.join(glob.escape(home), "rules", "**", "*.md"), recursive=True))
         return FILE_BREAK.join(with_imports(f) for f in files), files, roots + [("~/.claude/skills", os.path.join(home, "skills"))], ""
     if agent == "codex":
         home = os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex")
@@ -139,7 +139,7 @@ def unfenced(text):
 
 
 def section_end(text, at, level=2):
-    """Where the rule's section that holds `at` ends: the next heading of `level` or less (the replace: `#` or `##`)
+    """Where the rule's section that holds `at` ends: the next heading of `level` or less (rule_span gives the level)
     or the CODEGRAPH_START line of `codegraph install`'s block, out of fences; else the end."""
     return next((line.start() for line in unfenced(text)
                  if line.start() > at and re.match(r"#{1,%d} |\W*CODEGRAPH_START\W*$" % level, line.group())), len(text))
@@ -181,7 +181,8 @@ def check_rule(agent, text, files, marks, rule=""):
 
 def rule_span(text, marks):
     """The rule's section in a text, (start, end): from the nearest heading above its first bold lead-in (the first in
-    the rule's order that the text holds, as section() reads it) to section_end. A line inside a fence is no heading. It
+    the rule's order that the text holds, as section() reads it) to section_end at that heading's level, at least `##`
+    (a `# ` heading's `##` are the owner's). A line inside a fence is no heading. It
     starts at the lead-in's line when that heading is the file's first and a `# ` one (its title: D23, D25), or when a
     CODEGRAPH_END line comes after it (codegraph install's block stays whole); start is None when no heading is above.
     None when the text holds no lead-in."""
@@ -194,7 +195,9 @@ def rule_span(text, marks):
     if not heads:
         return None, section_end(text, at)
     title = above[-1] is heads[0] and above[-1].group().startswith("# ")
-    return (text.rfind("\n", 0, at) + 1 if title or not above[-1].group().startswith("#") else above[-1].start()), section_end(text, at)
+    own = above[-1].group()
+    level = max(2, len(own) - len(own.lstrip("#")))
+    return (text.rfind("\n", 0, at) + 1 if title or not own.startswith("#") else above[-1].start()), section_end(text, at, level)
 
 
 def rule_file(files, marks, depth):
@@ -274,13 +277,14 @@ def move_rule(path, copy, rule):
     code, said = write_copy(rule, copy)
     if code:
         return 1, f"{said}; {path} is unchanged"
-    old = back_up(path)
+    old = ""
     nl = "\r\n" if "\r\n" in text else "\n"
     above, below = text[:span[0]].rstrip("\r\n"), text[span[1]:].lstrip("\r\n")
     try:
+        old = back_up(path)
         write_whole(path, above + nl + nl + below if above and below else above + nl if above else below)
     except OSError as e:
-        return 1, f"{e}; {path} is as it was; its backup: {old}; two copies load until a re-run of setup"
+        return 1, f"{e}; {path} is as it was; {'its backup: ' + old if old else 'no backup'}; two copies load until a re-run of setup"
     return 0, f"{said}; backup: {old}"
 
 
@@ -1453,6 +1457,12 @@ def selftest():
                 assert ok and whole(copy) == real and whole(main_md) == "mine\n" and len(backups) == 1 and whole(backups[0]) == text, lines
                 assert not backups[0].endswith(".md") and "start a new session" in mine[0]["after"], (backups, mine)
                 assert not glob.glob(os.path.join(c, "rules", "*.kiss-new")) and rule_items() == [] and level() == "OK"
+            # F11: the backup fails after the copy (a name too long for the backup): the message says two copies load
+            c, main_md, copy = fresh()
+            long_name = os.path.join(c, "C" * 240 + ".md")
+            write_file(long_name, "# Me\n\n" + stale + "\n## Mine\n")
+            code, said = execute(["move", "the", "CodeGraph", "section", "of", long_name, "to", copy, "with", os.path.join(KISS, "rules", "codegraph.md")])
+            assert code == 1 and "two copies load until a re-run" in said and whole(copy) == real and whole(long_name).endswith("## Mine\n") and stale in whole(long_name), said
             # the first write fails: a folder at the copy's path
             c, main_md, copy = fresh("# Me\n\n" + stale + "\n## Mine\n")
             old = whole(main_md)
@@ -1522,6 +1532,20 @@ def selftest():
             c, main_md, copy = fresh()
             write_file(os.path.join(c, "rules", "sub", "x.md"), real)
             assert level() == "OK" and rule_items() == []
+            # F10: a ### rule ends at the next ###; the owner's next ### sections stay. Inside a ## section a ### stays with it
+            c, main_md, copy = fresh("# Me\n## Tools\n### CodeGraph\n" + stale.split("\n", 1)[1] + "### Python\nUse uv.\n### Git\nOwn.\n## Other\n")
+            mine = rule_items()
+            assert 'to just before "### Python"' in mine[0]["changes"], mine
+            lines, ok, *_ = apply(mine, "all")
+            assert ok and whole(main_md) == "# Me\n## Tools\n\n### Python\nUse uv.\n### Git\nOwn.\n## Other\n", whole(main_md)
+            c, main_md, copy = fresh("# Me\n\n" + stale + "### Inside\nx\n## Mine\n")
+            lines, ok, *_ = apply(rule_items(), "all")
+            assert ok and whole(main_md) == "# Me\n\n## Mine\n", whole(main_md)
+            md3 = os.path.join(fx, "codex", "AGENTS.md")                # the replace has the same end
+            mine, _ = items("codex", md3, "# Me\n### CodeGraph\n" + stale.split("\n", 1)[1] + "### Python\n## Other\n")
+            assert 'to just before "### Python"' in mine[0]["changes"], mine
+            lines, ok, *_ = apply(mine, "all")
+            assert ok and whole(md3) == "# Me\n" + real + "\n### Python\n## Other\n", whole(md3)
             # F7: each file's own section is compared: an own file with no heading after an exact copy, or after an exact section
             for files in ({"CLAUDE.md": "mine\n", "rules/kiss.md": real, "rules/zz.md": "Keep tests small.\n"},
                           {"CLAUDE.md": "# Me\n\n" + real, "rules/style.md": "Keep tests small.\n"}):
@@ -1552,6 +1576,8 @@ def selftest():
             c, main_md, copy = fresh(bold)
             write_file(os.path.join(c, "rules", "b.md"), "**%s** x\n" % markers()[-1])
             assert level() == "FAIL", "more than half only across two files"
+            c, main_md, copy = fresh("".join("%s x\n" % m for m in markers()))
+            assert level() == "FAIL", "every lead-in, in plain words"
             c, main_md, copy = fresh(bold + "**%s** x\n" % markers()[-1])
             assert level() == "WARN", "more than half"
             # F13: the WARN names the one file that holds the rule, and setup does the rest: for all four agents
@@ -1568,6 +1594,11 @@ def selftest():
                 text, files, _, _ = agent_setup(agent)
                 said = check_rule(agent, text, files, markers(), real)[0]
                 assert said[0] == "WARN" and "Subagents" in said[2] and os.path.realpath(os.path.join(c, name)) in said[2] and "run kiss-doctor setup" in said[2], said
+            # F12: a config folder with [ ] in its path finds its copy
+            c = os.path.join(fx, "D [x]")
+            write_file(os.path.join(c, "rules", "kiss.md"), real)
+            os.environ["CLAUDE_CONFIG_DIR"] = c
+            assert level() == "OK" and rule_items() == []
             # another agent's plan names no path under the Claude config folder
             c, main_md, copy = fresh("# Me\n\n" + stale)
             other = dict(got, agents=["codex"])

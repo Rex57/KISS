@@ -236,11 +236,11 @@ call, the gaps of `callers`, and how to brief a subagent. Each agent you use nee
 alone. A later update changes only that file: an older or edited copy is replaced, after a backup whose name does not end in `.md`, so
 keep your own lines in your own file, not in the copy. An exact section already in `CLAUDE.md` stays. An older or edited section moves: setup writes
 the copy, backs up `CLAUDE.md` beside it, and removes the section, with your other lines kept. Claude Code loads the file when a session
-starts, so start a new session. **When you uninstall KISS:** `rm ~/.claude/rules/kiss.md`.
+starts, so start a new session. **When you uninstall KISS:** `rm ~/.claude/rules/kiss.md*`; a `CLAUDE.md.kiss-backup-*` beside `CLAUDE.md` is yours to remove too.
 
 For the other agents, setup appends the rule, and replaces an older or edited copy: the section that holds
 it (from the heading above it, or from its first line under the file's `# ` title or after a `CODEGRAPH_END` line, to
-the next `#` or `##` heading or a `CODEGRAPH_START` line) becomes `rules/codegraph.md`, after a backup beside the file that keeps your own lines. Read the file first: append it once, not again on each update. If `codegraph install` added a
+the next heading of the same or a higher level, at least the next `#` or `##`, or a `CODEGRAPH_START` line) becomes `rules/codegraph.md`, after a backup beside the file that keeps your own lines. Read the file first: append it once, not again on each update. If `codegraph install` added a
 `CODEGRAPH_START`/`CODEGRAPH_END` block to the same file, delete that block.
 
 ## Use it in a project
