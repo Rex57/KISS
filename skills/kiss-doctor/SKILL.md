@@ -27,7 +27,8 @@ a shell profile or Codex's `config.toml`.
   steps, Codex's `/hooks` trust, a new session and its login); then the optional links. Optional items: `pyright`
   and `typescript-language-server` (only for a language the repo has files of) and CodeGraph's MCP server for each
   agent (through the agent's own `mcp add`; Claude Code also gets the permission `mcp__codegraph__*`; Antigravity: a
-  step by hand).
+  step by hand). When the script says that your agent is not on PATH, show that line and offer
+  `kiss-doctor setup <the agents it lists>`.
 - S2. **Show and ask.** Show the plan as printed, ask "all, none, or the numbers?", and wait. The owner's answer is
   the go.
 - S3. **Apply.** Run only the call the plan's last line names, `python3 -I "$KD/scripts/doctor.py" setup [<agents>]
@@ -42,8 +43,7 @@ a shell profile or Codex's `config.toml`.
 - S4. **Report** what it printed: each item done, a FAIL with its output and the items not run, the checks again
   with the line of the agents left out, and the steps by hand.
 
-1. **Run the checks:** `python3 -I "$KD/scripts/doctor.py"`. It checks each agent whose CLI is on PATH; when it says "not an agent on PATH", show that line and offer
-   `kiss-doctor setup <the agents it lists>`; name
+1. **Run the checks:** `python3 -I "$KD/scripts/doctor.py"`. It checks each agent whose CLI is on PATH; name
    agents to check fewer (`claude`, `codex`, `gemini`, `antigravity`). Per agent: the CodeGraph rule (KISS's
    `rules/codegraph.md`, found by its bold lead-ins) in the global instructions file; for Claude Code also in
    `rules/**/*.md` under its config folder, with `@` imports followed for 4 hops, where a file holds it only with more
