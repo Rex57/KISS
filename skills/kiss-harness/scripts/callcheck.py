@@ -29,9 +29,10 @@ JS_DEF = [re.compile(p, re.M) for p in (
     r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)",
     r"^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function\b[^(]*)?\(([^)]*)\)",
     r"^[ \t]+(?:(?:public|private|protected|static|async|override|readonly)\s+)*(\w+)\s*(?:<[^>]*>)?\s*\(([^()]*)\)\s*(?::\s*[^{;]+)?\{")]
+# the words a bare-word form (TYPED_DEF, JS_DEF[2]) must not read as a name: a keyword before a name makes no statement
 NOT_NAMES = {"if", "for", "while", "switch", "catch", "function", "return", "constructor", "with"}
 # a statement's keyword in this file type, which cannot be a function's name there; elsewhere the same word can
-NOT_NAMES_IN = {".cs": {"lock", "fixed", "using", "foreach"}, ".java": {"synchronized"}, ".php": {"use", "foreach"}}
+NOT_NAMES_IN = {".cs": {"lock", "fixed", "using", "foreach"}, ".java": {"synchronized", "try"}}
 # shortcut: a generic pattern, not a parser: of two overloads only the first is compared, a parenthesis nested two deep ends
 # the match, a function a macro makes is not seen, a return type's change is not compared, a Swift `init`'s callers write the
 # type's name, so its word search finds none, and a prose line or a C++ or Java local variable (`Widget w(parent);`) that
@@ -39,15 +40,16 @@ NOT_NAMES_IN = {".cs": {"lock", "fixed", "using", "foreach"}, ".java": {"synchro
 PARAMS = r"\s*\(((?:[^()]|\([^()]*\))*)\)"
 WORDS = r"^[ \t]*(?:[\w@()\"]+[ \t]+)*?"
 KEYWORD_DEF = re.compile(WORDS + r"(?:func|fn|fun|function)[ \t]+(?:\([^)]*\)\s*)?(?:<[^>]*>\s*)?(?:[\w<>?,]+\.)?&?(\w+)\s*(?:<[^(]*>)?" + PARAMS, re.M)
+PHP_DEF = re.compile(WORDS + r"function[ \t]+&?(\w+)\s*" + PARAMS, re.M)   # no receiver: `function ($a) use ($b)` is a closure
 SWIFT_INIT = re.compile(r"^[ \t]*(?:[\w@()]+[ \t]+)*?(init)[?!]?\s*(?:<[^(]*>)?" + PARAMS, re.M)
-RUBY_DEF = re.compile(r"^[ \t]*(?:\w+[ \t]+)*?def[ \t]+(?:self\.)?(\w+[?!=]?)[ \t]*\(?((?<=\()[^)\n#]*|[^)\n;#=]*)", re.M)
+RUBY_DEF = re.compile(r"^[ \t]*(?:\w+[ \t]+)*?def[ \t]+(?:self\.)?(\w+[?!=]?)[ \t]*\(?((?<=\()[^)\n#]*|(?!=)[^)\n;#]+|)", re.M)
 TYPED_DEF = re.compile(r"^[ \t]*(?!(?:return|new|throw|else|case|await|yield|delete|goto|assert|do|in|using|typedef|co_return|co_await|co_yield)\b)"
                        r"(?:[\w\[@](?:[\w:<>,\[\].?~]|[*&]+(?=[>,]))*[ \t*&]+)+(?:\w+::)*(~?\w+)" + PARAMS
                        + r"\s*(?:const\b\s*|noexcept\b\s*|override\b\s*|final\b\s*)*(?:throws\s+[\w., ]+)?\s*(?:\{|=>|:|;|$)", re.M)
 C_FAMILY = (".c", ".h", ".cc", ".cpp", ".hpp")
 JVM_FAMILY = (".java", ".kt", ".kts")
 OTHER_DEF = {".swift": (KEYWORD_DEF, SWIFT_INIT), ".go": (KEYWORD_DEF,), ".rs": (KEYWORD_DEF,), ".kt": (KEYWORD_DEF,), ".kts": (KEYWORD_DEF,),
-             ".php": (KEYWORD_DEF,), ".rb": (RUBY_DEF,),
+             ".php": (PHP_DEF,), ".rb": (RUBY_DEF,),
              **{e: (TYPED_DEF, JS_DEF[2]) for e in (".java", ".cs") + C_FAMILY}}
 COMPARED = PY + JS + tuple(OTHER_DEF)
 
@@ -64,9 +66,10 @@ def defs(src, path):
     """{name: signature} of the functions and methods in a source; a method is Class.name."""
     out = {}
     if path.endswith(PY):
+        # shortcut: a .py with bad bytes and no coding line reads as a file that does not parse, so its names are not compared; decode by a fallback when a project needs it
         try:
-            tree = ast.parse(src)
-        except SyntaxError:
+            tree = ast.parse(src.encode("utf-8", "surrogateescape"))
+        except (SyntaxError, ValueError):
             return out
 
         def walk(node, prefix):
@@ -81,7 +84,7 @@ def defs(src, path):
     suffix = os.path.splitext(path)[1]
     for rx in OTHER_DEF.get(suffix, JS_DEF):
         for m in rx.finditer(src):
-            if m.group(1) not in NOT_NAMES | NOT_NAMES_IN.get(suffix, set()):
+            if rx not in (TYPED_DEF, JS_DEF[2]) or m.group(1) not in NOT_NAMES | NOT_NAMES_IN.get(suffix, set()):
                 out.setdefault(m.group(1), "(%s)" % " ".join(m.group(2).split()))
     return out
 
@@ -262,7 +265,7 @@ def selftest_languages():
                     if body_ is None:
                         os.remove(os.path.join(W, f))
                     else:
-                        with open(os.path.join(W, f), "w") as fh:
+                        with open(os.path.join(W, f), "wb" if isinstance(body_, bytes) else "w") as fh:
                             fh.write(body_)
                 g("add", "-A")
                 if commit:
@@ -323,6 +326,28 @@ def selftest_languages():
     asked, out = names({"b.rb": "def foo; 1; end\ndef bar # note one\nend\ndef baz(a) # one\nend\n"},
                        {"b.rb": "def foo; 2; end\ndef bar # note two\nend\ndef baz(a) # two\nend\n"})
     assert asked == [], (asked, out)
+    # F401: a form with a keyword before the name is no statement, whatever the name; a bare word still is tested
+    for path, line, name in (("a.rs", "fn with(&self) {", "with"), ("a.rs", "fn switch(&self) {", "switch"), ("a.swift", "func with(a: Int) {", "with"),
+                             ("a.kt", "fun with(a: Int) {", "with"), ("a.rb", "def with(a)", "with"), ("a.rb", "def switch(a)", "switch"), ("a.rb", "def catch(a)", "catch"),
+                             ("a.rb", "def for(a)", "for"), ("a.go", "func (o *O) with(a int) {", "with"), ("a.php", "public function with($a) {", "with"),
+                             ("a.js", "function with(a) {", "with"), ("a.ts", "export const switch1 = (a) => {", "switch1")):
+        assert list(defs(line + "\n}\n", path)) == [name], (path, line)
+    for path in ("A.java", "a.cs", "a.cpp", "a.ts", "a.js"):
+        for line in ("  if (x) {", "  else if (x) {", "  } else if (x) {", "  for (a; b; c) {", "  while (x) {", "  switch (x) {", "  catch (x) {"):
+            assert defs(line + "\n}\n", path) == {}, (path, line)
+    # F400: PHP's closure gives no name, and its methods named like statements are named
+    for line, want in (("  return function ($a) use ($b) {", {}), ("  foreach ($a as $b) {", {}), ("  public function use($a) {", {"use": "($a)"}),
+                       ("  public function foreach($a) {", {"foreach": "($a)"}), ("  public static function &byRef($a) {", {"byRef": "($a)"})):
+        assert defs("<?php\n" + line + "\n}\n", "a.php") == want, line
+    # F402: a Ruby signature with no parentheses reads past its first default; F403: Java's try-with-resources is no name
+    asked, out = names({"d.rb": "def foo a = 1, b = 2\nend\n"}, {"d.rb": "def foo a = 1, c = 3, d = 4\nend\n"})
+    assert asked == ["foo"] and "(a = 1, b = 2) -> (a = 1, c = 3, d = 4)" in out, out
+    assert defs("  try (var x = y) {\n}\n", "T.java") == {}
+    # F405: bad bytes in a real commit: a coding line gives the names, and the range's other names still print; with no coding line it reads as a file that does not parse
+    asked, out = names({"lat.py": b"# -*- coding: latin-1 -*-\ndef gone_lat():\n    return '\xe9'\n", "no.py": b"def gone_no():\n    return '\xe9'\n",
+                        "nul.py": b"def gone_nul():\n    return '\x00'\n\x00", "plain.py": "def plain_gone():\n    pass\n"},
+                       {"lat.py": "x = 1\n", "no.py": "x = 1\n", "nul.py": "x = 1\n", "plain.py": "x = 1\n"})
+    assert sorted(asked) == ["gone_lat", "plain_gone"], (asked, out)
     # F301: a word that is a keyword in one file type is a name in the others; each form both ways
     for path, line, name in (("a.swift", "func lock() {}", "lock"), ("a.rs", "fn lock(&self) {", "lock"), ("a.go", "func (m *M) lock() {", "lock"),
                              ("A.java", "public void lock() {", "lock"), ("a.cpp", "void lock(int a) {", "lock"), ("a.ts", "export function use(a: string) {", "use"),
