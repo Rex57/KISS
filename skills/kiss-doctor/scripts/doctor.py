@@ -110,7 +110,7 @@ def agent_setup(agent):
         roots = []
         for pid in codex_enabled(read(cfg) if os.path.isfile(cfg) else ""):
             name, _, market = pid.partition("@")
-            versions = sorted(glob.glob(os.path.join(home, "plugins", "cache", market, name, "*")), key=os.path.getmtime)
+            versions = sorted(glob.glob(os.path.join(glob.escape(home), "plugins", "cache", market, name, "*")), key=os.path.getmtime)
             roots += [(pid, versions[-1])] if versions else []
         override = os.path.join(home, "AGENTS.override.md")
         files = [override if os.path.isfile(override) else os.path.join(home, "AGENTS.md")]
@@ -153,27 +153,40 @@ def section(text, first):
 
 
 def holds(text, marks):
-    """One file holds the rule only with more than half of its bold lead-ins: an owner's own bold word is no copy."""
+    """Claude Code: one file holds the rule only with more than half of its bold lead-ins: an owner's own bold word is no copy."""
     return 2 * sum("**" + m in text for m in marks) > len(marks)
 
 
+def differs(text, marks, rule):
+    """A holder file that lacks a bold lead-in, or whose own section is not KISS's rule text (when one is given)."""
+    return any("**" + m not in text for m in marks) or bool(rule) and section(text, marks[0]) != section(rule, marks[0])
+
+
 def check_rule(agent, text, files, marks, rule=""):
-    """The rule in an agent's instructions, read file by file: a file that holds it with its own section equal to KISS's
-    rule text (or, with no text given, with every lead-in) is OK; another holder is a WARN; none is a FAIL."""
+    """The rule in an agent's instructions: every lead-in is OK, unless KISS's rule text is given and the copy differs. Claude
+    Code's rules/ folder holds the owner's own files too, so its files are read one by one: OK when no holder differs."""
     shown = " or ".join(f.replace(HOME, "~") for f in files)
-    copies = [part for part in text.split(FILE_BREAK) if holds(part, marks)]
-    lacks = [m for m in marks if "**" + m not in copies[0]] if copies else []
-    named = lambda: (rule_file(files, marks, 4 if agent == "claude" else 0) or shown).replace(HOME, "~")
+    if agent == "claude":
+        found = [part for part in text.split(FILE_BREAK) if holds(part, marks)]
+        stale = next((part for part in found if differs(part, marks, rule)), None)
+        lacks = [m for m in marks if "**" + m not in stale] if stale else []
+        named = rule_file(files, marks, 4, rule)
+    else:                                               # D14: the other agents keep the read of the whole text
+        found = [m for m in marks if m in text]
+        lacks = [m for m in marks if m not in found]
+        stale = lacks or rule and section(text, marks[0]) != section(rule, marks[0])
+        named = rule_file(files, marks, 0)
+    named = (named or shown).replace(HOME, "~")
     if not text:
         out = [("FAIL", agent, f"CodeGraph rule: no {shown}", "The CodeGraph rule")]
-    elif not copies:
+    elif not found:
         out = [("FAIL", agent, f"CodeGraph rule: not in {shown}", "The CodeGraph rule")]
-    elif any(section(c, marks[0]) == section(rule, marks[0]) for c in copies) if rule else not lacks:
+    elif not stale:
         out = [("OK", agent, f"CodeGraph rule in {shown}", "")]
     elif lacks:
-        out = [("WARN", agent, f"CodeGraph rule in {named()} is an older or edited copy: lacks {', '.join(lacks)}: run kiss-doctor setup", "The CodeGraph rule")]
+        out = [("WARN", agent, f"CodeGraph rule in {named} is an older or edited copy: lacks {', '.join(lacks)}: run kiss-doctor setup", "The CodeGraph rule")]
     else:
-        out = [("WARN", agent, f"CodeGraph rule in {named()} differs from KISS's text: run kiss-doctor setup", "The CodeGraph rule")]
+        out = [("WARN", agent, f"CodeGraph rule in {named} differs from KISS's text: run kiss-doctor setup", "The CodeGraph rule")]
     if re.search(r"^\W*CODEGRAPH_START\W*$", text, re.M):  # the marker line, not the rule's own mention of it
         out.append(("WARN", agent, "a CODEGRAPH_START block from `codegraph install`: delete it", "The CodeGraph rule"))
     return out
@@ -200,12 +213,18 @@ def rule_span(text, marks):
     return (text.rfind("\n", 0, at) + 1 if title or not own.startswith("#") else above[-1].start()), section_end(text, at, level)
 
 
-def rule_file(files, marks, depth):
-    """The first of `files`, or of the files they `@`-import (as with_imports reads them), that holds the rule."""
+def rule_file(files, marks, depth, rule=None):
+    """The first of `files`, or of the files they `@`-import (as with_imports reads them), that holds the rule's first
+    bold lead-in: the first in the rule's order that any of them holds, as rule_span reads one file. With `rule` (Claude
+    Code): the first holder that differs from it."""
     seen = {}
     for f in files:
         with_imports(f, depth, seen)
-    return next((p for p in seen if holds(read(p), marks)), None)
+    texts = [(p, read(p)) for p in seen]
+    if rule is not None:
+        return next((p for p, x in texts if holds(x, marks) and differs(x, marks, rule)), None)
+    first = next(("**" + m for m in marks if any("**" + m in x for _, x in texts)), None)
+    return next((p for p, x in texts if first and first in x), None)
 
 
 def exact(path):
@@ -214,10 +233,13 @@ def exact(path):
         return f.read()
 
 
-def replace_item(path, marks):
-    """The replace item's values for the file that holds the rule: the section's first line and its end for the changes
-    line, or the reason the owner does it by hand."""
+def replace_item(path, listed, marks):
+    """The replace item's values for the file that holds the rule (None: no file holds a bold lead-in; `listed` is the
+    agent's instructions file): the section's first line and its end for the changes line, or the reason the owner
+    does it by hand."""
     yourself = ": replace the rule's lines with rules/codegraph.md yourself"
+    if not path:
+        return {"file": listed, "hand": f"no bold lead-in of the rule in {listed}{yourself}"}
     try:
         text = exact(path)
     except (OSError, UnicodeDecodeError) as e:
@@ -777,18 +799,18 @@ def detect():
             "path": os.environ.get("PATH", "")}
 
 
-def claude_rule_gap(level, files, marks):
+def claude_rule_gap(level, files, marks, rule):
     """Claude Code's rule item: none yet, a new copy; a stale section in CLAUDE.md, or a section beside a copy (a move
-    that stopped halfway), the move; a stale copy or a hand-made import, the replace; an exact holder, nothing."""
+    that stopped halfway), the move; another holder that differs (a stale copy, a hand-made import), its replace; else nothing."""
     main, copy = files[0], os.path.join(os.path.dirname(files[0]), "rules", "kiss.md")
     if level == "FAIL":
         return {("claude", "rule-new"): {"copy": copy}}
     real = os.path.realpath(main)
     beside = os.path.isfile(copy) and os.path.isfile(main) and holds(read(main), marks)
-    holder = rule_file(files, marks, 4)
+    holder = rule_file(files, marks, 4, rule)
     if beside or level == "WARN" and holder == real:
-        return {("claude", "rule-move"): dict(replace_item(real, marks), copy=copy)}
-    return {("claude", "rule-replace"): replace_item(holder, marks)} if level == "WARN" else {}
+        return {("claude", "rule-move"): dict(replace_item(real, main, marks), copy=copy)}
+    return {("claude", "rule-replace"): replace_item(holder, main, marks)} if level == "WARN" else {}
 
 
 def gaps(system):
@@ -807,11 +829,11 @@ def gaps(system):
         text, files, roots, note = agent_setup(agent)
         level = check_rule(agent, text, files, marks, rule)[0][0]
         if agent == "claude":
-            out.update(claude_rule_gap(level, files, marks))
+            out.update(claude_rule_gap(level, files, marks, rule))
         elif level == "FAIL":
             out[(agent, "rule")] = {"file": files[0]}
         elif level == "WARN":                   # an older or edited copy: its section replaced (D4)
-            out[(agent, "rule-replace")] = replace_item(rule_file(files, marks, 0), marks)
+            out[(agent, "rule-replace")] = replace_item(rule_file(files, marks, 0), files[0], marks)
         for level, _, _, fix in check_skills(agent, roots, need, note, loaded_here(agent)):
             if level == "FAIL" and fix.startswith("Install "):
                 out[(agent, fix)] = {}
@@ -1368,8 +1390,8 @@ def selftest():
             nothing = "nothing: setup does not change the file"             # a step by hand promises no backup
             mine, _ = items("codex", md, "intro\n" + real.split("\n", 1)[1].replace("Decide once", "Decide"))   # no heading
             assert [(i["n"], i["hand"].startswith("by hand: no heading above"), i["changes"]) for i in mine] == [(None, True, nothing)], mine
-            mine, found = items("codex", md, "## CodeGraph\n- Which index: decide once.\n- Keep it fresh: sync.\n")   # no bold lead-in: no copy
-            assert mine == [] and ("codex", "rule") in found, (mine, found)
+            mine, _ = items("codex", md, "## CodeGraph\n- Which index: decide once.\n- Keep it fresh: sync.\n")   # no bold lead-in
+            assert [(i["n"], i["hand"].startswith("by hand: no bold lead-in of the rule in "), i["changes"]) for i in mine] == [(None, True, nothing)], mine
             with open(md, "wb") as f:                                   # not UTF-8: a step by hand, not an item that fails
                 f.write(b"# Me\n\xe9t\xe9\n\n" + edited.encode())
             mine = [i for i in plan(dict(got, agents=["codex"]), gaps(dict(got, agents=["codex"]))) if i["what"].startswith("replace the CodeGraph")]
@@ -1479,6 +1501,7 @@ def selftest():
             backups = glob.glob(main_md + ".kiss-backup-*")
             assert not ok and whole(main_md) == old and whole(copy) == real and len(backups) == 1 and whole(backups[0]) == old, said
             assert "two copies load until a re-run" in said and backups[0] in said, said
+            assert level() == "WARN", "two copies load: the check does not say OK"
             os.rmdir(main_md + ".kiss-new")
             lines, ok, *_ = apply(rule_items(), "all")
             assert ok and whole(main_md) == "# Me\n\n## Mine\n" and level() == "OK" and rule_items() == [], lines
@@ -1580,6 +1603,23 @@ def selftest():
             assert level() == "FAIL", "every lead-in, in plain words"
             c, main_md, copy = fresh(bold + "**%s** x\n" % markers()[-1])
             assert level() == "WARN", "more than half"
+            # F19: OK only when no holder differs, each read on its own; the item goes to the first that differs
+            c, main_md, copy = fresh("# Me\n\n" + stale + "\n## Mine\n")
+            write_file(copy, real)
+            assert level() == "WARN" and [i["what"] for i in rule_items()] == ["move the CodeGraph section of %s to %s" % (os.path.realpath(main_md), copy)]
+            for own, rel in (("mine\n", "a-old.md"), ("# Me\n\n" + real, "old.md")):
+                c, main_md, copy = fresh(own)
+                if rel == "a-old.md":
+                    write_file(copy, real)
+                old_copy = os.path.join(c, "rules", rel)
+                write_file(old_copy, stale)
+                text, files, _, _ = agent_setup("claude")
+                said = check_rule("claude", text, files, markers(), real)[0]
+                assert said[0] == "WARN" and os.path.realpath(old_copy) in said[2], said
+                mine = rule_items()
+                assert [i["what"] for i in mine] == ["replace the CodeGraph section of " + os.path.realpath(old_copy)], mine
+                lines, ok, *_ = apply(mine, "all")
+                assert ok and whole(old_copy) == real and whole(main_md) == own and level() == "OK" and rule_items() == [], lines
             # F13: the WARN names the one file that holds the rule, and setup does the rest: for all four agents
             for agent, env, name in (("claude", "CLAUDE_CONFIG_DIR", "CLAUDE.md"), ("codex", "CODEX_HOME", "AGENTS.md")):
                 c, main_md, copy = fresh()
@@ -1599,6 +1639,40 @@ def selftest():
             write_file(os.path.join(c, "rules", "kiss.md"), real)
             os.environ["CLAUDE_CONFIG_DIR"] = c
             assert level() == "OK" and rule_items() == []
+            # T1: a Codex home with [ ] in its path finds its plugin
+            c = os.path.join(fx, "C [x]")
+            os.makedirs(os.path.join(c, "plugins", "cache", "m", "p", "1.0"))
+            write_file(os.path.join(c, "config.toml"), '[plugins."p@m"]\nenabled = true\n')
+            os.environ["CODEX_HOME"] = c
+            assert ("p@m", os.path.join(c, "plugins", "cache", "m", "p", "1.0")) in agent_setup("codex")[2], agent_setup("codex")[2]
+            # D14: the holder test is Claude Code's: the other agents' plans stay: any bold lead-in the replace, plain words by hand
+            home_was, three_bold = HOME, "## CodeGraph\n" + "".join("**%s** x\n" % m for m in markers()[:3]) + "Own line.\n## Other\n"
+            globals()["HOME"] = fx
+            try:
+                for agent, env, name in (("codex", "CODEX_HOME", "AGENTS.md"), ("gemini", None, ".gemini/GEMINI.md"), ("antigravity", None, ".gemini/GEMINI.md")):
+                    c = os.path.join(fx, "other " + agent)
+                    if env:
+                        os.environ[env] = c
+                    else:
+                        c = fx
+                    path = os.path.join(c, name)
+                    other_sys = dict(got, agents=[agent])
+                    for text, want in ((three_bold, "replace"), ("## Agents\n**Subagents** use a brief.\nOwn line.\n## Other\n", "replace"),
+                                       ("Subagents get a brief.\n", "hand"), ("".join("%s x\n" % m for m in markers()), "hand"), ("nothing\n", "append")):
+                        write_file(path, text)
+                        mine = [i for i in plan(other_sys, gaps(other_sys)) if "CodeGraph rule" in i["what"] or "CodeGraph section" in i["what"]]
+                        assert len(mine) == 1, (agent, text, mine)
+                        if want == "replace":
+                            assert mine[0]["n"] and mine[0]["what"] == "replace the CodeGraph section of " + os.path.realpath(path), (agent, text, mine)
+                        elif want == "hand":
+                            assert not mine[0]["n"] and mine[0]["hand"].startswith("by hand: no bold lead-in of the rule in "), (agent, text, mine)
+                        else:
+                            assert mine[0]["n"] and mine[0]["run"] == [["cat", os.path.join(KISS, "rules", "codegraph.md"), ">>", path]], (agent, text, mine)
+                        joined, files, _, _ = agent_setup(agent)
+                        said = check_rule(agent, joined, files, markers(), real)[0]
+                        assert said[0] == ("FAIL" if want == "append" else "WARN"), (agent, text, said)
+            finally:
+                globals()["HOME"] = home_was
             # another agent's plan names no path under the Claude config folder
             c, main_md, copy = fresh("# Me\n\n" + stale)
             other = dict(got, agents=["codex"])
