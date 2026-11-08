@@ -29,8 +29,9 @@ JS_DEF = [re.compile(p, re.M) for p in (
     r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)",
     r"^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function\b[^(]*)?\(([^)]*)\)",
     r"^[ \t]+(?:(?:public|private|protected|static|async|override|readonly)\s+)*(\w+)\s*(?:<[^>]*>)?\s*\(([^()]*)\)\s*(?::\s*[^{;]+)?\{")]
-NOT_NAMES = {"if", "for", "while", "switch", "catch", "function", "return", "constructor", "with", "foreach", "using", "lock",
-             "synchronized", "fixed", "use"}
+NOT_NAMES = {"if", "for", "while", "switch", "catch", "function", "return", "constructor", "with"}
+# a statement's keyword in this file type, which cannot be a function's name there; elsewhere the same word can
+NOT_NAMES_IN = {".cs": {"lock", "fixed", "using", "foreach"}, ".java": {"synchronized"}, ".php": {"use", "foreach"}}
 # shortcut: a generic pattern, not a parser: of two overloads only the first is compared, a parenthesis nested two deep ends
 # the match, a function a macro makes is not seen, a return type's change is not compared, a Swift `init`'s callers write the
 # type's name, so its word search finds none, and a prose line or a C++ or Java local variable (`Widget w(parent);`) that
@@ -39,7 +40,7 @@ PARAMS = r"\s*\(((?:[^()]|\([^()]*\))*)\)"
 WORDS = r"^[ \t]*(?:[\w@()\"]+[ \t]+)*?"
 KEYWORD_DEF = re.compile(WORDS + r"(?:func|fn|fun|function)[ \t]+(?:\([^)]*\)\s*)?(?:<[^>]*>\s*)?(?:[\w<>?,]+\.)?&?(\w+)\s*(?:<[^(]*>)?" + PARAMS, re.M)
 SWIFT_INIT = re.compile(r"^[ \t]*(?:[\w@()]+[ \t]+)*?(init)[?!]?\s*(?:<[^(]*>)?" + PARAMS, re.M)
-RUBY_DEF = re.compile(r"^[ \t]*(?:\w+[ \t]+)*?def[ \t]+(?:self\.)?(\w+[?!=]?)[ \t]*\(?([^)\n;#]*)", re.M)
+RUBY_DEF = re.compile(r"^[ \t]*(?:\w+[ \t]+)*?def[ \t]+(?:self\.)?(\w+[?!=]?)[ \t]*\(?((?<=\()[^)\n#]*|[^)\n;#=]*)", re.M)
 TYPED_DEF = re.compile(r"^[ \t]*(?!(?:return|new|throw|else|case|await|yield|delete|goto|assert|do|in|using|typedef|co_return|co_await|co_yield)\b)"
                        r"(?:[\w\[@](?:[\w:<>,\[\].?~]|[*&]+(?=[>,]))*[ \t*&]+)+(?:\w+::)*(~?\w+)" + PARAMS
                        + r"\s*(?:const\b\s*|noexcept\b\s*|override\b\s*|final\b\s*)*(?:throws\s+[\w., ]+)?\s*(?:\{|=>|:|;|$)", re.M)
@@ -53,7 +54,7 @@ COMPARED = PY + JS + tuple(OTHER_DEF)
 
 def git(W, *args, missing_ok=False):
     """git's stdout; a failure stops with git's own words (missing_ok: a path absent on one side gives "")."""
-    p = subprocess.run(["git", "-C", W] + list(args), capture_output=True, text=True)
+    p = subprocess.run(["git", "-C", W] + list(args), capture_output=True, text=True, errors="surrogateescape")   # -z: a name's raw bytes
     if p.returncode and not missing_ok:
         sys.exit("callcheck: git %s failed: %s" % (" ".join(args), p.stderr.strip()))
     return p.stdout if p.returncode == 0 else ""
@@ -77,9 +78,10 @@ def defs(src, path):
                     walk(n, prefix + n.name + ".")
         walk(tree, "")
         return out
-    for rx in OTHER_DEF.get(os.path.splitext(path)[1], JS_DEF):
+    suffix = os.path.splitext(path)[1]
+    for rx in OTHER_DEF.get(suffix, JS_DEF):
         for m in rx.finditer(src):
-            if m.group(1) not in NOT_NAMES:
+            if m.group(1) not in NOT_NAMES | NOT_NAMES_IN.get(suffix, set()):
                 out.setdefault(m.group(1), "(%s)" % " ".join(m.group(2).split()))
     return out
 
@@ -321,6 +323,33 @@ def selftest_languages():
     asked, out = names({"b.rb": "def foo; 1; end\ndef bar # note one\nend\ndef baz(a) # one\nend\n"},
                        {"b.rb": "def foo; 2; end\ndef bar # note two\nend\ndef baz(a) # two\nend\n"})
     assert asked == [], (asked, out)
+    # F301: a word that is a keyword in one file type is a name in the others; each form both ways
+    for path, line, name in (("a.swift", "func lock() {}", "lock"), ("a.rs", "fn lock(&self) {", "lock"), ("a.go", "func (m *M) lock() {", "lock"),
+                             ("A.java", "public void lock() {", "lock"), ("a.cpp", "void lock(int a) {", "lock"), ("a.ts", "export function use(a: string) {", "use"),
+                             ("a.js", "function fixed(a) {", "fixed"), ("a.kt", "fun use(a: Int) {", "use")):
+        assert list(defs(line + "\n}\n", path)) == [name], (path, line)
+    for path, line in (("a.cs", "  lock (x) {"), ("a.cs", "  fixed (x) {"), ("a.cs", "  using (x) {"), ("a.cs", "  foreach (x) {"), ("A.java", "  synchronized (x) {"),
+                       ("a.php", "  return function ($a) use ($b) {"), ("a.php", "  foreach ($a as $b) {")):
+        assert defs(line + "\n}\n", path) == {}, (path, line)
+    # F306: a Ruby endless method's body is no signature; a default value in parentheses still is
+    asked, out = names({"e.rb": "def foo = 1\ndef bar(a = 1) = 2\n"}, {"e.rb": "def foo = 2\ndef bar(a = 3) = 2\n"})
+    assert asked == ["bar"], (asked, out)
+    # F302: a file name that is not UTF-8 ends with no traceback, through the real script; the line names it, escaped
+    if os.name == "posix":
+        with tempfile.TemporaryDirectory() as W:
+            g = lambda *a, **k: subprocess.run(["git", "-C", W] + list(a), check=True, capture_output=True, **k)
+            g("init", "-q"), g("config", "user.name", "t"), g("config", "user.email", "t@example.com")
+            blob = g("hash-object", "-w", "--stdin", input=b"func goneB(a: Int) {\n}\n").stdout.decode().strip()
+            for raw in (b"caf\xe9.swift", b"caf\xe9.sh"):
+                g("update-index", "--add", "--cacheinfo", b"100644," + blob.encode() + b"," + raw)
+            g("commit", "-qm", "one")
+            g("update-index", "--force-remove", b"caf\xe9.swift")
+            g("update-index", "--force-remove", b"caf\xe9.sh")
+            g("commit", "-qm", "two")
+            p = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "-p", W, "HEAD~1..HEAD"], capture_output=True)
+            said = p.stdout.decode("utf-8") + p.stderr.decode("utf-8", "replace")
+            assert p.returncode == 0 and "Traceback (most recent call last):\n  File" not in p.stderr.decode("utf-8", "replace"), said
+            assert "== removed: goneB" in said and "not compared: caf\\udce9.sh;" in said, said
     # the word search for a removed name covers the file type, and a namesake's def is no caller
     with tempfile.TemporaryDirectory() as W:
         g = lambda *a: subprocess.run(["git", "-C", W] + list(a), check=True, capture_output=True)
@@ -354,6 +383,7 @@ def main(argv):
     spec = [a for i, a in enumerate(args) if a != "-p" and (i == 0 or args[i - 1] != "-p")]
     if len(spec) != 1 or not (spec[0] == "--cached" or ".." in spec[0]):
         sys.exit(__doc__)
+    sys.stdout.reconfigure(errors="backslashreplace")   # a file name that is not UTF-8
     print(check(W, spec[0]))
     return 0
 
