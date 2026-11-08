@@ -1304,6 +1304,49 @@ test('ORPHAN: a working owner task of a host that is gone does not hold the owne
   expect(w.spawned.length).toBe(1)
 })
 
+const other = (id: string, host: string, extra: object = {}) => ({ id, kind: 'code', title: id, sender: 's0', cwd: '/repo', state: 'working', started: NOW, claimed: NOW, host, agentId: `x${id}`, base: 'main', branch: `mini/${id}`, worktree: `/tmp/${id}`, ...extra })
+const seedHosts = { 'kiss-mini/beat/h1': { beat: NOW }, 'kiss-mini/host': { sessionId: 'h1', beat: NOW } }
+
+test('ORPHAN: two live hosts run side by side: neither stops the other\'s worker nor takes its ready task or watch', async ($, on) => {
+  const store = {
+    'kiss-mini/task/a1': other('a1', 'h1'),
+    'kiss-mini/task/a2': other('a2', 'h1', { state: 'ready', ahead: 1 }),
+    'kiss-mini/task/a3': other('a3', 'h1', { kind: 'watch', state: 'watching', target: 'pr 1', watch: 'pr', next: NOW + 3_600_000 }),
+    ...seedHosts,
+  }
+  const w = world(on, { store })
+  w.session = 'h2'
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  // h1 beats every minute; h2's own beat key comes from its start and its timer.
+  for (let i = 0; i < 5; i++) {
+    await w.clock.advance(60_000)
+    w.store['kiss-mini/beat/h1'] = { beat: w.clock.now() }
+  }
+  expect(w.store['kiss-mini/task/a1']).toMatchObject({ state: 'working', host: 'h1' })
+  expect(w.store['kiss-mini/task/a2'].host).toBe('h1')
+  expect(w.store['kiss-mini/task/a3'].host).toBe('h1')
+  expect(w.store['kiss-mini/beat/h2']).toBeDefined()
+})
+
+test('ORPHAN: a host with no beat for HOST_GONE loses its worker, ready task and watch; its stale beat key goes', async ($, on) => {
+  const store = {
+    'kiss-mini/task/a1': other('a1', 'h1'),
+    'kiss-mini/task/a2': other('a2', 'h1', { state: 'ready', ahead: 1 }),
+    'kiss-mini/task/a3': other('a3', 'h1', { kind: 'watch', state: 'watching', target: 'pr 1', watch: 'pr', next: NOW + 3_600_000 }),
+    ...seedHosts,
+  }
+  const w = world(on, { store })
+  w.session = 'h2'
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  await w.clock.advance(2 * 60_000)
+  expect(w.store['kiss-mini/task/a1'].state).toBe('working')
+  await w.clock.advance(2 * 60_000)
+  expect(w.store['kiss-mini/task/a1']).toMatchObject({ state: 'failed', report: 'its host session ended' })
+  expect(w.store['kiss-mini/task/a2'].host).toBe('h2')
+  expect(w.store['kiss-mini/task/a3'].host).toBe('h2')
+  expect(w.store['kiss-mini/beat/h1']).toBeUndefined()
+})
+
 test('TIMEOUT: an owner answer after 31 minutes of waiting does not stop the worker at once', async ($, on) => {
   const w = world(on)
   tools(on)
