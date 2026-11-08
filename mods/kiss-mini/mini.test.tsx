@@ -1247,7 +1247,8 @@ test('/kiss-mini stop on a working task stops its worker and marks it failed as 
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
   expect(await status($)).toContain(`${ID} code failed: fix add so it returns the sum - stopped`)
   const denied = await $.tool.call({ tool: 'Read', file_path: 'calc.py', agentId: 'w1' } as never)
-  expect(JSON.stringify(denied)).toContain('stopped')
+  expect(JSON.stringify(denied)).toContain('kiss-mini: this task was stopped (stopped). Make no more tool calls; end now.')
+  expect(JSON.stringify(denied)).not.toContain('owner')
   expect(ran).toEqual([])
   // Its last answer changes nothing.
   await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1, isAborted: false, turnId: 't2' } as never)

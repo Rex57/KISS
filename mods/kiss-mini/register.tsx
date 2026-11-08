@@ -796,7 +796,7 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     if (e.agentId === undefined || !(await isHost($))) return next(e)
     const t = (await tasks($)).find(x => x.agentId === e.agentId)
-    if (t?.stopped) return { deny: `kiss-mini: the owner stopped this task (${t.report}). Make no more tool calls; end now.` }
+    if (t?.stopped) return { deny: `kiss-mini: this task was stopped (${t.report}). Make no more tool calls; end now.` }
     if (t && GITHUB_WRITES.test(String(e.tool))) return { deny: 'kiss-mini: only the owner\'s press in the /kiss-mini pane writes to GitHub. Commit on your branch and report.' }
     // Monitor's shell command would start in the host's folder, past the cd below and the worktree guard.
     if (t && isCode(t) && String(e.tool) === 'Monitor') return { deny: 'kiss-mini: a code worker runs shell commands only with Bash, in its worktree. Use Bash.' }
