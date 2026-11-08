@@ -80,7 +80,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 4. **Implementer:** write the run's values once: `prompt.py start R W=W BR=<branch> SCR=<scratch folder>
    MAIN=<main checkout> PROJECT=<facts file> TITLE=<title> BASE=<base sha> SMOKE="<a fast end-to-end test>"
    APP="<how to start the product, and its test data>"` (R/run.json, with the running KISS `VERSION`). Write R's path in
-   full in each `prompt.py` command, not a variable: `metrics.py` finds the run by it. Show the owner
+   full in each `prompt.py` and `metrics.py` command, not a variable: `metrics.py` finds the run by it. Show the owner
    each WARN it prints for a facts line the file lacks, before the build: it says what no line means, and the file needs
    no edit unless the owner wants another behaviour. Any `prompt.py` call that prints "KISS <new>
    is installed" on stderr: tell the owner to start the run in a new session. Then `prompt.py implementer R ELAPSED=0` →
