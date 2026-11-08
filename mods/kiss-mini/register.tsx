@@ -281,6 +281,18 @@ async function seedFile($: $, t: Task, dir: string): Promise<boolean> {
   return true
 }
 
+/** The report's Tests field: its own line plus a list right under it (also after one blank line), on one line, cut to the summary limit. */
+function reportTests(answer: string) {
+  const lines = answer.split('\n')
+  const at = lines.findIndex(l => l.startsWith('Tests:'))
+  if (at < 0) return 'not reported'
+  const parts = [lines[at]!.slice('Tests:'.length).trim()]
+  const item = /^\s*[-*+]\s+/
+  let i = at + 1 + (lines[at + 1]?.trim() === '' ? 1 : 0)
+  for (; item.test(lines[i] ?? ''); i++) parts.push(lines[i]!.replace(item, '').trim())
+  return parts.filter(Boolean).join('; ').slice(0, SUMMARY_MAX) || 'not reported'
+}
+
 /** The report as the sender reads it: the report format's lines, the summary cut to 600, the log in the task folder. */
 function reportMessage(t: Task, answer: string) {
   const line = (name: string, none: string) => new RegExp(`^${name}:.*$`, 'm').exec(answer)?.[0] ?? `${name}: ${none}`
@@ -289,7 +301,7 @@ function reportMessage(t: Task, answer: string) {
     `State: ${t.state}`,
     `Summary: ${t.report ?? ''}`,
     line('Branch', 'none'),
-    line('Tests', 'not reported'),
+    `Tests: ${reportTests(answer)}`,
     `Full log: ${t.log}`,
   ].join('\n')
 }
@@ -829,7 +841,7 @@ export const register: Register = on => {
       const stat = await $.process.run(['git', '-C', t.cwd, 'diff', '--shortstat', `${t.base}...${t.branch}`])
       fields.diff = stat.stdout.trim() || 'no change'
       fields.ahead = Number((await $.process.run(['git', '-C', t.cwd, 'rev-list', '--count', `${t.base}..${t.branch}`])).stdout.trim()) || 0
-      fields.tests = /^Tests:\s*(.*)$/m.exec(e.answer)?.[1]?.trim() ?? 'not reported'
+      fields.tests = reportTests(e.answer)
       fields.pr = /^## Pull request body\s*\n([\s\S]*)/m.exec(e.answer)?.[1]?.trim() || summary
     }
     // A stop may have landed while the report was written: it stands.

@@ -54,7 +54,7 @@ skipped, and the worker does what the "Without it" column says.
    - Another agent: its start tool from `MA/../kiss-harness/references/agents.md`; the prompt is the text of
      `MA/../../claude-agents/kiss-worker.md` (below its front matter), then the brief.
    Tell the owner in one line: the id, the kind and the title.
-5. **The report:** when it arrives, save it whole as `T/report.md`, then give its `State`, `Summary`, `Branch` and
+5. **The report:** when it arrives, save it whole as `T/report.md`, then give its `State`, `Summary`, `Branch`, `Tests` and
    `Full log` lines as they are. Do not redo or extend the work. A `waiting for you` report holds a question: ask it, then start a new worker with the
    brief plus the answer.
 6. **Watch:** without the mod, a watch is checked on request: at each `status`, run its check again (`gh pr view`,

@@ -868,14 +868,49 @@ const HANDOFF_BRIEF = [
   'Suggested skills: diagnosing-bugs, tdd',
 ].join('\n')
 
-async function handoff($: any, w: ReturnType<typeof world>, back: boolean) {
+async function handoff($: any, w: ReturnType<typeof world>, back: boolean, answer = READY) {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const r = await $.tool.call({ tool: 'mcp__kiss__handoff', kind: 'bug', title: 'add subtracts', brief: HANDOFF_BRIEF, base: 'kiss-run', return: back })
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' })
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
-  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1000, isAborted: false, turnId: 't1' })
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer, durationMs: 1000, isAborted: false, turnId: 't1' })
   return r
 }
+
+// The report's Tests field: the relayed line and the pane's tests value are the same text (D23).
+const reported = (tests: string) => [
+  'State: ready', 'Summary: add(a, b) now returns the sum.', `Branch: mini/${ID}    Commits: abc1234 fix`, tests,
+  `Full log: /tmp/kiss-mini/${ID}/report.md`, '', '- a line of the full text', '## Pull request body', 'Fixes add.',
+].join('\n')
+const LONG = Array.from({ length: 100 }, (_, i) => `- check ${i}: passed`).join('\n')
+const CUT = Array.from({ length: 100 }, (_, i) => `check ${i}: passed`).join('; ').slice(0, 600)
+for (const [name, tests, want] of [
+  ['a list', 'Tests:\n- pytest: 3 passed\n- mutant: caught', 'pytest: 3 passed; mutant: caught'],
+  ['a list after one blank line', 'Tests:\n\n- pytest: 3 passed\n- mutant: caught', 'pytest: 3 passed; mutant: caught'],
+  ['an indented star list', 'Tests:\n  * pytest: 3 passed\n  * mutant: caught', 'pytest: 3 passed; mutant: caught'],
+  ['text on the line and a list', 'Tests: all ran\n- pytest: 3 passed', 'all ran; pytest: 3 passed'],
+  ['one line', 'Tests: pytest: 3 passed', 'pytest: 3 passed'],
+  ['no line', 'Note: nothing', 'not reported'],
+  ['an empty line with no list', 'Tests:', 'not reported'],
+  ['a very long list', `Tests:\n${LONG}`, CUT],
+] as const) {
+  test(`a report's Tests field relays and shows the same text: ${name}`, async ($, on) => {
+    const w = world(on)
+    await handoff($, w, true, reported(tests))
+    const text = w.sent.filter(m => !m.text.startsWith('KISS-MINI task'))[0]?.text ?? ''
+    expect(text.split('\n')).toContain(`Tests: ${want}`)
+    expect(w.store[`kiss-mini/task/${ID}`].tests).toBe(want)
+  })
+}
+
+test('a list under Summary stays with the summary, and the next field joins no Tests line', async ($, on) => {
+  const w = world(on)
+  await handoff($, w, true, ['State: ready', 'Summary: did two things', '- one', '- two', 'Tests:', '- pytest: 3 passed', 'Branch: none', '- not a test'].join('\n'))
+  const text = w.sent.filter(m => !m.text.startsWith('KISS-MINI task'))[0]?.text ?? ''
+  expect(text).toContain('Summary: did two things\n- one\n- two\n')
+  expect(text.split('\n')).toContain('Tests: pytest: 3 passed')
+  expect(w.store[`kiss-mini/task/${ID}`].tests).toBe('pytest: 3 passed')
+})
 
 test('a hand-off from the harness branches from the base it names and returns one report in the report format', async ($, on) => {
   const w = world(on, { branch: 'dev' })

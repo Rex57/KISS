@@ -47,7 +47,7 @@ The worker's final message. The receiver saves the whole message as `T/report.md
 State: ready | done | failed | waiting for you
 Summary: <at most 600 characters: what changed or the answer, or the question to the owner>
 Branch: mini/<id>    Commits: <sha> <subject>, ...
-Tests: <each acceptance check and its result>
+Tests: <each acceptance check and its result, all on this one line, separated by "; ">
 Full log: <T>/report.md
 ```
 
