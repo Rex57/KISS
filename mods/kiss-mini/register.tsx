@@ -323,8 +323,9 @@ async function refresh($: $) {
   }
 }
 
-/** Removes an ended task's folder; false when it stays and the entry must wait. A path not of the exact form removes nothing. */
+/** Removes an ended task's folder; false when the removal failed and the entry must wait. A path not of the exact form removes nothing. */
 async function removeFolder($: $, t: Task) {
+  // shortcut: a task with no stored log is looked for under the current TMPDIR, so after a changed TMPDIR its folder stays; store the folder on the task when one is seen left behind.
   const dir = t.log === undefined ? await folder($, t.id) : t.log.replace(/\/[^/]*$/, '')
   const parts = dir.split('/')
   if (!dir.startsWith('/') || parts.includes('..') || parts.slice(-2).join('/') !== `kiss-mini/${t.id}`) return true
@@ -402,7 +403,7 @@ async function tick($: $) {
           .filter(l => l.trim() && l.trim() !== '?? .codegraph/').join('\n')
         if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
         else await $.process.run(['git', '-C', repo, 'worktree', 'remove', '--force', t.worktree])
-        await save($, { ...t, state: 'done', delivered: 'merge', ...(dirty ? {} : { worktree: undefined }) })
+        await save($, { ...t, state: 'done', delivered: 'merge', finished: now, ...(dirty ? {} : { worktree: undefined }) })
         continue
       }
     }
@@ -628,7 +629,7 @@ async function deliverOnce($: $, id: string, how: Delivery) {
       if (deleted.exitCode !== 0 && (list.exitCode !== 0 || list.stdout.trim())) return failed(deleted.stderr || deleted.stdout)
     }
     const { pr, diff, tests, ...rest } = left
-    await save($, { ...rest, state: 'done', delivered: how })
+    await save($, { ...rest, state: 'done', delivered: how, finished: await $.clock.now() })
     await refresh($)
   } catch (err) {
     await failed(String(err))

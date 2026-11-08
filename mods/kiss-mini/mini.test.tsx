@@ -723,6 +723,35 @@ for (const [name, log] of [
     const w = world(on, { store: { 'kiss-mini/task/bad': ended('bad', { log }) } })
     await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
     expect(rmRuns(w)).toEqual([])
+    // Such a path cannot get better, so the entry does not wait for it.
+    expect(entry(w, 'bad')).toBeUndefined()
+  })
+}
+
+for (const how of ['a merge', 'a press'] as const) {
+  test(`prune: a task delivered by ${how} long after its report keeps its folder and entry for 7 more days`, async ($, on) => {
+    const w = world(on)
+    if (how === 'a merge') await handoff($, w, false)
+    else await ready($, w)
+    w.store[`kiss-mini/task/${ID}`].finished = NOW - 8 * DAY
+    if (how === 'a merge') w.merged = true
+    else {
+      const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+      await ui.press({ key: `push-${ID}` })
+      await ui.unmount()
+    }
+    await w.clock.advance(120_000)
+    expect(entry(w, ID).state).toBe('done')
+    expect(rmRuns(w)).toEqual([])
+    expect(entry(w, ID)).toBeDefined()
+    // The window runs from the delivery: 6 days on it holds, 8 days on it is over. (The 5 s timer forbids a real advance of days.)
+    entry(w, ID).finished -= 6 * DAY
+    await w.clock.advance(120_000)
+    expect(rmRuns(w)).toEqual([])
+    entry(w, ID).finished -= 2 * DAY
+    await w.clock.advance(120_000)
+    expect(rmRuns(w)).toHaveLength(1)
+    expect(entry(w, ID)).toBeUndefined()
   })
 }
 
