@@ -42,7 +42,8 @@ a shell profile or Codex's `config.toml`.
 - S4. **Report** what it printed: each item done, a FAIL with its output and the items not run, the checks again
   with the line of the agents left out, and the steps by hand.
 
-1. **Run the checks:** `python3 -I "$KD/scripts/doctor.py"`. It checks each agent whose CLI is on PATH; name
+1. **Run the checks:** `python3 -I "$KD/scripts/doctor.py"`. It checks each agent whose CLI is on PATH; when it says "not an agent on PATH", show that line and offer
+   `kiss-doctor setup <the agents it lists>`; name
    agents to check fewer (`claude`, `codex`, `gemini`, `antigravity`). Per agent: the CodeGraph rule (KISS's
    `rules/codegraph.md`, found by its bold lead-ins) in the global instructions file; for Claude Code also in
    `rules/**/*.md` under its config folder, with `@` imports followed for 4 hops, where a file holds it only with more
