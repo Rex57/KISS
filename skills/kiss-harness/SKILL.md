@@ -114,7 +114,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    BASE..HEAD` of the test files) adds a time value (a timeout, a sleep, a wall-clock bound), start the facts file's
    `Flake check: <command> x <n>` in the background beside the final review. A failure, or a time bound under 2 times
    the slowest time seen, is a fix before the merge gate. A final review may start while a solo review's fix round
-   still runs, because it works in its own clone of the head (the fix round keeps its own recheck).
+   still runs, because it works in its own clone of the head (the fix round keeps its own recheck); with "one at a time"
+   in the facts file, only after the solo reviewer stops.
 8. **Sort:** you sort (no subagent) by the rules `prompt.py severity R ROUND=<n>` prints, into `R/sort-<n>.json`
    (with the triage fix-now lines found after that review, each with a severity; a guard or data change is high),
    then go on. Each owner finding is a decision.
