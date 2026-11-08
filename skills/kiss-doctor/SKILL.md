@@ -19,9 +19,10 @@ a shell profile or Codex's `config.toml`.
 
 **Setup.** When the owner asks `kiss-doctor setup`:
 
-- S1. **Run** only `python3 -I "$KD/scripts/doctor.py" setup`, followed by the agents the owner names (`setup claude`),
-  if any: then the plan and the checks cover only those. It finds the OS, the shell, the package manager and the
-  agents on PATH, runs the checks, and prints a numbered plan of what is missing: each item with its command, its
+- S1. **Run** only `python3 -I "$KD/scripts/doctor.py" setup <agents>`, with the agents the owner names (`setup claude`),
+  or, when the owner names none, your own agent's name (`claude`, `codex`, `gemini` or `antigravity`), and say that
+  `kiss-doctor setup <others>` covers the rest. The plan and the checks cover only those. It finds the OS, the shell and
+  the package manager, runs the checks, and prints a numbered plan of what is missing: each item with its command, its
   source and what it changes; then the steps by hand, which setup never runs (a `sudo` command, Antigravity's copy
   steps, Codex's `/hooks` trust, a new session and its login); then the optional links. Optional items: `pyright`
   and `typescript-language-server` (only for a language the repo has files of) and CodeGraph's MCP server for each

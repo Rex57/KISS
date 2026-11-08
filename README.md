@@ -89,11 +89,11 @@ On every agent you can also just say it: "build <feature> with the KISS harness"
 ## Tools you need
 
 KISS installs only on your request, from the official sources, after you see each command. Run
-`kiss-doctor setup` (`/kiss:kiss-doctor setup` in Claude Code): it finds your OS, shell, package manager and the
-agents on your PATH, and shows a numbered plan of what is missing, each item with its command, its source and what
+`kiss-doctor setup` (`/kiss:kiss-doctor setup` in Claude Code): it finds your OS, shell and package manager, and, for the
+agent you run it from, shows a numbered plan of what is missing, each item with its command, its source and what
 it changes. You answer all, none or the numbers: it installs those, one at a time, stops at the first failure,
 runs the checks again and lists the steps only you can do. It never runs `sudo` and never edits your shell profile:
-it shows those lines for you to run. Name agents to set up only those (`kiss-doctor setup claude`). The plan also
+it shows those lines for you to run. Name agents to set up those instead (`kiss-doctor setup claude codex`). The plan also
 offers two optional kinds of item: the language servers for `cgcallers`' LSP pass (only for a language your repo has
 files of), and CodeGraph's MCP server for each agent, added through the agent's own command (Claude Code also gets the
 permission `mcp__codegraph__*`; Antigravity: a step by hand). It never runs `codegraph install`. Or install each tool
@@ -117,7 +117,7 @@ yourself from its link, once per device, then run `kiss-doctor`: it checks each 
 
 ### Install ponytail
 
-`kiss-doctor setup` installs it for each agent on your PATH (Codex: then open `/hooks`, trust its two hooks and
+`kiss-doctor setup` installs it for the agent you run it from, or each agent you name (Codex: then open `/hooks`, trust its two hooks and
 start a new thread; Antigravity: by hand). Upstream steps: [INSTALL.md](https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md).
 
 ### Install Matt Pocock's skills
@@ -126,7 +126,7 @@ KISS uses eight of them: `grilling`, `domain-modeling`, `tdd`, `codebase-design`
 `pr` and `research`. Install them once per agent, in one way only: two installs give you every skill twice. KISS
 needs no `/setup-matt-pocock-skills`, because it does not use his issue-tracker skills.
 
-`kiss-doctor setup` installs them for each agent on your PATH (Antigravity: copy the eight skill folders from a
+`kiss-doctor setup` installs them for the agent you run it from, or each agent you name (Antigravity: copy the eight skill folders from a
 clone into `~/.gemini/config/skills/`, by hand). Upstream steps: [mattpocock/skills](https://github.com/mattpocock/skills).
 
 ### User-only skills
