@@ -113,7 +113,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    to `R/review-<n>.md` (n = this round's number, from 1). **Flake check:** when the run's test diff (`git -C W diff
    BASE..HEAD` of the test files) adds a time value (a timeout, a sleep, a wall-clock bound), start the facts file's
    `Flake check: <command> x <n>` in the background beside the final review. A failure, or a time bound under 2 times
-   the slowest time seen, is a fix before the merge gate.
+   the slowest time seen, is a fix before the merge gate. A final review may start while a solo review's fix round
+   still runs, because it works in its own clone of the head (the fix round keeps its own recheck).
 8. **Sort:** you sort (no subagent) by the rules `prompt.py severity R ROUND=<n>` prints, into `R/sort-<n>.json`
    (with the triage fix-now lines found after that review, each with a severity; a guard or data change is high),
    then go on. Each owner finding is a decision.
@@ -121,7 +122,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    it with the ticket rules of [references/spec-and-tickets.md](references/spec-and-tickets.md) (its failure-path
    lines, and a message to an agent checked against that agent's standing prompt). Then `prompt.py fix R ROUND=<n>
    ELAPSED=<s>` → the SAME implementer. Check each test its answer names from the diff and the test output (run the
-   test). Save the answer to `R/answer-<n>.md`; when the round fixed a critical, high or reproduced-in-app finding, `prompt.py recheck R
+   test). Save the answer to `R/answer-<n>.md`; when the round fixed a critical, high or reproduced-in-app finding, or holds work from an owner decision, `prompt.py recheck R
    ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha>` → the SAME reviewer (its findings, if any, become `R/review-<n+1>.md`).
    Before each one, the context check of step 5: a marked implementer or reviewer is replaced by the handoff.
    At most 2 fix rounds per review and 3 per run; then a gate. At the cap, when only low or medium findings that

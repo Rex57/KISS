@@ -8,6 +8,7 @@ The reviewer reported every issue on purpose; you decide which need a fix now. A
    - "owner": a choice only the owner can make (the spec or decisions do not settle it).
    - "log": a low finding with no effect on a user, data or an owner rule (wording, style, an edge no user meets). It stays in the sort file, and you show it at the merge gate.
    A finding of medium or higher severity that fits none of these is a "fix": only a low finding goes to the log.
+   A finding on work an owner decision added touches an owner rule only when it breaks that ruling or its acceptance line.
    Each triage fix-now line found after this review (the Triage part of $R/decisions.md) joins "fix" as a finding with a severity; a guard or data change is high, so its fix gets a recheck.
 4. Write $R/sort-$ROUND.json:
    {"fix": [<findings, highest severity first>], "owner": [{"id": "", "question": ""}], "log": [], "dropped": [{"id": "", "why": ""}]}

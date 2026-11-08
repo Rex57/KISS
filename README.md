@@ -157,7 +157,7 @@ the first line of the run's `progress.md` records which skills the run used.
    a rule of yours is always fixed; a low finding with no effect on a user, data or a rule goes to the log, which
    you see at the merge gate. The same implementer fixes each one and names the test that failed before and passes
    now; the controller checks those, and the same reviewer rechecks in the product only critical, high or
-   reproduced findings. At most 2 fix rounds per review and 3 per run, then a gate (none when only low or medium
+   reproduced findings, and work from a decision of yours. At most 2 fix rounds per review and 3 per run, then a gate (none when only low or medium
    findings that touch no guard, data or rule of yours are left: the merge gate offers them as one `/kiss-mini`
    task). A risky ticket gets its own review only when it guards real data or later tickets build on its guard;
    meanwhile the implementer builds the tickets that do not depend on it.

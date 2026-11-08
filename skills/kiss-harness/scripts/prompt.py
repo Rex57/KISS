@@ -311,6 +311,14 @@ def selftest():
     assert 'A finding of medium or higher severity that fits none of these is a "fix"' in sv, "every finding has a bucket"
     assert "Start no subagent of your own" in rv, "the reviewer starts no subagent"
     fx, rc = loop["fix"], loop["recheck"]
+    assert "round 1 of your findings, or work from an owner decision, with the commits a1..b2" in rc, "the recheck's round: findings or decision work (D21)"
+    assert re.search(r"For each owner decision in \S+/fix-1\.md: judge its commits in that range by your rubric A to G, and check each of its `\(reviewer\)` lines in the running product\.", rc), rc
+    assert sv.count("touches an owner rule only when it breaks that ruling or its acceptance line") == 1, "one definition (D2)"
+    assert re.search(r"Never touch the main checkout /m, a live system \(except the exact read-only commands a ruling in \S+/decisions\.md names\), ssh or a git remote\.", rv), "D7"
+    assert "with no ruling, report that line in cannot_check and do not run it" in rv and "names its `D<n>`" in rv, "a live read, with a ruling and with none"
+    assert 'git clone -q "/w" "/s/<name>"' in rv and 'git -C "/s/<name>" checkout -q --detach def' in rv, "the reviewer's copy is a clone (D24)"
+    for name in sorted(os.listdir(T)) + ["../SKILL.md"]:
+        assert "archive" not in open(os.path.join(T, name)).read(), name       # no template or step tells a reviewer to use git archive
     assert 'codegraph sync -q "/w"' in fx and fx.index("Fix each one") < fx.index("codegraph sync -q") < fx.index("Run the acceptance"), "the fix prompt syncs CodeGraph after its edits"
     assert 'codegraph sync -q "/w"' in rc and rc.index("codegraph sync -q") < rc.index("CodeGraph"), "the recheck syncs before it reads with CodeGraph"
     print("prompt selftest ok")
