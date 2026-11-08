@@ -270,10 +270,11 @@ async function seedFile($: $, t: Task, dir: string): Promise<boolean> {
   // The index sits at the repo's root, also when the task started in a subfolder.
   const top = (await $.process.run(['git', '-C', t.cwd, 'rev-parse', '--show-toplevel']).catch(() => undefined))?.stdout.trim() || t.cwd
   const w = t.worktree ?? top
-  // A missing or slow codegraph is no seed, never a failed task.
-  const cg = (...argv: string[]) => $.process.run(['codegraph', ...argv], { cwd: w, timeoutMs: 600_000 }).catch(() => undefined)
-  if (!(await cg('status', top))?.stdout.includes(`Project: ${top}\n`)) return false
-  if (w !== top && (await cg('init', '-y', w))?.exitCode !== 0) return false
+  // A missing or slow codegraph is no seed, never a failed task. Stdin is closed: `init` must not wait for an answer.
+  const cg = (...argv: string[]) => $.process.run(['codegraph', ...argv], { cwd: w, timeoutMs: 600_000, stdin: '' }).catch(() => undefined)
+  // FORCE_COLOR or CI puts colour codes around `Project:`.
+  if (!(await cg('status', top))?.stdout.replace(/\x1b\[[0-9;]*m/g, '').includes(`Project: ${top}\n`)) return false
+  if (w !== top && (await cg('init', w))?.exitCode !== 0) return false
   const r = await cg('explore', '-p', w, t.title.slice(0, 200))
   if (r?.exitCode !== 0 || !r.stdout.trim()) return false
   await $.fs.write(`${dir}/seed.md`, r.stdout)

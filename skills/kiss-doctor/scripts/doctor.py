@@ -458,7 +458,7 @@ INSTALL = [
      "changes": "copies cgcallers.py to {bin}/cgcallers (KISS_BIN sets the folder; put it on your PATH yourself)",
      "run": ["install -m 755 {kiss}/skills/kiss-harness/scripts/cgcallers.py {bin}/cgcallers"]},
     {"key": "index", "what": "the CodeGraph index of this repo", "source": "https://github.com/colbymchenry/codegraph",
-     "changes": "adds {repo}/.codegraph/", "run": ["codegraph init -y {repo}"]},
+     "changes": "adds {repo}/.codegraph/", "run": ["codegraph init {repo}"]},
     {"key": "pyright", "what": "pyright (optional: cgcallers' LSP pass for Python)", "source": "https://github.com/microsoft/pyright",
      "changes": "adds pyright-langserver to npm's global folder (npm prefix -g)", "run": ["npm install -g pyright"]},
     {"key": "typescript-language-server", "what": "typescript-language-server (optional: cgcallers' LSP pass for JS/TS)",
@@ -972,7 +972,7 @@ def selftest():
     assert got == [
         ("CodeGraph", "device", ["npm install -g @colbymchenry/codegraph"], ""),
         ("cgcallers", "device", ["install -m 755 /k/skills/kiss-harness/scripts/cgcallers.py /b/cgcallers"], ""),
-        ("the CodeGraph index of this repo", "device", ["codegraph init -y /r/my app"], ""),
+        ("the CodeGraph index of this repo", "device", ["codegraph init /r/my app"], ""),
         ("the CodeGraph rule", "claude", ["cat /k/rules/codegraph.md >> /h/.claude/CLAUDE.md"], ""),
         ("ponytail", "claude", ["claude plugin marketplace add DietrichGebert/ponytail", "claude plugin install ponytail@ponytail"], ""),
         ("ponytail", "codex", ["codex plugin marketplace add DietrichGebert/ponytail", "codex plugin add ponytail@ponytail"], ""),
@@ -983,8 +983,8 @@ def selftest():
     items = plan(sysfor(), known)
     assert [i["n"] for i in items] == [1, 2, 3, 4, 5, 6, 7] and all(i["source"] and i["changes"] for i in items), items
     assert "/hooks" in items[5]["after"] and items[4]["after"] == "", items
-    assert items[2]["run"] == [["codegraph", "init", "-y", "/r/my app"]]     # a path with a space stays one word
-    assert command(items[2]["run"][0]) == "codegraph init -y '/r/my app'"
+    assert items[2]["run"] == [["codegraph", "init", "/r/my app"]]     # a path with a space stays one word
+    assert command(items[2]["run"][0]) == "codegraph init '/r/my app'"
     shared = plan(sysfor(agents=["gemini", "antigravity"]), {("gemini", "rule"): {"file": "/h/.gemini/GEMINI.md"},
                                                              ("antigravity", "rule"): {"file": "/h/.gemini/GEMINI.md"},
                                                              ("gemini", "Install ponytail"): {}, ("antigravity", "Install ponytail"): {},
@@ -1026,7 +1026,7 @@ def selftest():
     go = lambda s, a, r, f: setup(s, a, r, f, checks, pid=plan_id(plan(s, f(s))))   # the id the plan showed
     find = lambda system: known                               # numbered: 1 CodeGraph, 2 cgcallers, 3 index, 4 rule, 5-7 plugins
     lines, ok = go(sysfor(os="linux", pm="apt"), "1,3", runner(), lambda system: dict(known, git={}))
-    assert ok and ran == ["npm install -g @colbymchenry/codegraph", "codegraph init -y /r/my app"], ran
+    assert ok and ran == ["npm install -g @colbymchenry/codegraph", "codegraph init /r/my app"], ran
     text = "\n".join(lines)
     assert "CHECKS AGAIN" in text and "sudo apt install -y git" in text and "start a new session" not in text, text
     ran.clear()
@@ -1035,12 +1035,12 @@ def selftest():
                           "codex plugin marketplace add DietrichGebert/ponytail", "codex plugin add ponytail@ponytail"], ran
     assert "/hooks" in "\n".join(lines) and "start a new session" in "\n".join(lines), lines
     ran.clear()
-    lines, ok = go(sysfor(), "all", runner(fail={"codegraph init -y /r/my app"}), find)
+    lines, ok = go(sysfor(), "all", runner(fail={"codegraph init /r/my app"}), find)
     text = "\n".join(lines)
     assert not ok and ran == ["npm install -g @colbymchenry/codegraph",
                               "install -m 755 /k/skills/kiss-harness/scripts/cgcallers.py /b/cgcallers",
-                              "codegraph init -y /r/my app"], ran              # stops at the first failure
-    for want in ("done 1. CodeGraph", "done 2. cgcallers", "FAIL 3.", "codegraph init -y '/r/my app'", "npm ERR! 404",
+                              "codegraph init /r/my app"], ran              # stops at the first failure
+    for want in ("done 1. CodeGraph", "done 2. cgcallers", "FAIL 3.", "codegraph init '/r/my app'", "npm ERR! 404",
                  "not run: 4, 5, 6, 7", "CHECKS AGAIN"):
         assert want in text, (want, text)
     for answer in ("8", "0", "1,x", "rm -rf /", "", "²", "٣"):   # outside the plan: refused, nothing runs (F6)

@@ -24,12 +24,14 @@ type Opts = {
   plugins?: { id: string; enabled: boolean; installPath: string; readFromFolder?: string }[]
   /** The checkout has a CodeGraph index: `codegraph status <it>` names it as its project. */
   indexed?: boolean
+  /** `codegraph status` prints colour codes, as with FORCE_COLOR or CI set. */
+  colour?: boolean
   /** The repo's root, as `git rev-parse --show-toplevel` answers it (default: cwd). */
   top?: string
   /** How long `codegraph explore` (the seed) takes, on the mock clock. */
   seedMs?: number
 }
-function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, top = cwd, seedMs = 0 }: Opts = {}) {
+function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, colour = false, top = cwd, seedMs = 0 }: Opts = {}) {
   const w = {
     session: 's1',
     branch,
@@ -63,6 +65,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     branchGone: false,
     /** What `git worktree list --porcelain` prints. */
     worktrees: '',
+    /** The stdin each `codegraph init` got: '' is closed at once. */
+    initStdin: [] as (string | undefined)[],
   }
   w.clock = mock.clock(on, { now: NOW })
   // The store in memory, readable by the test: the ledger is the contract every session reads.
@@ -100,7 +104,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     if (e.argv[0] === 'codegraph' && e.argv[1] === 'explore' && seedMs) await w.clock.advance(seedMs)
     if (hang.includes(e.argv[0] ?? '') || hang.includes(`${e.argv[3]} ${e.argv[4]}`)) throw new Error(`${e.argv[0]}: timed out after 120000 ms`)
     if (e.argv[0] === 'codegraph') {
-      const out = e.argv[1] === 'status' ? (indexed ? `CodeGraph Status\n\nProject: ${top}\n` : 'CodeGraph not initialized\n') : e.argv[1] === 'explore' ? 'SEED: calc.py add()\n' : ''
+      if (e.argv[1] === 'init') w.initStdin.push(e.init?.stdin)
+      const out = e.argv[1] === 'status' ? (indexed ? `CodeGraph Status\n\n${colour ? '\x1b[36mProject:\x1b[0m' : 'Project:'} ${top}\n` : 'CodeGraph not initialized\n') : e.argv[1] === 'explore' ? 'SEED: calc.py add()\n' : ''
       return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (e.argv[0] === 'gh' && e.argv[2] === 'view') {
@@ -1363,7 +1368,17 @@ test('in an indexed repo a code task\'s brief names W, the CodeGraph commands wi
   expect(w.files[`${dir}/seed.md`]).toBe('SEED: calc.py add()\n')
   // The new worktree gets its own index before the seed reads it.
   const cg = w.runs.filter(a => a[0] === 'codegraph').map(a => a.slice(0, 4).join(' '))
-  expect(cg).toEqual([`codegraph status ${cwd}`, `codegraph init -y ${dir}/wt`, `codegraph explore -p ${dir}/wt`])
+  expect(cg).toEqual([`codegraph status ${cwd}`, `codegraph init ${dir}/wt`, `codegraph explore -p ${dir}/wt`])
+})
+
+test('a coloured `codegraph status` of the checkout gives the worker its seed, and the worktree\'s index starts with no -y and stdin closed', async ($, on) => {
+  const w = world(on, { indexed: true, colour: true })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(w.files[`/tmp/kiss-mini/${ID}/seed.md`]).toBe('SEED: calc.py add()\n')
+  expect(w.runs.filter(a => a[1] === 'init')).toEqual([['codegraph', 'init', `/tmp/kiss-mini/${ID}/wt`]])
+  expect(w.initStdin).toEqual([''])
 })
 
 test('a code task\'s brief names ponytail first, as handoff.md\'s skill rows do', async ($, on) => {

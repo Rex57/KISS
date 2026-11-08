@@ -10,7 +10,7 @@ exists (a bare name, `Class.method` or `Class::method`), `codegraph node` and `c
 `codegraph explore` of it when its kind is a type, TYPE_KINDS), then the ticket's `seeds` queries through `explore`. A
 ticket whose files CodeGraph does not index gets "No code seed". The rules live in the implementer prompt.
 """
-import json, os, subprocess, sys, tempfile
+import json, os, re, subprocess, sys, tempfile
 
 CALLERS_LIMIT = 100   # rules/codegraph.md, "Subagents" item 3
 NO_CODE = "No code seed: this ticket edits files CodeGraph does not index."
@@ -104,7 +104,7 @@ def seed(W, t, indexed, run=run):
 
 def main(R, W, branch, ids, run=run):
     tickets = {t["id"]: t for t in json.load(open(os.path.join(R, "tickets.json")))}
-    status = run("codegraph", "status", W).stdout
+    status = re.sub(r"\x1b\[[0-9;]*m", "", run("codegraph", "status", W).stdout)      # FORCE_COLOR or CI colours it
     assert f"Project: {W}" in status, f"wrong or missing index for {W}:\n{status}"
     stale = sync(W, run)
     indexed, unindexed = file_types(W, run)
@@ -194,6 +194,18 @@ def selftest():
         seed(W, {"seeds": ["q%d" % i for i in range(n)]}, [".py"], counting)
         got = [list(a[4:-1]) for a in calls if a[1] == "explore"]
         assert got == [flag] * n, (n, got)
+    colour = lambda path: f"\x1b[1m\nCodeGraph Status\n\x1b[0m\n\x1b[36mProject:\x1b[0m {path}\n"     # D27: FORCE_COLOR or CI set
+    with tempfile.TemporaryDirectory() as R:
+        json.dump([], open(os.path.join(R, "tickets.json"), "w"))
+        painted = lambda path: lambda *a, timeout=120: (subprocess.CompletedProcess(a, 0, colour(path), "") if a[1] == "status"
+                                                        else fake(*a, timeout=timeout))
+        main(R, W, "br", [], run=painted(W))                  # W's own coloured status passes the index check
+        try:
+            main(R, W, "br", [], run=painted("/w/other"))
+        except AssertionError as e:
+            assert "wrong or missing index" in str(e), e
+        else:
+            raise AssertionError("another path's coloured status passed the index check")
     print("briefs selftest ok")
 
 

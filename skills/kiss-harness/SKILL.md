@@ -74,7 +74,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    it, the rule as stated here: cut each line that no person asked for, and record the cut in `decisions.md`. Then the **tickets gate**: ask about the breakdown and show the defaults you took; change it until
    the owner says yes, then `tickets.py render R`.
 3. **Worktree** `W = <repo>/.kiss/worktrees/<run>/` (git-ignored; never a session scratch folder, which a session
-   restart can delete) on a new branch from the main branch; `codegraph init -y "W"`; `tickets.py freeze R` (from then
+   restart can delete) on a new branch from the main branch; `codegraph init "W" </dev/null`; `tickets.py freeze R` (from then
    on `check` refuses any change but `passes`); `R/progress.md` with one line: the skills of the table above that the
    run uses and their plugin versions (the version folder in each skill's base path).
 4. **Implementer:** write the run's values once: `prompt.py start R W=W BR=<branch> SCR=<scratch folder>

@@ -5,7 +5,7 @@ section holds its content.
 
 **Which index.** Decide once per checkout, before the first query. `W` = `git rev-parse --show-toplevel` in the folder
 of the files you read or edit. `W/.codegraph/` exists → use it. Else, when `W` is a git worktree whose main checkout
-has an index → run `codegraph init -y "W"` now. Else skip CodeGraph: indexing is the user's decision.
+has an index → run `codegraph init "W" </dev/null` now. Else skip CodeGraph: indexing is the user's decision.
 `codegraph status "W"` must print `Project: W`; any other path is another branch's index.
 
 **Every call names `W`:** CLI `-p "W"`; `status`, `sync` and `init` take `"W"` as their argument; MCP
