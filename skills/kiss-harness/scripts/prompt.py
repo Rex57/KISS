@@ -23,7 +23,9 @@ import json, os, re, string, sys
 HB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.dirname(os.path.dirname(HB))   # the plugin; in a plugin cache, its version folder
 MANIFESTS = (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "gemini-extension.json", ".antigravity-plugin/plugin.json")
-FACTS = ("Full check time:", "Smoke check", "Merge:", "After merge:", "Flake check:", "Shared test resources:")
+FACTS = {"Full check time:": "the budget adds no time for the full check", "Smoke check": "the SMOKE value is the only smoke check",
+         "Merge:": "the merge gate asks", "After merge:": "a later commit asks", "Flake check:": "the close starts no flake check",
+         "Shared test resources:": "product checks are not held"}   # each line start warns on, and what no line means (D8)
 T = os.path.join(HB, "templates")
 PER_TICKET_S, REVIEW_S = 600, 7200
 STEPS = ("implementer", "reviewer", "severity", "fix", "recheck")
@@ -108,7 +110,7 @@ def start(R, values, root=ROOT):
     try:
         with open(values.get("PROJECT", "")) as p:
             text = p.read()
-        out += [f"WARN: the facts file has no `{line}` line" for line in FACTS
+        out += [f"WARN: the facts file has no `{line}` line: {meaning}" for line, meaning in FACTS.items()
                 if not re.search(r"^\W*" + re.escape(line), text, re.M)]
     except OSError:
         out.append(f"WARN: no facts file at {values.get('PROJECT', '(no PROJECT)')}")
@@ -257,6 +259,15 @@ def selftest():
             o, e = call(root, "start", R, "PROJECT=" + facts, *start_keys)
             warns = [l for l in o.splitlines() if l.startswith("WARN")]
             assert len(warns) == len(warned) and all(sum(w in l for l in warns) == 1 for w in warned), (body, o)
+            assert "Models" not in o, o                                     # an optional line: no WARN
+            if warned == list(six):
+                assert warns == [
+                    "WARN: the facts file has no `Full check time:` line: the budget adds no time for the full check",
+                    "WARN: the facts file has no `Smoke check` line: the SMOKE value is the only smoke check",
+                    "WARN: the facts file has no `Merge:` line: the merge gate asks",
+                    "WARN: the facts file has no `After merge:` line: a later commit asks",
+                    "WARN: the facts file has no `Flake check:` line: the close starts no flake check",
+                    "WARN: the facts file has no `Shared test resources:` line: product checks are not held"], warns
             assert json.load(open(os.path.join(R, "run.json")))["VERSION"] == "2.1.1" and e == "", (body, o, e)
         quiet = call(root, "implementer", R, "ELAPSED=1")
         assert quiet[1] == "" and "Run 9" in quiet[0], "an older version and a folder that is not one: nothing"

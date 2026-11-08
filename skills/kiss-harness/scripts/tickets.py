@@ -112,12 +112,22 @@ def waits_for(rows, tid):
 
 
 def one_at_a_time(run):
-    """True when the facts file of run/run.json has a `Shared test resources:` line that says "one at a time" (D17)."""
+    """True when the facts file of run/run.json has a `Shared test resources:` list item that says "one at a time"
+    (D17), the whole item: up to a blank line, the next item or a heading (D20)."""
     try:
         with open(os.path.join(run, "run.json")) as f, open(json.load(f)["PROJECT"]) as p:
-            return any(re.match(r"\W*Shared test resources:", l) and "one at a time" in l.lower() for l in p)
+            lines = p.readlines()
     except (OSError, KeyError, ValueError, TypeError):
         return False
+    item = None
+    for l in lines:
+        if item is None:
+            item = l if re.match(r"\W*Shared test resources:", l) else None
+        elif not l.strip() or re.match(r"\s*(?:[-*+]\s|\d+[.)]\s|#)", l):
+            break
+        else:
+            item += " " + l
+    return "one at a time" in " ".join((item or "").lower().split())
 
 
 def continue_text(rows, elapsed=None, budget=None, review=None, hold=False):
@@ -198,7 +208,18 @@ def selftest():
             json.dump({"PROJECT": facts}, f)
         for body, held in (("- Shared test resources: one Postgres; One at a time.\n", True),
                            ("- Shared test resources: one Postgres, 3 sessions at once\n", False),
-                           ("- Merge: ask\n- Note: one at a time is fine\n", False), (None, False)):
+                           ("- Merge: ask\n- Note: one at a time is fine\n", False), (None, False),
+                           # D20: the whole list item, up to a blank line, the next item or a heading
+                           ("- Shared test resources: one Postgres, used\n  one at a time\n- Merge: ask\n", True),
+                           ("- Shared test resources: one Postgres, used\none at a time\n- Merge: ask\n", True),
+                           ("- Shared test resources: one Postgres, used one\n  at a\n  time.\n", True),
+                           ("- Shared test resources: one Postgres\n  - never one at a time\n", False),
+                           ("- Shared test resources: one Postgres\n  - 3 sessions\n  - the app: one at a time\n", False),
+                           ("- Tests:\n  - Shared test resources: one Postgres,\n    one at a time\n- Merge: ask\n", True),
+                           ("- Shared test resources: one Postgres\n\none at a time\n", False),
+                           ("- Shared test resources: one Postgres\n* one at a time\n", False),
+                           ("- Shared test resources: one Postgres\n1. one at a time\n", False),
+                           ("- Shared test resources: one Postgres\n## one at a time\n", False)):
             if body is not None:
                 with open(facts, "w") as f:
                     f.write(body)
@@ -210,6 +231,8 @@ def selftest():
                 with contextlib.redirect_stdout(out):
                     main(["tickets.py", "continue", run, *argv])
                 assert out.getvalue() == want + "\n", (body, argv, out.getvalue())
+        os.remove(os.path.join(run, "run.json"))                         # no run.json: no hold and no failure
+        assert one_at_a_time(run) is False
     with tempfile.TemporaryDirectory() as root:                          # the repo that holds R
         os.makedirs(os.path.join(root, "app"))
         open(os.path.join(root, "app", "x.py"), "w").close()

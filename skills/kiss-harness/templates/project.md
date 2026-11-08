@@ -18,6 +18,8 @@ project's instructions file (CLAUDE.md, AGENTS.md or GEMINI.md) already says.
 - Shared test resources: what the tests and the full check start (a database, a server, the app), its memory or
   connection limit, and how many agents or sessions may use it at once ("one at a time" holds the implementer's
   product checks while a solo reviewer uses it).
+- Models: implementer <model>, reviewer <model>, effort <level> (optional; with no line, the rule in the harness's
+  `references/agents.md` holds).
 - Build steps: which change needs which build, and what goes in the same commit (for example: a change under
   `web/` ends with `npm run build`, and the built files go in the same commit).
 - Commit trailer: the exact lines each commit message ends with, or "none".

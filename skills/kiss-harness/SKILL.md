@@ -80,10 +80,11 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 4. **Implementer:** write the run's values once: `prompt.py start R W=W BR=<branch> SCR=<scratch folder>
    MAIN=<main checkout> PROJECT=<facts file> TITLE=<title> BASE=<base sha> SMOKE="<a fast end-to-end test>"
    APP="<how to start the product, and its test data>"` (R/run.json, with the running KISS `VERSION`). Show the owner
-   each WARN it prints for a facts line the file lacks, before the build. Any `prompt.py` call that prints "KISS <new>
+   each WARN it prints for a facts line the file lacks, before the build: it says what no line means, and the file needs
+   no edit unless the owner wants another behaviour. Any `prompt.py` call that prints "KISS <new>
    is installed" on stderr: tell the owner to start the run in a new session. Then `prompt.py implementer R ELAPSED=0` →
-   start ONE subagent with that text: your strongest model at medium effort, in the background. Give every path
-   absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
+   start ONE subagent with that text, on the model and effort of the Models rule (`references/agents.md`), in the
+   background. Give every path absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` (empty) and `git -C MAIN
    status` (empty for the files the run's diff `git -C W diff --name-only BASE..HEAD` names; another session's files
    do not stop the run), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). **Triage** each new
@@ -108,7 +109,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    resources:` says "one at a time"), send the implementer "product free" as soon as the solo reviewer stops; it then
    runs its held checks (step 5: a stop on a held check waits for it).
 7. **Review once at the end:** `prompt.py reviewer R HEAD=<head> ELAPSED=<s>` (a risky ticket's review adds
-   `BASE=<the commit before it>`) → a NEW subagent on your strongest model at medium effort. Save its last message
+   `BASE=<the commit before it>`) → a NEW subagent on the model and effort of the Models rule. Save its last message
    to `R/review-<n>.md` (n = this round's number, from 1). **Flake check:** when the run's test diff (`git -C W diff
    BASE..HEAD` of the test files) adds a time value (a timeout, a sleep, a wall-clock bound), start the facts file's
    `Flake check: <command> x <n>` in the background beside the final review. A failure, or a time bound under 2 times
