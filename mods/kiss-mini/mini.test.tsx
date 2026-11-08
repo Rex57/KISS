@@ -782,6 +782,17 @@ test('prune: a removal that fails keeps the entry, and a later prune removes bot
   expect(entry(w, 'old')).toBeUndefined()
 })
 
+test('prune: a removal that keeps failing toasts its stderr once per task, and the retries go on', async ($, on) => {
+  const w = world(on, { fail: { rm: { stderr: 'rm: Permission denied' } }, store: { 'kiss-mini/task/old': ended('old') } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(w.toasts.filter(t => t.includes('Permission denied'))).toHaveLength(1)
+  expect(w.toasts.at(-1)).toContain('old')
+  expect(entry(w, 'old').rmToasted).toBe(true)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect(rmRuns(w)).toHaveLength(2)
+  expect(w.toasts.filter(t => t.includes('Permission denied'))).toHaveLength(1)
+})
+
 test('prune: an rm that cannot run keeps the entry and raises nothing; the session starts', async ($, on) => {
   const w = world(on, { hang: ['rm'], store: { 'kiss-mini/task/old': ended('old'), 'kiss-mini/task/next': ended('next', { state: 'working', finished: undefined }) } })
   await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)

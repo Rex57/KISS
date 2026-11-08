@@ -48,6 +48,8 @@ export type Task = {
   report?: string
   log?: string
   notified?: boolean
+  /** Prune's rm failed and its error was toasted: the retries stay quiet. */
+  rmToasted?: boolean
   /** A code task: its base branch, its mini/<id> branch and worktree, and what the worker's report said. */
   base?: string
   branch?: string

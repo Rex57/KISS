@@ -181,12 +181,14 @@ def check_rule(agent, text, files, marks, rule=""):
         out = [("FAIL", agent, f"CodeGraph rule: no {shown}", "The CodeGraph rule")]
     elif not found:
         out = [("FAIL", agent, f"CodeGraph rule: not in {shown}", "The CodeGraph rule")]
+    elif not stale and agent == "claude" and sum(not differs(part, marks, rule) for part in found) > 1:
+        out = [("WARN", agent, f"CodeGraph rule is in two files of {shown} and loads twice: delete the section of the one you do not keep", "The CodeGraph rule")]
     elif not stale:
         out = [("OK", agent, f"CodeGraph rule in {shown}", "")]
     elif lacks:
-        out = [("WARN", agent, f"CodeGraph rule in {named} is an older or edited copy: lacks {', '.join(lacks)}: run kiss-doctor setup", "The CodeGraph rule")]
+        out = [("WARN", agent, f"CodeGraph rule in {named} is an older or edited copy: lacks {', '.join(lacks)}: run kiss-doctor setup {agent}", "The CodeGraph rule")]
     else:
-        out = [("WARN", agent, f"CodeGraph rule in {named} differs from KISS's text: run kiss-doctor setup", "The CodeGraph rule")]
+        out = [("WARN", agent, f"CodeGraph rule in {named} differs from KISS's text: run kiss-doctor setup {agent}", "The CodeGraph rule")]
     if re.search(r"^\W*CODEGRAPH_START\W*$", text, re.M):  # the marker line, not the rule's own mention of it
         out.append(("WARN", agent, "a CODEGRAPH_START block from `codegraph install`: delete it", "The CodeGraph rule"))
     return out
@@ -801,16 +803,21 @@ def detect():
 
 def claude_rule_gap(level, files, marks, rule):
     """Claude Code's rule item: none yet, a new copy; a stale section in CLAUDE.md, or a section beside a copy (a move
-    that stopped halfway), the move; another holder that differs (a stale copy, a hand-made import), its replace; else nothing."""
+    that stopped halfway), the move; another holder that differs (a stale copy, a hand-made import): the move beside an exact
+    copy (one copy must load), else the replace; two exact holders (no stale one) that are not a section beside the copy: nothing, check_rule warns."""
     main, copy = files[0], os.path.join(os.path.dirname(files[0]), "rules", "kiss.md")
     if level == "FAIL":
         return {("claude", "rule-new"): {"copy": copy}}
     real = os.path.realpath(main)
     beside = os.path.isfile(copy) and os.path.isfile(main) and holds(read(main), marks)
     holder = rule_file(files, marks, 4, rule)
-    if beside or level == "WARN" and holder == real:
-        return {("claude", "rule-move"): dict(replace_item(real, main, marks), copy=copy)}
-    return {("claude", "rule-replace"): replace_item(holder, main, marks)} if level == "WARN" else {}
+    if not holder and not beside:
+        return {}
+    exact_copy = os.path.isfile(copy) and holds(read(copy), marks) and not differs(read(copy), marks, rule)
+    target = holder if holder and (holder == real or exact_copy and holder != os.path.realpath(copy)) else real if beside else None
+    if target:
+        return {("claude", "rule-move"): dict(replace_item(target, main, marks), copy=copy)}
+    return {("claude", "rule-replace"): replace_item(holder, main, marks)}
 
 
 def gaps(system):
@@ -884,7 +891,7 @@ def selftest():
         same = "# Mine\n\n## CodeGraph\n\n**Which index.**  a\n**`callers` is incomplete:** b\n\n## Other\nmore\n"
         assert check_rule("claude", same, [main], marks, rule) == [("OK", "claude", "CodeGraph rule in " + main, "")]
         old = check_rule("claude", "**Which index.** a\n**`callers` is incomplete:** older b\n", [main], marks, rule)
-        assert old[0][0] == "WARN" and "differs from KISS's text: run kiss-doctor setup" in old[0][2], old
+        assert old[0][0] == "WARN" and "differs from KISS's text: run kiss-doctor setup claude" in old[0][2], old
         assert check_rule("claude", "**Which index.** **`callers` is incomplete** only", [main], three, rule)[0][0] == "WARN"   # lacks a lead-in: as before
         assert check_rule("claude", "nothing", [main], marks, rule)[0][0] == "FAIL"
         assert len(check_rule("claude", "Which index `callers` is incomplete: delete a `CODEGRAPH_START` block", [main], marks)) == 1
@@ -1617,9 +1624,16 @@ def selftest():
                 said = check_rule("claude", text, files, markers(), real)[0]
                 assert said[0] == "WARN" and os.path.realpath(old_copy) in said[2], said
                 mine = rule_items()
+                if rel == "a-old.md":           # F300: beside an exact copy the stale holder gets the move, so one copy loads
+                    assert [i["what"] for i in mine] == ["move the CodeGraph section of %s to %s" % (os.path.realpath(old_copy), copy)], mine
+                    lines, ok, *_ = apply(mine, "all")
+                    assert ok and real not in whole(old_copy) and whole(copy) == real and level() == "OK" and rule_items() == [], lines
+                    continue
                 assert [i["what"] for i in mine] == ["replace the CodeGraph section of " + os.path.realpath(old_copy)], mine
                 lines, ok, *_ = apply(mine, "all")
-                assert ok and whole(old_copy) == real and whole(main_md) == own and level() == "OK" and rule_items() == [], lines
+                assert ok and whole(old_copy) == real and whole(main_md) == own and rule_items() == [], lines
+                said = check_rule("claude", *agent_setup("claude")[:2], markers(), real)[0]     # F300: two exact holders, no item
+                assert said[0] == "WARN" and "twice" in said[2], said
             # F13: the WARN names the one file that holds the rule, and setup does the rest: for all four agents
             for agent, env, name in (("claude", "CLAUDE_CONFIG_DIR", "CLAUDE.md"), ("codex", "CODEX_HOME", "AGENTS.md")):
                 c, main_md, copy = fresh()

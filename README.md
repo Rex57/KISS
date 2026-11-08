@@ -214,7 +214,7 @@ agy plugin install ./KISS
 
 **Then, after the first install and after each KISS update, run `kiss-doctor setup`** (Claude Code:
 `/kiss:kiss-doctor setup`; Codex: `$kiss:kiss-doctor setup`; Gemini CLI: say "kiss doctor setup"; Antigravity:
-`/kiss-doctor setup`). A new version can call a new skill or tool: setup shows what your device lacks and installs only
+`/kiss-doctor setup`). A new version can call a new skill or tool: setup shows what this agent lacks (repeat it for each agent you use) and installs only
 what you approve (see "Tools you need").
 
 Each agent reads the same `skills/` folder. The manifests are `.claude-plugin/` (Claude Code),

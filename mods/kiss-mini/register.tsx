@@ -334,7 +334,12 @@ async function removeFolder($: $, t: Task) {
   const dir = t.log === undefined ? await folder($, t.id) : t.log.replace(/\/[^/]*$/, '')
   const parts = dir.split('/')
   if (!dir.startsWith('/') || parts.includes('..') || parts.slice(-2).join('/') !== `kiss-mini/${t.id}`) return true
-  return (await $.process.run(['rm', '-rf', '--', dir]).catch(() => undefined))?.exitCode === 0
+  const r = await $.process.run(['rm', '-rf', '--', dir]).catch(() => undefined)
+  if (r && r.exitCode !== 0 && !t.rmToasted) {
+    await save($, { ...((await $.store.get(TASK + t.id)) as Task), rmToasted: true })
+    $.ui.toast(`kiss-mini ${t.id}: its folder stays, rm failed: ${r.stderr.trim().slice(0, 200)}`)
+  }
+  return r?.exitCode === 0
 }
 
 /** Host: the ledger forgets ended tasks after 7 days, each with its folder; one that still holds a worktree or a branch waits for its Discard. */
