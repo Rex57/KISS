@@ -1347,6 +1347,23 @@ test('ORPHAN: a host with no beat for HOST_GONE loses its worker, ready task and
   expect(w.store['kiss-mini/beat/h1']).toBeUndefined()
 })
 
+test('a stopped task with return set sends its report to the sender; a refused send is no error', async ($, on) => {
+  const w = world(on, { store: { 'kiss-mini/task/a1': other('a1', 's1', { return: true, sender: 'c9', log: '/tmp/kiss-mini/a1/report.md' }) } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  await w.clock.advance(31 * 60_000)
+  expect(w.store['kiss-mini/task/a1'].state).toBe('failed')
+  expect(JSON.stringify(w.sent.at(-1))).toContain('c9')
+  expect(w.sent.at(-1)?.text).toContain('State: failed')
+  expect(w.sent.at(-1)?.text).toContain('timed out after 30 minutes')
+})
+
+test('a stopped task whose report send is refused still ends failed', async ($, on) => {
+  const w = world(on, { delivered: false, store: { 'kiss-mini/task/a2': other('a2', 's1', { return: true, sender: 'c9' }) } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  await w.clock.advance(31 * 60_000)
+  expect(w.store['kiss-mini/task/a2'].state).toBe('failed')
+})
+
 test('TIMEOUT: an owner answer after 31 minutes of waiting does not stop the worker at once', async ($, on) => {
   const w = world(on)
   tools(on)

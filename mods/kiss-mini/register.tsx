@@ -372,7 +372,9 @@ async function look($: $, t: Task): Promise<{ state: State; status: string }> {
 
 /** Host: ends a task's worker by denying its every tool call; its last report is ignored. A slot frees. */
 async function stop($: $, t: Task, why: string) {
-  await save($, { ...t, state: 'failed', report: why, stopped: true, finished: await $.clock.now() })
+  const stopped: Task = { ...t, state: 'failed', report: why, stopped: true, finished: await $.clock.now() }
+  await save($, stopped)
+  if (t.return) await $.session.send({ to: { sessionId: t.sender }, text: reportMessage(stopped, '') }).catch(() => {})
   for (const x of await tasks($)) if (!x.host) await run($, x.id)
   await refresh($)
 }
