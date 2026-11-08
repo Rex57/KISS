@@ -42,8 +42,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    docs are on or off. Write each answer into the file.
 3. **Runs** go in `<repo>/.kiss/runs/` and their worktrees in `<repo>/.kiss/worktrees/`: add both folders (or all
    of `.kiss/`) to `.gitignore` or `.git/info/exclude`, as the owner says.
-4. **CodeGraph** indexes the repo: `codegraph status "<repo>"` prints `Project: <repo>`. The global CodeGraph rule
-   (`rules/codegraph.md` in the KISS repo) is in your instructions file.
+4. **CodeGraph** indexes the repo: `codegraph status "<repo>"` prints `Project: <repo>`. Your agent loads the global CodeGraph
+   rule (`rules/codegraph.md` in the KISS repo); `kiss-doctor setup` puts it in place.
 
 ## A run
 

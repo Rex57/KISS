@@ -1,7 +1,7 @@
 ## CodeGraph — the rule
 
-**Installer trap:** `codegraph install` adds a `CODEGRAPH_START`/`CODEGRAPH_END` block to this file: delete it; this
-section holds its content.
+**Installer trap:** `codegraph install` adds a `CODEGRAPH_START`/`CODEGRAPH_END` block to your instructions file: delete it;
+this rule holds its content.
 
 **Which index.** Decide once per checkout, before the first query. `W` = `git rev-parse --show-toplevel` in the folder
 of the files you read or edit. `W/.codegraph/` exists → use it. Else, when `W` is a git worktree whose main checkout

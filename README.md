@@ -67,7 +67,7 @@ What KISS adds:
 | Skill | What it does |
 |---|---|
 | `kiss-harness` | The questions (decisions recorded in `decisions.md`), the spec, the tickets, then one implementer, one review that uses the product, at most 2 fix rounds per review and 3 per run, a metrics line, and the owner's merge. Its scripts check the tickets, fill the prompts, seed each ticket with CodeGraph and keep the time budget (10 minutes per ticket, plus 2 hours for reviews and fixes, plus the full check time from the facts file). |
-| `kiss-doctor` | Checks a device for a run: the CodeGraph rule in each agent's global instructions file, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix. `kiss-doctor setup` shows a numbered plan of what is missing, and KISS installs only on your request, from the official sources, after you see each command. |
+| `kiss-doctor` | Checks a device for a run: the CodeGraph rule that each agent loads, the skills KISS calls (installed, enabled, once, callable by the model) and the tools. It reports each problem with its fix. `kiss-doctor setup` shows a numbered plan of what is missing, and KISS installs only on your request, from the official sources, after you see each command. |
 | `kiss-mini` | A small side task in a background worker: a code change on its own `mini/<id>` branch, a read-only question, or a watch on a pull request, a CI run or a test command. kiss-harness hands off work outside its tickets to it. On Claude Code a mod answers `/kiss-mini` (`/kiss-mini <task>`, `/kiss-mini --now <task>` to skip the worker's checks, `/kiss-mini ask <question>`, `/kiss-mini watch pr <n>` / `run <id>` / `<test command>`, `/kiss-mini stop <id>`, `/kiss-mini status`, `/kiss-mini` alone opens the pane), a band with the counts, and the delivery buttons (Merge into the base, Push, Draft PR, Discard); only your press delivers. |
 | `kiss-housekeeping` | "Clean up the docs": a First run, on your ask, gives each fact one home, sorts pages by kind (living, log, record, history), builds a map, retires stale pages, fixes old names, moves files without breaking code or tests, installs a docs gate in your tests (`tools/check_docs.py`, your own copy) and proves the result with a routing test. After that, each harness close runs its Upkeep when your facts file names the gate. |
 | `kiss-system-design` | First version. From a new product idea to a plan of harness runs: a product brief, a decision map (decisions so far, open decisions typed research / prototype / grilling / task, not yet clear, out of scope), one decision at a time with you (research in the background), then a system design document and an ordered run plan in your docs. Its working files stay in the git-ignored `.kiss/design/<name>/`; continue a design by its name. An idea that fits one run goes to `kiss-harness`. |
@@ -221,19 +221,24 @@ Each agent reads the same `skills/` folder. The manifests are `.claude-plugin/` 
 `.codex-plugin/` and `.agents/plugins/marketplace.json` (Codex), `gemini-extension.json` (Gemini CLI) and
 `.antigravity-plugin/` (Antigravity).
 
-## The CodeGraph rule: add it to your global instructions
+## The CodeGraph rule: one per device, for each agent
 
 [`rules/codegraph.md`](rules/codegraph.md) tells every agent how to use CodeGraph: which index, a `-p` on every
-call, the gaps of `callers`, and how to brief a subagent. Add it once per device to the global instructions file
-of each agent you use:
+call, the gaps of `callers`, and how to brief a subagent. Each agent you use needs it once per device:
 
-| Agent | Global instructions file | Command (from this repo's folder) |
+| Agent | Where it goes | Command (from this repo's folder) |
 |---|---|---|
-| Claude Code | `~/.claude/CLAUDE.md` | `cat rules/codegraph.md >> ~/.claude/CLAUDE.md` |
+| Claude Code | its own file, `~/.claude/rules/kiss.md` (`CLAUDE_CONFIG_DIR` moves it) | `mkdir -p ~/.claude/rules && cp rules/codegraph.md ~/.claude/rules/kiss.md` |
 | Codex | `~/.codex/AGENTS.md` | `cat rules/codegraph.md >> ~/.codex/AGENTS.md` |
 | Gemini CLI and Antigravity | `~/.gemini/GEMINI.md` (both read it) | `cat rules/codegraph.md >> ~/.gemini/GEMINI.md` |
 
-`kiss-doctor setup` appends it for you, on your answer, and replaces an older or edited copy: the section that holds
+`kiss-doctor setup` does this for you, on your answer. For Claude Code it writes the copy and leaves your `CLAUDE.md`
+alone. A later update changes only that file: an older or edited copy is replaced, after a backup whose name does not end in `.md`, so
+keep your own lines in your own file, not in the copy. An exact section already in `CLAUDE.md` stays. An older or edited section moves: setup writes
+the copy, backs up `CLAUDE.md` beside it, and removes the section, with your other lines kept. Claude Code loads the file when a session
+starts, so start a new session. **When you uninstall KISS:** `rm ~/.claude/rules/kiss.md`.
+
+For the other agents, setup appends the rule, and replaces an older or edited copy: the section that holds
 it (from the heading above it, or from its first line under the file's `# ` title or after a `CODEGRAPH_END` line, to
 the next `#` or `##` heading or a `CODEGRAPH_START` line) becomes `rules/codegraph.md`, after a backup beside the file that keeps your own lines. Read the file first: append it once, not again on each update. If `codegraph install` added a
 `CODEGRAPH_START`/`CODEGRAPH_END` block to the same file, delete that block.
@@ -290,7 +295,7 @@ agent session in a KISS checkout to apply it. Read it before you post: the repo 
 .agents/plugins/             Codex marketplace
 .antigravity-plugin/         Antigravity manifest
 gemini-extension.json        Gemini CLI manifest
-rules/codegraph.md           the CodeGraph rule for the global instructions file
+rules/codegraph.md           the CodeGraph rule: copied to ~/.claude/rules/kiss.md for Claude Code, a section of the global instructions file for the others
 LICENSE, NOTICE              Apache-2.0 and the author credit; THIRD_PARTY_NOTICES.md: Matt Pocock's MIT license
 rules/feedback.md            the feedback mode: the block each skill ends with when KISS_FEEDBACK=1
 rules/feedback.py            prints a skill's feedback step, only when KISS_FEEDBACK=1

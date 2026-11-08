@@ -42,9 +42,10 @@ a shell profile or Codex's `config.toml`.
   with the line of the agents left out, and the steps by hand.
 
 1. **Run the checks:** `python3 -I "$KD/scripts/doctor.py"`. It checks each agent whose CLI is on PATH; name
-   agents to check fewer (`claude`, `codex`, `gemini`, `antigravity`). Per agent: the CodeGraph rule in the global
-   instructions file (KISS's `rules/codegraph.md`, found by its bold lead-ins, `@` imports followed; a copy with every
-   lead-in but other words is a WARN: replace the section), each skill in
+   agents to check fewer (`claude`, `codex`, `gemini`, `antigravity`). Per agent: the CodeGraph rule (KISS's
+   `rules/codegraph.md`, found by its bold lead-ins) in the global instructions file; for Claude Code also in
+   `rules/**/*.md` under its config folder, with `@` imports followed for 4 hops. A copy with every lead-in but other
+   words is a WARN. Then each skill in
    the skill table of each KISS skill that has one and KISS's own (installed, enabled, once, callable by the model), and the tools.
    Done when it prints its summary line.
 2. **Compare with your own skill list.** The script reads the disk; your skill list is what this session loaded.
@@ -58,9 +59,11 @@ a shell profile or Codex's `config.toml`.
    (`$KD/../../README.md`). End the report with one line: "Ready for a KISS run" when no line is FAIL, else the FAIL lines to
    fix first. Done when each WARN and FAIL line has its fix.
 4. **Fix on the owner's yes.** The owner installs tools, skills and the CodeGraph rule with `kiss-doctor setup`
-   (or the README links); never append or replace the rule by hand. A WARN copy of the rule (it differs from KISS's
-   text, or is an older or edited copy) gets the setup item "replace the CodeGraph section of <file>": show it with
-   its changes line (the owner's own lines in that section are lost and kept in the backup), and on the owner's yes
+   (or the README links); never append or replace the rule by hand. On Claude Code a missing rule gets the item that writes
+   a copy to `rules/kiss.md` under the config folder, and a section in `CLAUDE.md` that is older or edited gets the item
+   "move the CodeGraph section of <file> to <copy>". A WARN copy of the rule elsewhere (it differs from KISS's text, or is
+   an older or edited copy) gets the setup item "replace the CodeGraph section of <file>". Show the item with its
+   changes line (the owner's own lines in that section are lost and kept in the backup), say to start a new session after it, and on the owner's yes
    run only that item, with the plan's call `setup [<agents>] --apply <its number> --plan <id>`. With a yes, your
    one file fix is to delete a `CODEGRAPH_START` block (read the file first). Then run step 1 again.
 !`python3 -I "${CLAUDE_PLUGIN_ROOT}/rules/feedback.py" 5 kiss-doctor`
