@@ -281,7 +281,7 @@ async function seedFile($: $, t: Task, dir: string): Promise<boolean> {
   return true
 }
 
-/** The report's Tests field: its own line plus a list right under it (also after one blank line), on one line, cut to the summary limit. */
+/** The report's Tests field: its own line plus a list right under it (also after one blank line), a wrapped item joined, on one line, cut to the summary limit. */
 function reportTests(answer: string) {
   const lines = answer.split('\n')
   const at = lines.findIndex(l => l.startsWith('Tests:'))
@@ -289,7 +289,10 @@ function reportTests(answer: string) {
   const parts = [lines[at]!.slice('Tests:'.length).trim()]
   const item = /^\s*[-*+]\s+/
   let i = at + 1 + (lines[at + 1]?.trim() === '' ? 1 : 0)
-  for (; item.test(lines[i] ?? ''); i++) parts.push(lines[i]!.replace(item, '').trim())
+  for (; /^\s+\S|^[-*+]\s/.test(lines[i] ?? ''); i++) {
+    if (item.test(lines[i]!)) parts.push(lines[i]!.replace(item, '').trim())
+    else parts[parts.length - 1] = `${parts[parts.length - 1]} ${lines[i]!.trim()}`.trim()
+  }
   return parts.filter(Boolean).join('; ').slice(0, SUMMARY_MAX) || 'not reported'
 }
 
@@ -336,7 +339,7 @@ async function removeFolder($: $, t: Task) {
 async function prune($: $) {
   const now = await $.clock.now()
   for (const t of await tasks($)) {
-    if (ENDED.includes(t.state) && !holds(t) && (t.finished ?? t.started) < now - KEEP_MS && await removeFolder($, t)) await $.store.delete(TASK + t.id)
+    if (ENDED.includes(t.state) && !holds(t) && (t.deliveredAt ?? t.finished ?? t.started) < now - KEEP_MS && await removeFolder($, t)) await $.store.delete(TASK + t.id)
   }
 }
 
@@ -403,7 +406,7 @@ async function tick($: $) {
           .filter(l => l.trim() && l.trim() !== '?? .codegraph/').join('\n')
         if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
         else await $.process.run(['git', '-C', repo, 'worktree', 'remove', '--force', t.worktree])
-        await save($, { ...t, state: 'done', delivered: 'merge', finished: now, ...(dirty ? {} : { worktree: undefined }) })
+        await save($, { ...t, state: 'done', delivered: 'merge', deliveredAt: now, ...(dirty ? {} : { worktree: undefined }) })
         continue
       }
     }
@@ -629,7 +632,7 @@ async function deliverOnce($: $, id: string, how: Delivery) {
       if (deleted.exitCode !== 0 && (list.exitCode !== 0 || list.stdout.trim())) return failed(deleted.stderr || deleted.stdout)
     }
     const { pr, diff, tests, ...rest } = left
-    await save($, { ...rest, state: 'done', delivered: how, finished: await $.clock.now() })
+    await save($, { ...rest, state: 'done', delivered: how, deliveredAt: await $.clock.now() })
     await refresh($)
   } catch (err) {
     await failed(String(err))
@@ -903,7 +906,7 @@ export const register: Register = on => {
     // Mobile draws no Input: there the owner answers from another surface.
     const Input = e.surface === 'mobile' ? undefined : ($.ui.resolve(e) as { Input?: any }).Input
     const all = await read($, ledger)
-    const ended = all.filter(t => ENDED.includes(t.state)).sort((a, b) => (b.finished ?? 0) - (a.finished ?? 0))
+    const ended = all.filter(t => ENDED.includes(t.state)).sort((a, b) => (b.deliveredAt ?? b.finished ?? 0) - (a.deliveredAt ?? a.finished ?? 0))
     // An ended task that still holds a worktree or a branch stays in view until its Discard.
     // Waiting for the owner first, then working, ready, watching; then the ended ones, newest first.
     const open = all.filter(t => !ENDED.includes(t.state)).sort((a, b) => ORDER.indexOf(a.state) - ORDER.indexOf(b.state))

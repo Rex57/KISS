@@ -745,15 +745,30 @@ for (const how of ['a merge', 'a press'] as const) {
     expect(rmRuns(w)).toEqual([])
     expect(entry(w, ID)).toBeDefined()
     // The window runs from the delivery: 6 days on it holds, 8 days on it is over. (The 5 s timer forbids a real advance of days.)
-    entry(w, ID).finished -= 6 * DAY
+    entry(w, ID).deliveredAt -= 6 * DAY
     await w.clock.advance(120_000)
     expect(rmRuns(w)).toEqual([])
-    entry(w, ID).finished -= 2 * DAY
+    entry(w, ID).deliveredAt -= 2 * DAY
     await w.clock.advance(120_000)
     expect(rmRuns(w)).toHaveLength(1)
     expect(entry(w, ID)).toBeUndefined()
   })
 }
+
+test('a late merge leaves the pane\'s time at the worker\'s, and the task sorts by its delivery', async ($, on) => {
+  const store: Record<string, unknown> = {}
+  for (let i = 0; i < 12; i++) store[`kiss-mini/task/q${i}`] = { ...ended(`q${i}`), finished: NOW - i }
+  const w = world(on, { store })
+  await handoff($, w, false)
+  Object.assign(entry(w, ID), { started: NOW - 2 * DAY - 240_000, finished: NOW - 2 * DAY })
+  w.merged = true
+  await w.clock.advance(60_000)
+  expect(entry(w, ID).state).toBe('done')
+  expect(entry(w, ID).finished).toBe(NOW - 2 * DAY)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: new RegExp(`${ID} .*done.*· 4m`) })).toBeDefined()
+  await ui.unmount()
+})
 
 test('prune: a removal that fails keeps the entry, and a later prune removes both', async ($, on) => {
   const fail: Record<string, { stderr: string }> = { rm: { stderr: 'rm: Operation not permitted' } }
@@ -1002,6 +1017,9 @@ for (const [name, tests, want] of [
   ['no line', 'Note: nothing', 'not reported'],
   ['an empty line with no list', 'Tests:', 'not reported'],
   ['a very long list', `Tests:\n${LONG}`, CUT],
+  ['a wrapped bullet', 'Tests:\n- pytest: 3 passed\n  on Python 3.12\n- mutant: caught', 'pytest: 3 passed on Python 3.12; mutant: caught'],
+  ['a wrap on the last bullet, then a blank line', 'Tests:\n- pytest: 3 passed\n  on Python 3.12\n\n  not this', 'pytest: 3 passed on Python 3.12'],
+  ['a list, then the next field', 'Tests:\n- pytest: 3 passed\nMutants: the guard: its test fails', 'pytest: 3 passed'],
 ] as const) {
   test(`a report's Tests field relays and shows the same text: ${name}`, async ($, on) => {
     const w = world(on)

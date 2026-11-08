@@ -43,17 +43,18 @@ URL; do not copy them in. No secrets: no keys, passwords or personal data. Count
 
 ## The report
 
-The worker's final message. The receiver saves the whole message as `T/report.md` and passes on only these lines:
+The worker's final message. The receiver saves the whole message as `T/report.md` and passes on these lines:
 
 ```markdown
 State: ready | done | failed | waiting for you
 Summary: <at most 600 characters: what changed or the answer, or the question to the owner>
 Branch: mini/<id>    Commits: <sha> <subject>, ...
 Tests: <each acceptance check and its result, all on this one line, separated by "; ">
+Mutants: <each new guard or changed test>: <the mutant and which test fails, or why none can>
 Full log: <T>/report.md
 ```
 
-A question task writes `Branch: none`. Below these lines comes the full text: the whole answer, the commands run
+The `Mutants:` line stays in `T/report.md`; the receiver does not pass it on. A question task writes `Branch: none`, and no `Mutants:` line. Below these lines comes the full text: the whole answer, the commands run
 and their output. A code or bug task's full text ends with a `## Pull request body` section, written with the `pr`
 skill when it is installed: a draft pull request takes it as its body.
 
@@ -93,8 +94,8 @@ skill when it is installed: a draft pull request takes it as its body.
    step of your plan.
 6. **End** with the report as your final message; write no report file. Before it says that no test covers a
    function, run `codegraph callers -p "$PWD" <name>` (when the repo has an index): a selftest in the same file counts.
-   In the full text, list each new guard and each test whose seam or expected value changed, each with a mutant in a
-   scratch copy that makes it fail (one mutant may serve several), or say why none can.
+   In the report's `Mutants:` line, list each new guard and each test whose seam or expected value changed, each with a
+   mutant in a scratch copy that makes it fail (one mutant may serve several), or say why none can.
 
 ## Credit
 
