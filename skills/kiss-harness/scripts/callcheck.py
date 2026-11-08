@@ -30,19 +30,21 @@ JS_DEF = [re.compile(p, re.M) for p in (
     r"^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function\b[^(]*)?\(([^)]*)\)",
     r"^[ \t]+(?:(?:public|private|protected|static|async|override|readonly)\s+)*(\w+)\s*(?:<[^>]*>)?\s*\(([^()]*)\)\s*(?::\s*[^{;]+)?\{")]
 NOT_NAMES = {"if", "for", "while", "switch", "catch", "function", "return", "constructor", "with", "foreach", "using", "lock",
-             "synchronized", "fixed"}
+             "synchronized", "fixed", "use"}
 # shortcut: a generic pattern, not a parser: of two overloads only the first is compared, a parenthesis nested two deep ends
-# the match, a function a macro makes is not seen, and a prose line that reads like a declaration can give a false name;
-# use a language's parser when a project's stops miss real names.
+# the match, a function a macro makes is not seen, a return type's change is not compared, a Swift `init`'s callers write the
+# type's name, so its word search finds none, and a prose line or a C++ or Java local variable (`Widget w(parent);`) that
+# reads like a declaration can give a false name; use a language's parser when a project's stops miss real names.
 PARAMS = r"\s*\(((?:[^()]|\([^()]*\))*)\)"
 WORDS = r"^[ \t]*(?:[\w@()\"]+[ \t]+)*?"
 KEYWORD_DEF = re.compile(WORDS + r"(?:func|fn|fun|function)[ \t]+(?:\([^)]*\)\s*)?(?:<[^>]*>\s*)?(?:[\w<>?,]+\.)?&?(\w+)\s*(?:<[^(]*>)?" + PARAMS, re.M)
 SWIFT_INIT = re.compile(r"^[ \t]*(?:[\w@()]+[ \t]+)*?(init)[?!]?\s*(?:<[^(]*>)?" + PARAMS, re.M)
-RUBY_DEF = re.compile(r"^[ \t]*def[ \t]+(?:self\.)?(\w+[?!=]?)[ \t]*\(?([^)\n]*)", re.M)
+RUBY_DEF = re.compile(r"^[ \t]*(?:\w+[ \t]+)*?def[ \t]+(?:self\.)?(\w+[?!=]?)[ \t]*\(?([^)\n;#]*)", re.M)
 TYPED_DEF = re.compile(r"^[ \t]*(?!(?:return|new|throw|else|case|await|yield|delete|goto|assert|do|in|using|typedef|co_return|co_await|co_yield)\b)"
-                       r"(?:[\w\[@][\w:<>,\[\]*&.?~]*[ \t*&]+)+(?:\w+::)*(~?\w+)" + PARAMS
+                       r"(?:[\w\[@](?:[\w:<>,\[\].?~]|[*&]+(?=[>,]))*[ \t*&]+)+(?:\w+::)*(~?\w+)" + PARAMS
                        + r"\s*(?:const\b\s*|noexcept\b\s*|override\b\s*|final\b\s*)*(?:throws\s+[\w., ]+)?\s*(?:\{|=>|:|;|$)", re.M)
 C_FAMILY = (".c", ".h", ".cc", ".cpp", ".hpp")
+JVM_FAMILY = (".java", ".kt", ".kts")
 OTHER_DEF = {".swift": (KEYWORD_DEF, SWIFT_INIT), ".go": (KEYWORD_DEF,), ".rs": (KEYWORD_DEF,), ".kt": (KEYWORD_DEF,), ".kts": (KEYWORD_DEF,),
              ".php": (KEYWORD_DEF,), ".rb": (RUBY_DEF,),
              **{e: (TYPED_DEF, JS_DEF[2]) for e in (".java", ".cs") + C_FAMILY}}
@@ -87,12 +89,11 @@ def changes(W, spec):
     diff in a language not compared])."""
     cached = spec == "--cached"
     base, head = ("HEAD", "") if cached else spec.split("..", 1)
-    diff = git(W, "diff", "--name-status", "-M", *(["--cached"] if cached else [base, head]))
+    diff = git(W, "diff", "-z", "--name-status", "-M", *(["--cached"] if cached else [base, head])).split("\0")[:-1]   # -z: no quoted names
     out, other = [], []
-    for row in diff.splitlines():
-        parts = row.split("\t")
-        status, old = parts[0], parts[1]
-        new = parts[-1]
+    while diff:
+        status, old = diff.pop(0), diff.pop(0)
+        new = diff.pop(0) if status[0] in "RC" else old
         if not old.endswith(COMPARED) and os.path.splitext(new)[1] in CODE and not new.endswith(COMPARED):
             other.append(new)
         if not old.endswith(COMPARED) or status.startswith("A"):
@@ -119,13 +120,13 @@ def word_hits(W, name, path):
     """The code lines that still name a function no definition holds, by cgcallers' own rules: the word search in
     its file and the files that import its module (any file for a method), with no namesake's def line."""
     suffix = os.path.splitext(path)[1]
-    word, ext = name.rsplit(".", 1)[-1], next((g for g in (PY, JS, C_FAMILY) if suffix in g), (suffix,))
+    word, ext = name.rsplit(".", 1)[-1], next((g for g in (PY, JS, C_FAMILY, JVM_FAMILY) if suffix in g), (suffix,))
     lang = "python" if ext == PY else "typescript" if ext == JS else suffix
     mod, pkg = cgcallers.module_of(path), os.path.basename(os.path.dirname(path))
     wanted = {"mod:" + mod, "name:" + mod, "imp:" + pkg, "from:%s:%s" % (pkg, word)}
     method = "." in name
     rows = []
-    for f in git(W, "ls-files").splitlines():
+    for f in git(W, "ls-files", "-z").split("\0"):
         if f.endswith(ext):
             try:
                 src = cgcallers.read_file(os.path.join(W, f))
@@ -248,12 +249,13 @@ def selftest_languages():
     js = {"w.js": ("describe('a', function () {\n  describe('b', function () {\n  })\n})\nclass W {\n  realMethod(x) {\n    return x\n  }\n}\n",
                    "class W {\n}\n")}
 
-    def names(before, after):
-        """(the names, the output) of a commit that turns `before` into `after`, each {file: text}; a None text deletes."""
+    def names(before, after, spec="HEAD~1..HEAD"):
+        """(the names, the output) of a commit that turns `before` into `after`, each {file: text}; a None text deletes.
+        With spec --cached the second change is staged, not committed."""
         with tempfile.TemporaryDirectory() as W:
             g = lambda *a: subprocess.run(["git", "-C", W] + list(a), check=True, capture_output=True)
             g("init", "-q"), g("config", "user.name", "t"), g("config", "user.email", "t@example.com")
-            def put(files):
+            def put(files, commit=True):
                 for f, body_ in files.items():
                     if body_ is None:
                         os.remove(os.path.join(W, f))
@@ -261,12 +263,13 @@ def selftest_languages():
                         with open(os.path.join(W, f), "w") as fh:
                             fh.write(body_)
                 g("add", "-A")
-                g("commit", "-qm", "x", "--allow-empty")
+                if commit:
+                    g("commit", "-qm", "x", "--allow-empty")
             put(before)
-            put(after)
+            put(after, spec != "--cached")
             asked = []
             fake = lambda W_, name, path: asked.append(name) or "definition  %s:1  function %s" % (path, name)
-            out = check(W, "HEAD~1..HEAD", fake)
+            out = check(W, spec, fake)
             return asked, out
 
     asked, out = names({f: s[0] for f, s in swift.items()}, {f: s[1] for f, s in swift.items()})
@@ -294,6 +297,30 @@ def selftest_languages():
     assert sorted(asked) == ["goneKts", "gone_hpp"] and "not covered" not in out, out
     asked, out = names({"new.sh": "a\n"}, {"new2.sh": "a\n"})               # a new code file: nothing compared, so named
     assert out.splitlines()[-1] == words % "new2.sh", out
+    # F22: a file name git would quote is compared or named, in a range and staged, also through a rename
+    for spec in ("HEAD~1..HEAD", "--cached"):
+        asked, out = names({"R\u00e9sum\u00e9.swift": "func goneU(a: Int) {\n}\n", "stuff \u00e9.sh": "a\n"},
+                           {"R\u00e9sum\u00e9.swift": "\n", "stuff \u00e9.sh": "b\n"}, spec)
+        assert asked == ["goneU"] and out.splitlines()[-1] == words % "stuff \u00e9.sh", (spec, asked, out)
+    long_body = "func keep(a: Int) {\n}\n" * 20
+    asked, out = names({"\u00e9 old.swift": long_body + "func goneR(a: Int) {\n}\n"}, {"\u00e9 old.swift": None, "\u00e9 new.swift": long_body})
+    assert asked == ["goneR"] and "\u00e9 old.swift" in out and "R100" not in out, (asked, out)
+    # F23: a line of factors with no spaces ends, in a fixed input; the pointer forms stay; 10 s is only a backstop (this takes under 0.2 s)
+    for path, line in (("x.cpp", "*".join("m%d" % i for i in range(40))), ("x.java", "&".join("F%d" % i for i in range(40)))):
+        code = "import sys; sys.path.insert(0, %r); import callcheck; assert callcheck.defs(%r, %r) == {}" % (HERE, "  " + line + ";\n", path)
+        subprocess.run([sys.executable, "-I", "-c", code], check=True, timeout=10)
+    pointers = {"int* a1(int a) {": "a1", "int *a2(int a) {": "a2", "char** a3(int a) {": "a3", "const std::vector<int>& a4(int a) const {": "a4",
+                "std::vector<int*> a5(int a) {": "a5", "std::map<int*, char&> a6(int a) {": "a6", "Foo * a7(int a) {": "a7", "Foo& a8(int a) {": "a8",
+                "Klass::Inner* Klass::a9(int a) {": "a9"}
+    for line, name in pointers.items():
+        assert list(defs(line + "\n}\n", "x.cpp")) == [name], line
+    # F24: words before Ruby's def; F25: a closure's `use` is no name, and a Ruby body or a comment is no signature
+    rb = "private def helper(a)\nend\nmodule_function def mf(a)\nend\npublic_class_method def self.pcm(b)\nend\n# def not_real(a)\n"
+    assert defs(rb, "a.rb") == {"helper": "(a)", "mf": "(a)", "pcm": "(b)"}, defs(rb, "a.rb")
+    assert defs("<?php\nreturn function ($a) use ($b) {\n};\n", "c.php") == {}, defs("<?php\nreturn function ($a) use ($b) {\n};\n", "c.php")
+    asked, out = names({"b.rb": "def foo; 1; end\ndef bar # note one\nend\ndef baz(a) # one\nend\n"},
+                       {"b.rb": "def foo; 2; end\ndef bar # note two\nend\ndef baz(a) # two\nend\n"})
+    assert asked == [], (asked, out)
     # the word search for a removed name covers the file type, and a namesake's def is no caller
     with tempfile.TemporaryDirectory() as W:
         g = lambda *a: subprocess.run(["git", "-C", W] + list(a), check=True, capture_output=True)
@@ -305,6 +332,18 @@ def selftest_languages():
         g("add", "-A")
         assert word_hits(W, "oldHelper", "gone.swift") == ["[grep only] a.swift:2  oldHelper(1)"], "only Swift files; no def line"
         assert "[grep only] i.cpp:1  gone_c(1);" in word_hits(W, "gone_c", "v.c"), "a C name: the C family's files"
+    # F26: the JVM family, both ways; another family's file is not searched; F22: a caller's file name git would quote
+    with tempfile.TemporaryDirectory() as W:
+        g = lambda *a: subprocess.run(["git", "-C", W] + list(a), check=True, capture_output=True)
+        g("init", "-q")
+        for f, text in (("build.kts", "goneK(1)\nJ.goneJ(2)\n"), ("use.kt", "J.goneJ(1)\ngoneK(2)\n"), ("U.java", "class U { int a = goneK(1); }\n"),
+                        ("o.cpp", "goneK(1);\n"), ("\u00e9 s.swift", "goneS(1)\n")):
+            with open(os.path.join(W, f), "w") as fh:
+                fh.write(text)
+        g("add", "-A")
+        assert word_hits(W, "goneK", "k.kt") == ["[grep only] U.java:1  class U { int a = goneK(1); }", "[grep only] build.kts:1  goneK(1)", "[grep only] use.kt:2  goneK(2)"], word_hits(W, "goneK", "k.kt")
+        assert word_hits(W, "goneJ", "J.java") == ["[grep only] build.kts:2  J.goneJ(2)", "[grep only] use.kt:1  J.goneJ(1)"], word_hits(W, "goneJ", "J.java")
+        assert word_hits(W, "goneS", "g.swift") == ["[grep only] \u00e9 s.swift:1  goneS(1)"], word_hits(W, "goneS", "g.swift")
 
 
 def main(argv):
