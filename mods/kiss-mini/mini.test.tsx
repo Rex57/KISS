@@ -713,7 +713,7 @@ test('prune: a task ended 6 days ago, one that holds a worktree or a branch, and
 for (const [name, log] of [
   ['an empty path', ''],
   ['the root', '/report.md'],
-  ['a path with ..', '/tmp/kiss-mini/../bad/report.md'],
+  ['a path with ..', '/tmp/x/../kiss-mini/bad/report.md'],
   ['a .. as the last parts', '/tmp/kiss-mini/bad/../report.md'],
   ["another task's id", '/tmp/kiss-mini/other/report.md'],
   ['another parent folder', '/tmp/not-kiss/bad/report.md'],
@@ -739,9 +739,11 @@ test('prune: a removal that fails keeps the entry, and a later prune removes bot
 })
 
 test('prune: an rm that cannot run keeps the entry and raises nothing; the session starts', async ($, on) => {
-  const w = world(on, { hang: ['rm'], store: { 'kiss-mini/task/old': ended('old') } })
+  const w = world(on, { hang: ['rm'], store: { 'kiss-mini/task/old': ended('old'), 'kiss-mini/task/next': ended('next', { state: 'working', finished: undefined }) } })
   await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
   expect(entry(w, 'old')).toBeDefined()
+  // The host's start goes on past the prune: the waiting task gets its worker.
+  expect(w.spawned).toHaveLength(1)
 })
 
 test('a scratch copy: from the worktree a clone to T/scratch passes, and git init in that copy is denied', async ($, on) => {
