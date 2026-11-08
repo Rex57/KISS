@@ -374,7 +374,7 @@ async function look($: $, t: Task): Promise<{ state: State; status: string }> {
 async function stop($: $, t: Task, why: string) {
   const stopped: Task = { ...t, state: 'failed', report: why, stopped: true, finished: await $.clock.now() }
   await save($, stopped)
-  if (t.return) await $.session.send({ to: { sessionId: t.sender }, text: reportMessage(stopped, '') }).catch(() => {})
+  if (t.return) await $.session.send({ to: { sessionId: t.sender }, text: reportMessage({ ...stopped, log: t.log ?? 'none' }, '') }).catch(() => {})
   for (const x of await tasks($)) if (!x.host) await run($, x.id)
   await refresh($)
 }

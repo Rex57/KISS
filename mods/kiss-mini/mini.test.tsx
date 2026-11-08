@@ -1358,6 +1358,14 @@ test('a stopped task with return set sends its report to the sender; a refused s
   expect(w.sent.at(-1)?.text).toContain('timed out after 30 minutes')
 })
 
+test('a stopped task with no log sends Full log: none and saves no log', async ($, on) => {
+  const w = world(on, { store: { 'kiss-mini/task/a3': other('a3', 's1', { return: true, sender: 'c9' }) } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  await w.clock.advance(31 * 60_000)
+  expect(w.sent.at(-1)?.text).toContain('Full log: none')
+  expect(w.store['kiss-mini/task/a3'].log).toBeUndefined()
+})
+
 test('a stopped task whose report send is refused still ends failed', async ($, on) => {
   const w = world(on, { delivered: false, store: { 'kiss-mini/task/a2': other('a2', 's1', { return: true, sender: 'c9' }) } })
   await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
