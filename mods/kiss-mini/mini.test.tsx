@@ -24,8 +24,11 @@ type Opts = {
   plugins?: { id: string; enabled: boolean; installPath: string; readFromFolder?: string }[]
   /** The checkout has a CodeGraph index: `codegraph status <it>` names it as its project. */
   indexed?: boolean
-  /** `codegraph status` prints colour codes, as with FORCE_COLOR or CI set. */
+  /** The text `codegraph status` prints colour codes, as with FORCE_COLOR or CI set (the mod reads only `status -j`). */
   colour?: boolean
+  /** What `codegraph status -j` names: its projectPath (default: top) and its worktreeMismatch. */
+  project?: string
+  mismatch?: unknown
   /** The repo's root, as `git rev-parse --show-toplevel` answers it (default: cwd). */
   top?: string
   /** How long `codegraph explore` (the seed) takes, on the mock clock. */
@@ -33,7 +36,7 @@ type Opts = {
   /** The main checkout: the folder that holds the repository's common git folder (default: top). */
   common?: string
 }
-function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, colour = false, top = cwd, seedMs = 0, common = top }: Opts = {}) {
+function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, colour = false, top = cwd, seedMs = 0, common = top, project = top, mismatch = null }: Opts = {}) {
   const w = {
     session: 's1',
     branch,
@@ -116,7 +119,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     if (hang.includes(e.argv[0] ?? '') || hang.includes(`${e.argv[3]} ${e.argv[4]}`)) throw new Error(`${e.argv[0]}: timed out after 120000 ms`)
     if (e.argv[0] === 'codegraph') {
       if (e.argv[1] === 'init') w.initStdin.push(e.init?.stdin)
-      const out = e.argv[1] === 'status' ? (indexed ? `CodeGraph Status\n\n${colour ? '\x1b[36mProject:\x1b[0m' : 'Project:'} ${top}\n` : 'CodeGraph not initialized\n') : e.argv[1] === 'explore' ? 'SEED: calc.py add()\n' : ''
+      const out = e.argv[1] === 'status' && e.argv[2] === '-j' ? JSON.stringify(indexed ? { initialized: true, projectPath: project, worktreeMismatch: mismatch } : { initialized: false, projectPath: e.argv[3] })
+        : e.argv[1] === 'status' ? (indexed ? `CodeGraph Status\n\n${colour ? '\x1b[36mProject:\x1b[0m' : 'Project:'} ${top}\n` : 'CodeGraph not initialized\n') : e.argv[1] === 'explore' ? 'SEED: calc.py add()\n' : ''
       return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (e.argv[0] === 'gh' && e.argv[2] === 'view') {
@@ -1646,10 +1650,10 @@ test('in an indexed repo a code task\'s brief names W, the CodeGraph commands wi
   expect(w.files[`${dir}/seed.md`]).toBe('SEED: calc.py add()\n')
   // The new worktree gets its own index before the seed reads it.
   const cg = w.runs.filter(a => a[0] === 'codegraph').map(a => a.slice(0, 4).join(' '))
-  expect(cg).toEqual([`codegraph status ${cwd}`, `codegraph init ${wt}`, `codegraph explore -p ${wt}`])
+  expect(cg).toEqual([`codegraph status -j ${cwd}`, `codegraph init ${wt}`, `codegraph explore -p ${wt}`])
 })
 
-test('a coloured `codegraph status` of the checkout gives the worker its seed, and the worktree\'s index starts with no -y and stdin closed', async ($, on) => {
+test('with FORCE_COLOR set, `codegraph status -j` of the checkout gives the worker its seed, and the worktree\'s index starts with no -y and stdin closed', async ($, on) => {
   const w = world(on, { indexed: true, colour: true })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
@@ -1899,3 +1903,16 @@ test('a host stopped after the worktree was made leaves a task whose worktree th
   expect(await ui.find({ key: 'merge-h1' })).toBeUndefined()
   await ui.unmount()
 })
+
+for (const [name, opts] of [['another project', { project: '/elsewhere' }], ['a worktreeMismatch', { mismatch: { indexRoot: '/elsewhere' } }],
+  ['no index', { indexed: false }]] as const) {
+  test(`a \`codegraph status -j\` with ${name} gives no seed and no CodeGraph line; the task still starts`, async ($, on) => {
+    const w = world(on, { indexed: true, ...opts })
+    await codeTask($, w)
+    expect(w.runs.some(a => a[0] === 'codegraph' && a[1] === 'status' && a[2] === '-j')).toBe(true)
+    expect(w.runs.some(a => a[0] === 'codegraph' && a[1] !== 'status')).toBe(false)
+    expect(Object.keys(w.files).some(f => f.endsWith('seed.md'))).toBe(false)
+    expect(w.spawned[0]?.prompt).not.toMatch(/^CodeGraph /m)
+    expect(w.store[`kiss-mini/task/${ID}`].state).toBe('working')
+  })
+}

@@ -296,8 +296,14 @@ async function seedFile($: $, t: Task, dir: string): Promise<boolean> {
   const w = t.worktree ?? top
   // A missing or slow codegraph is no seed, never a failed task. Stdin is closed: `init` must not wait for an answer.
   const cg = (...argv: string[]) => $.process.run(['codegraph', ...argv], { cwd: w, timeoutMs: 600_000, stdin: '' }).catch(() => undefined)
-  // FORCE_COLOR or CI puts colour codes around `Project:`.
-  if (!(await cg('status', top))?.stdout.replace(/\x1b\[[0-9;]*m/g, '').includes(`Project: ${top}\n`)) return false
+  // The checkout's own index, by CodeGraph's JSON status (no colour codes): initialized, its project, no worktree mismatch.
+  let status: { initialized?: unknown; projectPath?: unknown; worktreeMismatch?: unknown } | undefined
+  try {
+    status = JSON.parse((await cg('status', '-j', top))?.stdout ?? '')
+  } catch {
+    return false
+  }
+  if (status?.initialized !== true || status.projectPath !== top || status.worktreeMismatch) return false
   if (w !== top && (await cg('init', w))?.exitCode !== 0) return false
   const r = await cg('explore', '-p', w, t.title.slice(0, 200))
   if (r?.exitCode !== 0 || !r.stdout.trim()) return false
