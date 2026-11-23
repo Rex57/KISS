@@ -349,20 +349,24 @@ def check_index(repo):
     except ValueError:
         status = {}
     if isinstance(status, dict) and (status.get("index") or {}).get("reindexRecommended") is True:
-        return [("WARN", "device", 'the CodeGraph index of %s needs a rebuild: run codegraph index "%s"' % (repo, repo), "Tools you need")]
+        where = status.get("projectPath") or repo                        # a worktree's status reads its main checkout's index
+        return [("WARN", "device", 'the CodeGraph index of %s needs a rebuild: run codegraph index "%s"' % (where, where), "Tools you need")]
     return []
 
 
 def check_tools():
     good = sys.version_info >= (3, 9)
     out = [("OK" if good else "FAIL", "device", f"python3 {sys.version.split()[0]} (3.9 or later)", "" if good else "Tools you need")]
+    have = re.search(r"(\d+)\.(\d+)\.(\d+)", run(["codegraph", "--version"])) if shutil.which("codegraph") else None
+    old = bool(have) and tuple(map(int, have.groups())) < CODEGRAPH_MIN
     for tool in ("git", "node", "npm", "codegraph"):
         found = shutil.which(tool)
+        if tool == "codegraph" and old:                                  # its WARN below is its one row
+            continue
         version = run([tool, "--version"]).strip().splitlines()[:1] if found else []
         out.append(("OK", "device", f"{tool}: {version[0] if version else 'found'}", "") if found
                    else ("FAIL", "device", f"{tool}: not on PATH", "Tools you need"))
-    have = re.search(r"(\d+)\.(\d+)\.(\d+)", run(["codegraph", "--version"])) if shutil.which("codegraph") else None
-    if have and tuple(map(int, have.groups())) < CODEGRAPH_MIN:
+    if old:
         out.append(("WARN", "device", "codegraph %s: older than %s, the version the CodeGraph rule holds for: upgrade it: "
                     "npm install -g @colbymchenry/codegraph" % (have.group(0), ".".join(map(str, CODEGRAPH_MIN))), "Tools you need"))
     out.append(("OK", "device", "cgcallers", "") if shutil.which("cgcallers")
@@ -1402,6 +1406,8 @@ def selftest():
                 cg = [r for r in check_tools() if r[0] == "WARN" and r[2].startswith("codegraph")]
                 assert len(cg) == warns, (version, cg)
                 assert not cg or "1.6.4" in cg[0][2] and "npm install -g @colbymchenry/codegraph" in cg[0][2], cg
+                ok = [r for r in check_tools() if r[0] == "OK" and r[2].startswith("codegraph")]
+                assert len(ok) == 1 - warns, (version, ok)                       # F15: an old CodeGraph gets no OK row
             assert not os.path.isdir(os.path.join(repo, ".codegraph"))
             for status, warns in (({"initialized": True, "index": {"reindexRecommended": True}}, 1),
                                   ({"initialized": True, "index": {"reindexRecommended": False}}, 0),
@@ -1410,6 +1416,11 @@ def selftest():
                 cg = [r for r in check_index(repo) if r[0] == "WARN"]
                 assert len(cg) == warns, (status, cg)
                 assert not cg or 'codegraph index "%s"' % repo in cg[0][2], cg
+            main_index = os.path.join(fx, "main checkout")                       # F14: a worktree with no index of its own
+            fake_cg("1.6.4", {"initialized": True, "projectPath": main_index, "worktreeMismatch": {"worktree": repo},
+                              "index": {"reindexRecommended": True}})
+            assert check_index(repo) == [("WARN", "device", 'the CodeGraph index of %s needs a rebuild: run codegraph index "%s"'
+                                          % (main_index, main_index), "Tools you need")], check_index(repo)
             assert check_index(None) == [] and "index" in gaps(dict(got, agents=[], repo=repo))   # no index: setup still offers init
             # D6: the new rule passes the rule check; KISS 2.3.0's rule (its two changed paragraphs put back) is a stale copy
             new = read(os.path.join(KISS, "rules", "codegraph.md"))
