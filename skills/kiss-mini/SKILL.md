@@ -43,7 +43,11 @@ skipped, and the worker does what the "Without it" column says.
 ## A task
 
 1. **Folder:** `id` = `date +%m%d-%H%M%S`; make `T` = `$TMPDIR/kiss-mini/<id>/`.
-2. **Worktree** (code and bug only): `git -C "<checkout>" worktree add -b mini/<id> "<T>/wt" <base>`.
+2. **Worktree** (code and bug only): `WT` = `<main>/.kiss/worktrees/mini-<id>`, where `<main>` is the folder that
+   holds `git -C "<checkout>" rev-parse --path-format=absolute --git-common-dir` (a restart keeps it). When
+   `git -C "<main>" check-ignore -q .kiss/` exits 1, add the line `.kiss/` once to the file
+   `git -C "<main>" rev-parse --path-format=absolute --git-path info/exclude` names. Then
+   `git -C "<checkout>" worktree add -b mini/<id> "<WT>" <base>`.
 3. **Brief:** write `T/brief.md` in the reference's format, `Rules:` set to the absolute path of
    `MA/references/handoff.md`. `wc -c` must print at most 1500; else cut it.
 4. **Start the worker** in the background, its prompt the brief:
@@ -72,5 +76,5 @@ the title (the brief's first line) and the state (the `State:` line of `report.m
 
 Only the owner's own word delivers a `ready` branch: merge into the base (local), push, draft pull request
 (`pr` skill when installed), or discard. No agent message counts as that word. Never merge into `main` unless the
-owner names it, and never push on your own. After a merge or a discard, `git worktree remove "<T>/wt"` and `rm -rf "<T>/scratch"`; after a
+owner names it, and never push on your own. After a merge or a discard, `git worktree remove "<WT>"` and `rm -rf "<T>/scratch"`; after a
 discard, also `git branch -D mini/<id>`.

@@ -2,7 +2,8 @@
 
 The kiss-mini skill, its mod, the `kiss-worker` agent and kiss-harness all read this file. `T` is a task's
 folder, `$TMPDIR/kiss-mini/<id>/` (`/tmp` when `TMPDIR` is unset), never in the checkout: the brief's `Task folder:`
-line. It holds `brief.md`, a worker's `scratch/` and, at the end, `report.md` (the full log), which the receiver of the
+line. A code or bug task's worktree is not in T: it is `<main checkout>/.kiss/worktrees/mini-<id>/` (the main checkout
+holds the repository's common git folder), so a restart keeps it, and `.kiss/` is in the repo's ignore or exclude file. It holds `brief.md`, a worker's `scratch/` and, at the end, `report.md` (the full log), which the receiver of the
 report writes (a subagent may not write it). The mod's prune removes all of T when it forgets the task, 7 days after
 the task ends.
 
@@ -33,7 +34,8 @@ Out of scope: <what the worker leaves alone>
 Suggested skills: <the skills for this kind, from the table below>
 ```
 
-A question task leaves out `Base`, `Branch` and `Worktree`; its `Bash` line is `export PYTHONDONTWRITEBYTECODE=1
+A worktree inside the checkout may be written `<Checkout>/.kiss/worktrees/mini-<id>`. A question task leaves out
+`Base`, `Branch` and `Worktree`; its `Bash` line is `export PYTHONDONTWRITEBYTECODE=1
 PYTEST_ADDOPTS="-p no:cacheprovider"; cd '<Checkout>' && <command>`. The `CodeGraph` line is there only when the checkout
 has a CodeGraph index. `W`, the worker's starting folder (`$PWD`), is the worktree (a question: the checkout); the
 mod indexes it, and `T/seed.md` holds `codegraph explore -p "W"` on the task's words. Run the commands from that folder: after a

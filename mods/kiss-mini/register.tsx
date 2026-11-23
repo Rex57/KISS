@@ -44,6 +44,27 @@ async function folder($: $, id: string) {
   return `${tmp.replace(/\/$/, '')}/kiss-mini/${id}`
 }
 
+/** The main checkout of the repository `dir` is in: the folder that holds its common git folder; undefined when git fails. */
+async function mainOf($: $, dir: string) {
+  const common = await $.process.run(['git', '-C', dir, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 120_000 }).catch(() => undefined)
+  return common?.exitCode === 0 ? common.stdout.trim().replace(/\/\.git$/, '') : undefined
+}
+
+/** D1: a code task's worktree, beside the harness worktrees in its main checkout, so a restart keeps it (T stays in TMPDIR). */
+const worktreeOf = async ($: $, cwd: string, id: string) => `${(await mainOf($, cwd)) ?? cwd}/.kiss/worktrees/mini-${id}`
+
+/** D1: `.kiss/` in the repo's exclude file once, so the worktree never shows in `git status`. Its caller ignores a failure (D14). */
+async function exclude($: $, t: Task) {
+  // Asked in the main checkout, whose .kiss/ holds the worktree (a subfolder or another worktree may read other rules).
+  const repo = (await mainOf($, t.cwd)) ?? t.cwd
+  const git = (...args: string[]) => $.process.run(['git', '-C', repo, ...args], { timeoutMs: 120_000 })
+  if ((await git('check-ignore', '-q', '.kiss/')).exitCode !== 1) return
+  const path = (await git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude')).stdout.trim()
+  if (!path) return
+  const old = await $.fs.read(path).then(String, () => '')
+  await $.fs.write(path, `${old}${old && !old.endsWith('\n') ? '\n' : ''}.kiss/\n`)
+}
+
 /** The worker's report: its State line and its Summary (up to the next field), cut to 600 characters. */
 export function parseReport(answer: string, kind?: Task['kind']): { state: State; summary: string } {
   if (!answer.trim()) return { state: 'failed', summary: 'the worker returned no answer' }
@@ -213,7 +234,8 @@ function briefLines(t: Task, text: string, rules: string, dir: string, seed = fa
   // Short: the lines that only say "not given" go first, before any of the task's own text.
   const given = (line: string) => !(short && line.endsWith(NOT_GIVEN))
   const where = [...(isCode(t)
-    ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`]
+    // A worktree in the checkout is named from the Checkout field: a long checkout path would cost the task text twice.
+    ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree?.startsWith(`${t.cwd}/`) ? `<Checkout>${t.worktree.slice(t.cwd.length)}` : t.worktree}`, `Task folder: ${dir}`]
     : [`Checkout: ${t.cwd} (read only)    Task folder: ${dir}`]),
   // The folder by its field's name: the path is on the line above, and a second copy would cost the task text its length.
   `Bash: ${bashPrefix(t, isCode(t) ? "'<Worktree>'" : "'<Checkout>'")}<command>`,
@@ -221,7 +243,7 @@ function briefLines(t: Task, text: string, rules: string, dir: string, seed = fa
   // would query the base branch's index. Two full paths here would cost the task text 150 characters.
   ...(seed ? ['CodeGraph (never cd first): codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder'] : [])]
   // The report's first line and the progress tool are in the brief itself: a worker may not open the Rules file.
-  const rule = `Report (your final message): ${isCode(t) ? '"State: ready|failed|waiting for you", then Summary:, Branch:, Tests:' : '"State: done|failed|waiting for you", then Summary:'}. Call mcp__kiss__progress (step, total) at each step.`
+  const rule = `Final message: ${isCode(t) ? '"State: ready|failed|waiting for you", then Summary:, Branch:, Tests:' : '"State: done|failed|waiting for you", then Summary:'}. Call mcp__kiss__progress (step, total) at each step.`
   if (t.brief !== undefined) {
     return [`# Mini task ${t.id}: ${t.title.slice(0, 120)}`, ...where, `Return: ${t.return ? 'harness' : 'owner'}    Checks: run`, `Rules: ${rules}`, rule, text].join('\n')
   }
@@ -501,6 +523,7 @@ async function run($: $, id: string) {
   // The host's minute timer checks a watch: a check never runs inside the message that brought the task.
   if (t.kind === 'watch') return
   if (isCode(t)) {
+    await exclude($, t).catch(() => {})
     const made = await $.process.run(['git', '-C', t.cwd, 'worktree', 'add', '-b', t.branch!, t.worktree!, t.base!])
     // No worktree was made: nothing is left to Discard.
     if (made.exitCode !== 0) {
@@ -599,9 +622,7 @@ async function deliver($: $, id: string, how: Delivery) {
 
 /** A code task's own repository (D16): the main checkout of its worktree's git folder, else the sender's folder. */
 async function repoOf($: $, t: Task) {
-  if (t.repo) return t.repo
-  const common = t.worktree ? await $.process.run(['git', '-C', t.worktree, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 120_000 }) : undefined
-  return common?.exitCode === 0 ? common.stdout.trim().replace(/\/\.git$/, '') : t.cwd
+  return t.repo ?? (t.worktree && (await mainOf($, t.worktree))) ?? t.cwd
 }
 
 async function deliverOnce($: $, id: string, how: Delivery) {
@@ -761,7 +782,7 @@ export const register: Register = on => {
         const base = at >= 0 ? words.splice(at, 2)[1] : undefined
         const head = base ?? (await $.process.run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
         if (!head || head === 'HEAD') return { text: `kiss-mini: ${cwd} is on no branch (or in no repository): name one with --base <branch>.` }
-        Object.assign(t, { kind: 'code', title: words.join(' '), base: head, branch: `mini/${id}`, worktree: `${await folder($, id)}/wt` })
+        Object.assign(t, { kind: 'code', title: words.join(' '), base: head, branch: `mini/${id}`, worktree: await worktreeOf($, cwd, id) })
       }
       if (!t.title) return { text: 'kiss-mini: say what to do: /kiss-mini <task>, /kiss-mini ask <question>.' }
       await save($, t)
@@ -793,7 +814,7 @@ export const register: Register = on => {
     if (isCode(t)) {
       const base = a.base || (await $.process.run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
       if (!base || base === 'HEAD') return { result: `kiss-mini: ${cwd} is on no branch: give a base.` }
-      Object.assign(t, { base, branch: `mini/${id}`, worktree: `${await folder($, id)}/wt` })
+      Object.assign(t, { base, branch: `mini/${id}`, worktree: await worktreeOf($, cwd, id) })
     }
     await save($, t)
     await refresh($)

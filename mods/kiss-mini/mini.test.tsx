@@ -30,8 +30,10 @@ type Opts = {
   top?: string
   /** How long `codegraph explore` (the seed) takes, on the mock clock. */
   seedMs?: number
+  /** The main checkout: the folder that holds the repository's common git folder (default: top). */
+  common?: string
 }
-function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, colour = false, top = cwd, seedMs = 0 }: Opts = {}) {
+function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, colour = false, top = cwd, seedMs = 0, common = top }: Opts = {}) {
   const w = {
     session: 's1',
     branch,
@@ -67,6 +69,10 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     worktrees: '',
     /** The stdin each `codegraph init` got: '' is closed at once. */
     initStdin: [] as (string | undefined)[],
+    /** The repo ignores `.kiss/` (its .gitignore): `git check-ignore` says so whatever the exclude file holds. */
+    ignored: true,
+    /** A folder stands where the exclude file goes: its read and its write fail. */
+    excludeFolder: false,
   }
   w.clock = mock.clock(on, { now: NOW })
   // The store in memory, readable by the test: the ledger is the contract every session reads.
@@ -99,7 +105,12 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     if (e.argv[0] === 'git' && w.gone.includes(e.argv[2] ?? '')) return { value: { exitCode: 128, stdout: '', stderr: `fatal: cannot change to '${e.argv[2]}': No such file or directory\n`, isStdoutTruncated: false, isStderrTruncated: false } }
     // Every test's repository is /repo; its worktrees share its git folder.
     if (e.argv[3] === 'branch' && e.argv[4] === '--list') return { value: { exitCode: 0, stdout: w.branchGone ? '' : `  ${e.argv[5]}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (e.argv.includes('--git-common-dir')) return { value: { exitCode: 0, stdout: '/repo/.git\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv.includes('--git-common-dir')) return { value: { exitCode: 0, stdout: `${common}/.git\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv.includes('--git-path')) return { value: { exitCode: 0, stdout: `${common}/.git/info/exclude\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv[3] === 'check-ignore') {
+      const listed = (w.files[`${common}/.git/info/exclude`] ?? '').split('\n').includes('.kiss/')
+      return { value: { exitCode: w.ignored || listed ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv.includes('--show-toplevel')) return { value: { exitCode: 0, stdout: `${top}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv[0] === 'codegraph' && e.argv[1] === 'explore' && seedMs) await w.clock.advance(seedMs)
     if (hang.includes(e.argv[0] ?? '') || hang.includes(`${e.argv[3]} ${e.argv[4]}`)) throw new Error(`${e.argv[0]}: timed out after 120000 ms`)
@@ -138,7 +149,13 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
   })
   on('ui.open', ($, e) => (w.opened.push(e.id), { value: { isPlaced: true } }) as never)
   on('tool.register', ($, e) => ({ value: { tool: `mcp__kiss__${e.name}` } }) as never)
+  on('fs.read', ($, e) => {
+    if (w.excludeFolder && e.path.endsWith('/info/exclude')) throw new Error(`EISDIR: illegal operation on a directory, read '${e.path}'`)
+    if (!(e.path in w.files)) throw new Error(`ENOENT: no such file or directory, open '${e.path}'`)
+    return { value: w.files[e.path] } as never
+  })
   on('fs.write', ($, e) => {
+    if (w.excludeFolder && e.path.endsWith('/info/exclude')) throw new Error(`EISDIR: illegal operation on a directory, open '${e.path}'`)
     w.files[e.path] = e.text
     return { value: undefined }
   })
@@ -181,7 +198,7 @@ test('/kiss-mini ask records a working task and the band reads 1 working; the re
   expect(w.spawned[0]?.cwd).toBe('/repo')
   expect(git(w).some(line => line.includes('worktree add'))).toBe(false)
   expect(w.spawned[0]?.prompt).toContain('mcp__kiss__progress')
-  expect(w.spawned[0]?.prompt).toContain('Report (your final message): "State: done|failed|waiting for you", then Summary:.')
+  expect(w.spawned[0]?.prompt).toContain('Final message: "State: done|failed|waiting for you", then Summary:.')
   expect(w.spawned[0]?.prompt).toContain('Kind: question')
   expect(w.spawned[0]?.prompt).toContain('what does tickets.py check?')
   expect(w.spawned[0]?.prompt).toContain('Current behaviour:')
@@ -298,7 +315,7 @@ const PANE = {
   requestId: 'kiss-mini',
   props: { title: 'kiss-mini', isFocused: true, bodyColumns: 100, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
 } as const
-const WT = `/tmp/kiss-mini/${ID}/wt`
+const WT = `/repo/.kiss/worktrees/mini-${ID}`
 const READY = [
   'State: ready',
   'Summary: add(a, b) now returns the sum.',
@@ -326,7 +343,7 @@ test('a code task gets a mini/<id> worktree from --base; ready, the pane shows i
   expect(git(w)).toContain(`git -C /repo worktree add -b mini/${ID} ${WT} main`)
   expect(w.spawned[0]?.cwd).toBe(WT)
   expect(w.spawned[0]?.prompt).toContain('Kind: code')
-  expect(w.spawned[0]?.prompt).toContain('Report (your final message): "State: ready|failed|waiting for you", then Summary:, Branch:, Tests:.')
+  expect(w.spawned[0]?.prompt).toContain('Final message: "State: ready|failed|waiting for you", then Summary:, Branch:, Tests:.')
   expect(await status($)).toContain(`${ID} code ready: fix add so it returns the sum`)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -597,10 +614,10 @@ test('a code worker\'s Monitor is denied, as its shell command would run unguard
 
 test('a worker\'s Bash command runs in its worktree: the mod puts a cd there first, one word with a space or a quote', async ($, on) => {
   // The worker's shell starts in the host's folder (the spawn's cwd does not move it), so a bare git write needs the cd.
-  const { ran } = await worker($, on, { tmp: "/tmp/it's a dir/" })
+  const { ran } = await worker($, on, { cwd: "/src/it's a dir" })
   await call($, 'Bash', { command: 'git commit -m x' })
   expect(JSON.stringify(await call($, 'Bash', { command: 'git -C /repo commit -m x' }))).toContain(ONLY)
-  expect(ran).toEqual([`Bash cd '/tmp/it'\\''s a dir/kiss-mini/${ID}/wt' && git commit -m x`])
+  expect(ran).toEqual([`Bash cd '/src/it'\\''s a dir/.kiss/worktrees/mini-${ID}' && git commit -m x`])
 })
 
 test('a worker\'s command that starts with the brief\'s prefix reaches beneath the mod unchanged; one without gets it once', async ($, on) => {
@@ -613,11 +630,11 @@ test('a worker\'s command that starts with the brief\'s prefix reaches beneath t
 })
 
 test('a /private/var spelling of a /var worktree is inside it', async ($, on) => {
-  const { ran } = await worker($, on, { tmp: '/var/kiss/' })
-  const wt = `/private/var/kiss/kiss-mini/${ID}/wt`
+  const { ran } = await worker($, on, { cwd: '/var/kiss' })
+  const wt = `/private/var/kiss/.kiss/worktrees/mini-${ID}`
   await call($, 'Bash', { command: `git -C ${wt} commit -m x` })
   await call($, 'Write', { file_path: `${wt}/calc.py` })
-  expect(ran).toEqual([`Bash cd '/var/kiss/kiss-mini/${ID}/wt' && git -C ${wt} commit -m x`, `Write ${wt}/calc.py`])
+  expect(ran).toEqual([`Bash cd '/var/kiss/.kiss/worktrees/mini-${ID}' && git -C ${wt} commit -m x`, `Write ${wt}/calc.py`])
 })
 
 test('a code worker\'s Edit, Write and NotebookEdit outside its worktree are denied; inside they pass', async ($, on) => {
@@ -875,7 +892,7 @@ test('with real-length paths a long task text still gives a brief of at most 1,5
 })
 
 test('Discard clears a worktree git no longer lists, so the task can leave the ledger', async ($, on) => {
-  const w = world(on, { fail: { 'worktree remove': { stderr: `fatal: '/tmp/kiss-mini/${ID}/wt' is not a working tree` } } })
+  const w = world(on, { fail: { 'worktree remove': { stderr: `fatal: '${WT}' is not a working tree` } } })
   await ready($, w)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: `discard-${ID}` })
@@ -898,7 +915,7 @@ const discard = async ($: any, w: ReturnType<typeof world>) => {
 }
 
 test('Discard of a harness task whose sender folder is gone removes the worktree and the branch in the task\'s repository', async ($, on) => {
-  const w = world(on, { cwd: RUN })
+  const w = world(on, { cwd: RUN, common: '/repo' })
   await handoff($, w, false)
   w.gone.push(RUN)
   const toasts = w.toasts.length
@@ -910,7 +927,7 @@ test('Discard of a harness task whose sender folder is gone removes the worktree
 })
 
 test('a harness task merged into its base while its sender folder is gone ends done; its worktree goes in its repository', async ($, on) => {
-  const w = world(on, { cwd: RUN })
+  const w = world(on, { cwd: RUN, common: '/repo' })
   await handoff($, w, false)
   w.gone.push(RUN)
   w.merged = true
@@ -920,9 +937,9 @@ test('a harness task merged into its base while its sender folder is gone ends d
 })
 
 test('Discard keeps a /var worktree that git lists by its /private/var spelling: the task stays open with it, a toast', async ($, on) => {
-  const w = world(on, { tmp: '/var/kiss/', fail: { 'worktree remove': { stderr: 'fatal: cannot remove a locked working tree' } } })
+  const w = world(on, { common: '/var/kiss', fail: { 'worktree remove': { stderr: 'fatal: cannot remove a locked working tree' } } })
   await ready($, w)
-  const wt = `/var/kiss/kiss-mini/${ID}/wt`
+  const wt = `/var/kiss/.kiss/worktrees/mini-${ID}`
   w.worktrees = `worktree /repo\nHEAD abc\nbranch refs/heads/main\n\nworktree /private${wt}\nHEAD def\nlocked\n`
   const { t, offered } = await discard($, w)
   expect([t.state, t.worktree, offered]).toEqual(['ready', wt, true])
@@ -960,7 +977,7 @@ test('Discard whose branch -D fails after the worktree went toasts; the task sta
 
 test('a Discard interrupted after the worktree went, with the sender folder gone, finishes on a second press', async ($, on) => {
   const hang = ['branch -D']
-  const w = world(on, { cwd: RUN, hang })
+  const w = world(on, { cwd: RUN, common: '/repo', hang })
   await handoff($, w, false)
   w.gone.push(RUN)
   expect((await discard($, w)).t.state).toBe('ready')
@@ -1620,14 +1637,16 @@ test('in an indexed repo a code task\'s brief names W, the CodeGraph commands wi
   const dir = `/tmp/kiss-mini/${ID}`
   const prompt = w.spawned[0]?.prompt ?? ''
   expect(prompt.length).toBeLessThanOrEqual(1500)
-  expect(prompt).toContain(`Worktree: ${dir}/wt\nTask folder: ${dir}\n`)
+  const wt = `${cwd}/.kiss/worktrees/mini-${ID}`
+  // The worktree sits in the checkout: the brief names it from the Checkout field, as the Bash line names <Worktree>.
+  expect(prompt).toContain(`Worktree: <Checkout>/.kiss/worktrees/mini-${ID}\nTask folder: ${dir}\n`)
   expect(prompt).toContain('CodeGraph (never cd first): codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder')
   // The worker starts in W, so "$PWD" in the line is W.
-  expect(w.spawned[0]?.cwd).toBe(`${dir}/wt`)
+  expect(w.spawned[0]?.cwd).toBe(wt)
   expect(w.files[`${dir}/seed.md`]).toBe('SEED: calc.py add()\n')
   // The new worktree gets its own index before the seed reads it.
   const cg = w.runs.filter(a => a[0] === 'codegraph').map(a => a.slice(0, 4).join(' '))
-  expect(cg).toEqual([`codegraph status ${cwd}`, `codegraph init ${dir}/wt`, `codegraph explore -p ${dir}/wt`])
+  expect(cg).toEqual([`codegraph status ${cwd}`, `codegraph init ${wt}`, `codegraph explore -p ${wt}`])
 })
 
 test('a coloured `codegraph status` of the checkout gives the worker its seed, and the worktree\'s index starts with no -y and stdin closed', async ($, on) => {
@@ -1636,7 +1655,7 @@ test('a coloured `codegraph status` of the checkout gives the worker its seed, a
   await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   expect(w.files[`/tmp/kiss-mini/${ID}/seed.md`]).toBe('SEED: calc.py add()\n')
-  expect(w.runs.filter(a => a[1] === 'init')).toEqual([['codegraph', 'init', `/tmp/kiss-mini/${ID}/wt`]])
+  expect(w.runs.filter(a => a[1] === 'init')).toEqual([['codegraph', 'init', WT]])
   expect(w.initStdin).toEqual([''])
 })
 
@@ -1764,4 +1783,119 @@ test('a task started in a subfolder of an indexed repo still gets its seed', asy
   await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
   expect(w.files[`/tmp/kiss-mini/${ID}/seed.md`]).toBe('SEED: calc.py add()\n')
+})
+
+async function codeTask($: any, w: ReturnType<typeof world>, cwd = '/repo') {
+  await $.session.start({ cwd, surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent.at(-1)?.text ?? '' } as never)
+}
+
+for (const cwd of ['/repo', '/repo/.kiss/worktrees/run9']) {
+  test(`a code task from ${cwd} gets <main checkout>/.kiss/worktrees/mini-<id>; T stays in the temp folder`, async ($, on) => {
+    const w = world(on, { cwd, common: '/repo' })
+    await codeTask($, w, cwd)
+    expect(git(w)).toContain(`git -C ${cwd} worktree add -b mini/${ID} ${WT} main`)
+    expect([w.store[`kiss-mini/task/${ID}`].worktree, w.spawned.at(-1)?.cwd]).toEqual([WT, WT])
+    expect(w.spawned.at(-1)?.prompt).toContain(`Task folder: /tmp/kiss-mini/${ID}\n`)
+    await $.turn.start({ agentId: 'w1', text: w.spawned.at(-1)?.prompt ?? '', turnId: 't1' } as never)
+    await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1000, isAborted: false, turnId: 't1' } as never)
+    expect(w.store[`kiss-mini/task/${ID}`].log).toBe(`/tmp/kiss-mini/${ID}/report.md`)
+  })
+}
+
+test('a hand-off from a harness run\'s worktree puts the worker\'s worktree in the main checkout', async ($, on) => {
+  const w = world(on, { cwd: '/repo/.kiss/worktrees/run9', common: '/repo' })
+  await $.session.start({ cwd: '/repo/.kiss/worktrees/run9', surface: 'terminal', isInteractive: true } as never)
+  await $.tool.call({ tool: 'mcp__kiss__handoff', kind: 'bug', title: 'add subtracts', brief: HANDOFF_BRIEF, base: 'kiss-run', return: true } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(git(w)).toContain(`git -C /repo/.kiss/worktrees/run9 worktree add -b mini/${ID} ${WT} kiss-run`)
+  expect(w.spawned[0]?.prompt).toContain(`Worktree: ${WT}\n`)
+  expect(git(w)).toContain('git -C /repo check-ignore -q .kiss/')               // asked in the main checkout
+})
+
+const EXCLUDE = '/repo/.git/info/exclude'
+test('a repo that does not ignore .kiss/ gets one .kiss/ line in its exclude file; a second task adds none', async ($, on) => {
+  const w = world(on)
+  w.ignored = false
+  w.files[EXCLUDE] = '# git ls-files --others --exclude-from=.git/info/exclude\n*.log'
+  await codeTask($, w)
+  expect(w.files[EXCLUDE]).toBe('# git ls-files --others --exclude-from=.git/info/exclude\n*.log\n.kiss/\n')
+  // The first ends, so the owner's one slot is free and the second task reaches its own worktree.
+  await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' } as never)
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1000, isAborted: false, turnId: 't1' } as never)
+  await w.clock.advance(1000)
+  await codeTask($, w)
+  expect(w.spawned).toHaveLength(2)
+  expect(git(w).filter(l => l.includes('worktree add'))).toHaveLength(2)
+  expect(w.files[EXCLUDE]!.split('\n').filter(l => l === '.kiss/')).toHaveLength(1)
+})
+
+test('a repo with no exclude file yet gets one that holds .kiss/', async ($, on) => {
+  const w = world(on)
+  w.ignored = false
+  await codeTask($, w)
+  expect(w.files[EXCLUDE]).toBe('.kiss/\n')
+})
+
+test('a repo that ignores .kiss/ gets no exclude line', async ($, on) => {
+  const w = world(on)
+  await codeTask($, w)
+  expect(EXCLUDE in w.files).toBe(false)
+  expect(git(w)).toContain('git -C /repo check-ignore -q .kiss/')
+  expect(git(w)).toContain(`git -C /repo worktree add -b mini/${ID} ${WT} main`)
+})
+
+test('a question task writes no exclude line', async ($, on) => {
+  const w = world(on)
+  w.ignored = false
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' } as never)
+  expect(EXCLUDE in w.files).toBe(false)
+})
+
+test('with the worktree inside the checkout, a worker\'s write in the checkout outside it, a git -C <checkout> commit and a .. climb are denied; inside passes', async ($, on) => {
+  const { ran } = await worker($, on)
+  for (const [tool, arg] of [['Edit', { file_path: '/repo/calc.py' }], ['Write', { file_path: '/repo/.kiss/notes.md' }],
+    ['Write', { file_path: `${WT}/../../../calc.py` }], ['Edit', { file_path: `${WT}/../mini-other/calc.py` }],
+    ['Bash', { command: 'git -C /repo commit -m x' }], ['Bash', { command: `git -C ${WT}/../../.. commit -m x` }],
+    ['Bash', { command: `cd ${WT}/../../.. && git commit -am x` }]] as const) {
+    expect(JSON.stringify(await call($, tool, arg)), `${tool} ${JSON.stringify(arg)}`).toContain(ONLY)
+  }
+  await call($, 'Edit', { file_path: `${WT}/calc.py` })
+  await call($, 'Bash', { command: `git -C ${WT} commit -m x` })
+  expect(ran).toEqual([`Edit ${WT}/calc.py`, `Bash cd '${WT}' && git -C ${WT} commit -m x`])
+})
+
+test('an exclude file that cannot be written (a folder in its place) does not stop the task: its worktree is made', async ($, on) => {
+  const w = world(on)
+  w.ignored = false
+  w.excludeFolder = true
+  await codeTask($, w)
+  expect(git(w)).toContain(`git -C /repo worktree add -b mini/${ID} ${WT} main`)
+  expect([w.store[`kiss-mini/task/${ID}`].state, w.spawned.length]).toEqual(['working', 1])
+})
+
+test('a worktree add that fails after the exclude line was written fails the task with git\'s words and holds nothing to discard', async ($, on) => {
+  const w = world(on, { fail: { worktree: { stderr: 'fatal: invalid reference: main' } } })
+  w.ignored = false
+  await codeTask($, w)
+  expect(w.files[EXCLUDE]).toBe('.kiss/\n')
+  const t = w.store[`kiss-mini/task/${ID}`]
+  expect([t.state, t.report, t.worktree, t.branch]).toEqual(['failed', 'fatal: invalid reference: main', undefined, undefined])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: `discard-${ID}` })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a host stopped after the worktree was made leaves a task whose worktree the pane offers to Discard', async ($, on) => {
+  const t = { id: 'h1', kind: 'code', title: 'h', sender: 's1', cwd: '/repo', state: 'working', started: NOW, host: 'gone', agentId: 'x', base: 'main', branch: 'mini/h1', worktree: '/repo/.kiss/worktrees/mini-h1', claimed: NOW }
+  const w = world(on, { store: { 'kiss-mini/task/h1': t } })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false } as never)
+  expect([w.store['kiss-mini/task/h1'].state, w.store['kiss-mini/task/h1'].worktree]).toEqual(['failed', '/repo/.kiss/worktrees/mini-h1'])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'discard-h1' })).toBeDefined()
+  expect(await ui.find({ key: 'merge-h1' })).toBeUndefined()
+  await ui.unmount()
 })
