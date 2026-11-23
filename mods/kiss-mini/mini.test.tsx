@@ -9,6 +9,9 @@ const BAND = {
 // 2 Nov 2026, 14:30:05 UTC: the task id is 1102-143005.
 const NOW = Date.UTC(2026, 10, 2, 14, 30, 5)
 const ID = '1102-143005'
+// The exclude append's script, as a real sh ran it on real files (a Latin-1 byte with no final newline, no info/ folder,
+// a folder in the file's place): a test has no process to run it, so the fake takes only this text. A change re-runs that check.
+const APPEND = 'mkdir -p "${1%/*}" && { [ -s "$1" ] && [ -n "$(tail -c 1 "$1")" ] && echo >> "$1"; echo .kiss/ >> "$1"; }'
 
 /** The engine beneath the mod: one session that is both the sender and the host. */
 type Opts = {
@@ -138,9 +141,10 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     // The exclude file's append, as `>>` changes its bytes; a folder in its place fails as sh does.
     if (e.argv[0] === 'sh' && e.argv[4]?.endsWith('/info/exclude')) {
       const path = e.argv[4], old = w.files[path] ?? ''
+      if (e.argv[2] !== APPEND) return { value: { exitCode: 1, stdout: '', stderr: 'not the append script a real sh was checked with\n', isStdoutTruncated: false, isStderrTruncated: false } }
       if (w.excludeFolder) return { value: { exitCode: 1, stdout: '', stderr: `sh: ${path}: Is a directory\n`, isStdoutTruncated: false, isStderrTruncated: false } }
       // `mkdir -p "${1%/*}"` first makes the missing folder, as sh does; without it the append finds no folder.
-      if (w.noInfo && !e.argv[2]?.startsWith('mkdir -p "${1%/*}" && ')) return { value: { exitCode: 1, stdout: '', stderr: `sh: ${path}: No such file or directory\n`, isStdoutTruncated: false, isStderrTruncated: false } }
+      if (w.noInfo && !e.argv[2].startsWith('mkdir -p "${1%/*}" && ')) return { value: { exitCode: 1, stdout: '', stderr: `sh: ${path}: No such file or directory\n`, isStdoutTruncated: false, isStderrTruncated: false } }
       w.files[path] = `${old}${old && !old.endsWith('\n') ? '\n' : ''}.kiss/\n`
       return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
