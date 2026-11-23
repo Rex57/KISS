@@ -447,6 +447,8 @@ def selftest():
                      "When no ticket is open", 'After a ticket marked "risky"'):
             assert step not in ho, ("no per-ticket step", step)
             assert step in impl, ("the implementer keeps it", step)
+        for text in (fix2, ho):                     # F16: the commit step in the fix prompt, which the handoff ends with
+            assert "callcheck.py" in text and "explicit path" in text and "as before" not in text, text
         assert "missing ROUND" in refused("handoff", R) and "fix-3.md" in refused("handoff", R, "ROUND=3")
         # T-7: a fix list that asks for the full check: one WARN on stderr, the whole prompt on stdout
         with open(os.path.join(R, "fix-4.md"), "w") as f:
