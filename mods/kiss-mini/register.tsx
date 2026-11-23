@@ -44,10 +44,11 @@ async function folder($: $, id: string) {
   return `${tmp.replace(/\/$/, '')}/kiss-mini/${id}`
 }
 
-/** The main checkout of the repository `dir` is in: the folder that holds its common git folder; undefined when git fails. */
+/** The main checkout of the repository `dir` is in: the first `worktree` line git lists (a submodule's common git folder is in its superproject's .git); undefined when git fails. */
 async function mainOf($: $, dir: string) {
-  const common = await $.process.run(['git', '-C', dir, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 120_000 }).catch(() => undefined)
-  return common?.exitCode === 0 ? common.stdout.trim().replace(/\/\.git$/, '') : undefined
+  const list = await $.process.run(['git', '-C', dir, 'worktree', 'list', '--porcelain'], { timeoutMs: 120_000 }).catch(() => undefined)
+  const first = list?.exitCode === 0 ? list.stdout.split('\n')[0] : undefined
+  return first?.startsWith('worktree ') ? first.slice(9) : undefined
 }
 
 /** D1: a code task's worktree, beside the harness worktrees in its main checkout, so a restart keeps it (T stays in TMPDIR). */
@@ -61,8 +62,8 @@ async function exclude($: $, t: Task) {
   if ((await git('check-ignore', '-q', '.kiss/')).exitCode !== 1) return
   const path = (await git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude')).stdout.trim()
   if (!path) return
-  const old = await $.fs.read(path).then(String, () => '')
-  await $.fs.write(path, `${old}${old && !old.endsWith('\n') ? '\n' : ''}.kiss/\n`)
+  // An append, never a read and rewrite: the owner's lines keep every byte (the fs API reads and writes only UTF-8 text).
+  await $.process.run(['sh', '-c', '[ -s "$1" ] && [ -n "$(tail -c 1 "$1")" ] && echo >> "$1"; echo .kiss/ >> "$1"', 'sh', path], { timeoutMs: 120_000 })
 }
 
 /** The worker's report: its State line and its Summary (up to the next field), cut to 600 characters. */

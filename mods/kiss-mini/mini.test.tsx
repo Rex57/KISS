@@ -33,10 +33,12 @@ type Opts = {
   top?: string
   /** How long `codegraph explore` (the seed) takes, on the mock clock. */
   seedMs?: number
-  /** The main checkout: the folder that holds the repository's common git folder (default: top). */
+  /** The main checkout: the first worktree `git worktree list` names (default: top). */
   common?: string
+  /** The repository's git folder, where `--git-path` names its exclude file (default: `<common>/.git`; a submodule's is in its superproject's .git). */
+  gitDir?: string
 }
-function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, colour = false, top = cwd, seedMs = 0, common = top, project = top, mismatch = null }: Opts = {}) {
+function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, colour = false, top = cwd, seedMs = 0, common = top, project = top, mismatch = null, gitDir = `${common}/.git` }: Opts = {}) {
   const w = {
     session: 's1',
     branch,
@@ -108,10 +110,9 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     if (e.argv[0] === 'git' && w.gone.includes(e.argv[2] ?? '')) return { value: { exitCode: 128, stdout: '', stderr: `fatal: cannot change to '${e.argv[2]}': No such file or directory\n`, isStdoutTruncated: false, isStderrTruncated: false } }
     // Every test's repository is /repo; its worktrees share its git folder.
     if (e.argv[3] === 'branch' && e.argv[4] === '--list') return { value: { exitCode: 0, stdout: w.branchGone ? '' : `  ${e.argv[5]}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (e.argv.includes('--git-common-dir')) return { value: { exitCode: 0, stdout: `${common}/.git\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (e.argv.includes('--git-path')) return { value: { exitCode: 0, stdout: `${common}/.git/info/exclude\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv.includes('--git-path')) return { value: { exitCode: 0, stdout: `${gitDir}/info/exclude\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv[3] === 'check-ignore') {
-      const listed = (w.files[`${common}/.git/info/exclude`] ?? '').split('\n').includes('.kiss/')
+      const listed = (w.files[`${gitDir}/info/exclude`] ?? '').split('\n').includes('.kiss/')
       return { value: { exitCode: w.ignored || listed ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (e.argv.includes('--show-toplevel')) return { value: { exitCode: 0, stdout: `${top}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -127,6 +128,13 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
       w.ghAt.push(w.clock.now())
       return { value: { exitCode: 0, stdout: `${e.argv[1] === 'pr' ? w.gh.pr : w.gh.run}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // The exclude file's append, as `>>` changes its bytes; a folder in its place fails as sh does.
+    if (e.argv[0] === 'sh' && e.argv[4]?.endsWith('/info/exclude')) {
+      const path = e.argv[4], old = w.files[path] ?? ''
+      if (w.excludeFolder) return { value: { exitCode: 1, stdout: '', stderr: `sh: ${path}: Is a directory\n`, isStdoutTruncated: false, isStderrTruncated: false } }
+      w.files[path] = `${old}${old && !old.endsWith('\n') ? '\n' : ''}.kiss/\n`
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv[0] === 'sh') {
       const failed = e.argv[2]?.includes('fail')
       return { value: { exitCode: failed ? 1 : 0, stdout: failed ? 'collected 3\nline a\nFAILED test_add - assert -1 == 5\n' : 'ok\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -141,7 +149,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     const bad = fail[`${e.argv[3]} ${e.argv[4]}`] ?? fail[e.argv[3] ?? ''] ?? fail[e.argv[0] ?? '']
     if (bad && e.argv[3] === 'merge') w.merging = true
     if (bad) return { value: { exitCode: 1, stdout: bad.stdout ?? '', stderr: bad.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (e.argv[3] === 'worktree' && e.argv[4] === 'list') return { value: { exitCode: 0, stdout: w.worktrees, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv[3] === 'worktree' && e.argv[4] === 'list') return { value: { exitCode: 0, stdout: w.worktrees || `worktree ${common}\nHEAD abc\nbranch refs/heads/main\n\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.join(' ') === 'claude plugin list --json') return { value: { exitCode: 0, stdout: JSON.stringify(plugins), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const out = e.argv.includes('--abbrev-ref') ? `${w.branch}\n` : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -156,11 +164,13 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
   on('fs.read', ($, e) => {
     if (w.excludeFolder && e.path.endsWith('/info/exclude')) throw new Error(`EISDIR: illegal operation on a directory, read '${e.path}'`)
     if (!(e.path in w.files)) throw new Error(`ENOENT: no such file or directory, open '${e.path}'`)
+    // The exclude file holds bytes, one character each; a text read decodes them as UTF-8, as the engine does.
+    if (e.path.endsWith('/info/exclude')) return { value: new TextDecoder().decode(Uint8Array.from(w.files[e.path]!, c => c.charCodeAt(0))) } as never
     return { value: w.files[e.path] } as never
   })
   on('fs.write', ($, e) => {
     if (w.excludeFolder && e.path.endsWith('/info/exclude')) throw new Error(`EISDIR: illegal operation on a directory, open '${e.path}'`)
-    w.files[e.path] = e.text
+    w.files[e.path] = e.path.endsWith('/info/exclude') ? String.fromCharCode(...new TextEncoder().encode(e.text)) : e.text
     return { value: undefined }
   })
   on('ui.toast', ($, e) => {
@@ -1834,6 +1844,23 @@ test('a repo that does not ignore .kiss/ gets one .kiss/ line in its exclude fil
   expect(w.spawned).toHaveLength(2)
   expect(git(w).filter(l => l.includes('worktree add'))).toHaveLength(2)
   expect(w.files[EXCLUDE]!.split('\n').filter(l => l === '.kiss/')).toHaveLength(1)
+})
+
+test('an exclude file with a byte that is not UTF-8 keeps every byte; only the .kiss/ line is appended', async ($, on) => {
+  const w = world(on)
+  w.ignored = false
+  w.files[EXCLUDE] = '# caf\xe9 (Latin-1)\n*.log'
+  await codeTask($, w)
+  expect(w.files[EXCLUDE]).toBe('# caf\xe9 (Latin-1)\n*.log\n.kiss/\n')
+})
+
+test('a code task in a submodule gets its worktree in the submodule\'s checkout and its exclude line in that checkout\'s exclude file', async ($, on) => {
+  const w = world(on, { cwd: '/super/lib', common: '/super/lib', gitDir: '/super/.git/modules/lib' })
+  w.ignored = false
+  await codeTask($, w, '/super/lib')
+  expect(git(w)).toContain(`git -C /super/lib worktree add -b mini/${ID} /super/lib/.kiss/worktrees/mini-${ID} main`)
+  expect(git(w)).toContain('git -C /super/lib check-ignore -q .kiss/')
+  expect(w.files['/super/.git/modules/lib/info/exclude']).toBe('.kiss/\n')
 })
 
 test('a repo with no exclude file yet gets one that holds .kiss/', async ($, on) => {

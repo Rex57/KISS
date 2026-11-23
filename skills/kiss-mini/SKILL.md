@@ -43,10 +43,10 @@ skipped, and the worker does what the "Without it" column says.
 ## A task
 
 1. **Folder:** `id` = `date +%m%d-%H%M%S`; make `T` = `$TMPDIR/kiss-mini/<id>/`.
-2. **Worktree** (code and bug only): `WT` = `<main>/.kiss/worktrees/mini-<id>`, where `<main>` is the folder that
-   holds `git -C "<checkout>" rev-parse --path-format=absolute --git-common-dir` (a restart keeps it). When
-   `git -C "<main>" check-ignore -q .kiss/` exits 1, add the line `.kiss/` once to the file
-   `git -C "<main>" rev-parse --path-format=absolute --git-path info/exclude` names. Then
+2. **Worktree** (code and bug only): `WT` = `<main>/.kiss/worktrees/mini-<id>`, where `<main>` is the path on the first
+   `worktree` line of `git -C "<checkout>" worktree list --porcelain` (a restart keeps it). When
+   `git -C "<main>" check-ignore -q .kiss/` exits 1, append the line `.kiss/` to the end of the file
+   `git -C "<main>" rev-parse --path-format=absolute --git-path info/exclude` names (never rewrite it). Then
    `git -C "<checkout>" worktree add -b mini/<id> "<WT>" <base>`.
 3. **Brief:** write `T/brief.md` in the reference's format, `Rules:` set to the absolute path of
    `MA/references/handoff.md`. `wc -c` must print at most 1500; else cut it.
