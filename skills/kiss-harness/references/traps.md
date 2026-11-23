@@ -13,6 +13,8 @@ A project's own traps are in its facts file (`.kiss/project.md`).
 - A worktree has no CodeGraph watcher: `codegraph sync -q "W"` after each commit.
 - A seed or a sync can run for minutes: give it a 10-minute timeout (Claude Code: the Bash tool's
   `timeout: 600000`), or a short default timeout kills it and the agent runs it again.
+- A background command that detaches its own work (`( ... ) &`, `nohup`, `setsid`) reports done at once: put the
+  work itself in the background call, never a detached subshell inside it.
 - A tool result that shows a preview and names a file: read the file before you act.
 - A GUI app: before a click or a key, refuse while another copy of the product runs (the owner's own app gets the
   click), and check which app is in front through a second source (its process id or window title), not the

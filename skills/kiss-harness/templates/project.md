@@ -37,6 +37,7 @@ reviewer uses the resource.
 - How to start a scratch copy: a free port, a scratch store, never a live one.
 - The test accounts, and how to sign in.
 - How to drive the UI (a headless browser) and the API, and the test data to load.
+- A command that shows the browser tool starts (it opens a blank page), run before the first review.
 - GUI: how an agent drives only its own copy of the app (its own build, window and data), never the owner's
   running app.
 
