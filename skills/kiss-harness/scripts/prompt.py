@@ -189,6 +189,9 @@ def prompt(step, R, call, now=time.time):
         if not os.path.isfile(p):
             sys.exit(f"{step}: missing {p}")
         keys[name] = open(p).read().strip()
+        if step == "fix" and re.search(r"\bfull check\b", keys[name], re.I):   # the implementer never runs it (T-7)
+            print("WARN: the fix list asks for the full check: the controller runs it once at the end; name the tests instead",
+                  file=sys.stderr)
     return fill(step, keys)
 
 
@@ -435,11 +438,26 @@ def selftest():
         for rule in ("ponytail:ponytail", "mattpocock-skills:tdd", 'codegraph node -p "/w" <name>', 'codegraph callers -p "/w" --limit 100',
                      "cgcallers.py", "Never relax the limit", "Never touch the main checkout /m", "Never the full check"):
             assert ho.count(rule) == 1, ("a standing rule, once", rule)
-        for step in ("You build every open ticket", "1. Seed it", "Stage the ticket's files", 'set this ticket\'s "passes"',
+        for step in ("You build the open tickets", "1. Seed it", "Stage the ticket's files", 'set this ticket\'s "passes"',
                      "When no ticket is open", 'After a ticket marked "risky"'):
             assert step not in ho, ("no per-ticket step", step)
             assert step in impl, ("the implementer keeps it", step)
         assert "missing ROUND" in refused("handoff", R) and "fix-3.md" in refused("handoff", R, "ROUND=3")
+        # T-7: a fix list that asks for the full check: one WARN on stderr, the whole prompt on stdout
+        with open(os.path.join(R, "fix-4.md"), "w") as f:
+            f.write("- F1: the guard misses a case; then run the full check")
+        o, e = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(o), contextlib.redirect_stderr(e):
+            main(["prompt.py", "fix", R, "ROUND=4"], now=lambda: clock[0])
+        assert e.getvalue() == ("WARN: the fix list asks for the full check: the controller runs it once at the end; "
+                                "name the tests instead\n"), e.getvalue()
+        assert "F1: the guard misses a case" in o.getvalue() and o.getvalue().rstrip().endswith('"not_fixed": [{"id": "", "why": ""}]}'), o.getvalue()
+        e = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(e):
+            main(["prompt.py", "fix", R, "ROUND=2"], now=lambda: clock[0])
+        assert e.getvalue() == "", "no full check asked: no WARN"
+    assert ("You build the open tickets in" in out and "at most 3 open tickets per turn" in out
+            and "end your turn with one line that names the tickets you built and the next open one" in out), "D2: batches of 3"
     print("prompt selftest ok")
 
 

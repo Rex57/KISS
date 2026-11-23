@@ -85,7 +85,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    no edit unless the owner wants another behaviour. Any `prompt.py` call that prints "KISS <new>
    is installed" on stderr: tell the owner to start the run in a new session. Then `prompt.py implementer R` →
    start ONE subagent with that text, on the model and effort of the Models rule (`references/agents.md`), in the
-   background. Give every path absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
+   background. It builds at most 3 open tickets per turn, then ends the turn with a line that names them and the next
+   open one, so the context check of step 5 runs between batches. Give every path absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` (empty) and `git -C MAIN
    status` (empty for the files the run's diff `git -C W diff --name-only BASE..HEAD` names; another session's files
    do not stop the run), the commits, and `progress.md` (each ticket ends with what it skipped and any risk). **Triage** each new
@@ -95,7 +96,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    A triage claim about the base code cites its file and line. A fix-now line found after a review goes into that
    round's `sort-<n>.json` with a severity (step 8). Run `callcheck.py -p
    W <the HEAD at the last stop, or BASE at the first>..HEAD` and send each caller line it prints to read to the implementer. Open tickets and no
-   BLOCKED: `tickets.py continue R <elapsed> <budget>` → send it to the SAME implementer (after a risky ticket,
+   BLOCKED: `tickets.py continue R <elapsed> <budget>` (it names at most 3 open tickets) → send it to the SAME implementer (after a risky ticket,
    step 6's `--review` message goes instead). When it stopped on a held check and the solo reviewer still runs, send
    nothing; when that reviewer stops, send "product free" with the next continue. Before each continue, fix
    round and recheck, run `metrics.py R --context` (Claude Code): an agent it marks gets the handoff of
