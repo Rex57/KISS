@@ -221,7 +221,7 @@ function briefLines(t: Task, text: string, rules: string, dir: string, seed = fa
   // would query the base branch's index. Two full paths here would cost the task text 150 characters.
   ...(seed ? ['CodeGraph (never cd first): codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder'] : [])]
   // The report's first line and the progress tool are in the brief itself: a worker may not open the Rules file.
-  const rule = 'Report: your final message starts "State: done|ready|failed|waiting for you", then "Summary:". Call mcp__kiss__progress (step, total) as you start each step.'
+  const rule = `Report (your final message): ${isCode(t) ? '"State: ready|failed|waiting for you", then Summary:, Branch:, Tests:' : '"State: done|failed|waiting for you", then Summary:'}. Call mcp__kiss__progress (step, total) at each step.`
   if (t.brief !== undefined) {
     return [`# Mini task ${t.id}: ${t.title.slice(0, 120)}`, ...where, `Return: ${t.return ? 'harness' : 'owner'}    Checks: run`, `Rules: ${rules}`, rule, text].join('\n')
   }
@@ -305,7 +305,8 @@ function reportMessage(t: Task, answer: string) {
     `kiss-mini task ${t.id} (${t.kind}): ${t.title.slice(0, 120)}`,
     `State: ${t.state}`,
     `Summary: ${t.report ?? ''}`,
-    line('Branch', 'none'),
+    // A worker that names no branch: the task's own, with the commits counted at its report.
+    line('Branch', isCode(t) && t.branch && t.ahead !== undefined ? `${t.branch} (${t.ahead} commits)` : 'none'),
     `Tests: ${reportTests(answer)}`,
     `Full log: ${t.log}`,
   ].join('\n')
@@ -410,11 +411,16 @@ async function tick($: $) {
       const repo = await repoOf($, t)
       if ((await $.process.run(['git', '-C', repo, 'merge-base', '--is-ancestor', t.branch, t.base!])).exitCode === 0) {
         // A worktree with changes nobody committed is never forced away.
-        // The index the seed made (`?? .codegraph/`) is no change of the worker's.
-        const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.split('\n')
-          .filter(l => l.trim() && l.trim() !== '?? .codegraph/').join('\n')
+        const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.trim()
         if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
-        else await $.process.run(['git', '-C', repo, 'worktree', 'remove', '--force', t.worktree])
+        else {
+          const sha = (await $.process.run(['git', '-C', repo, 'rev-parse', t.branch])).stdout.trim()
+          await $.process.run(['git', '-C', repo, 'worktree', 'remove', '--force', t.worktree])
+          // The owner and the sender learn who removed the worktree, and where the branch stands.
+          const said = `kiss-mini ${t.id}: merged into ${t.base}; its worktree is removed; branch ${t.branch} at ${sha}`
+          $.ui.toast(said)
+          if (t.return) await $.session.send({ to: { sessionId: t.sender }, text: said }).catch(() => {})
+        }
         await save($, { ...t, state: 'done', delivered: 'merge', deliveredAt: now, ...(dirty ? {} : { worktree: undefined }) })
         continue
       }
@@ -549,6 +555,12 @@ async function wake($: $, text: string) {
   const dir = (await installed($)) ? [] : ['--plugin-dir', $.plugin.root]
   const r = await $.process.run(['claude', '--bg', '--name', HOST_NAME, '--model', 'haiku', ...dir, '--settings', settings])
   return r.exitCode === 0 ? 'started a new host' : `${NO_HOST}: ${`${r.stderr}\n${r.stdout}`.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 300)}`
+}
+
+/** The reply to a new task: what started it, or "failed: could not start a host: <reason>" (the task is failed). */
+async function reply($: $, t: Task, ok: (how: string) => string) {
+  const how = await started($, t)
+  return how.startsWith(NO_HOST) ? `failed: ${how} (kiss-mini task ${t.id})` : ok(how)
 }
 
 /** A task no host can take ends failed with the reason. */
@@ -754,7 +766,7 @@ export const register: Register = on => {
       if (!t.title) return { text: 'kiss-mini: say what to do: /kiss-mini <task>, /kiss-mini ask <question>.' }
       await save($, t)
       await refresh($)
-      return { text: `kiss-mini ${id}: ${t.kind} started (${await started($, t)}).` }
+      return { text: await reply($, t, how => `kiss-mini ${id}: ${t.kind} started (${how}).`) }
     }
     const lines = (await tasks($)).map(t => `${t.id} ${t.kind} ${t.state}: ${t.title}${t.report ? ` - ${t.report}` : ''}`)
     return { text: lines.join('\n') || 'kiss-mini: no tasks.' }
@@ -771,7 +783,7 @@ export const register: Register = on => {
       const t: Task = { id, kind: 'watch', title: a.title || w.target, ...w, return: a.return === true, sender: await $.session.id(), cwd: await $.session.cwd(), state: 'watching', started: await $.clock.now(), key: crypto.randomUUID() }
       await save($, t)
       await refresh($)
-      return { result: `kiss-mini task ${id} (watch) started (${await started($, t)}).${t.return ? ' Its end comes back to this session as one message.' : ''}` }
+      return { result: await reply($, t, how => `kiss-mini task ${id} (watch) started (${how}).${t.return ? ' Its end comes back to this session as one message.' : ''}`) }
     }
     if (!['code', 'bug', 'question'].includes(a.kind) || !a.title || !a.brief) return { result: 'kiss-mini: kind (code, bug, question or watch), title and brief are needed.' }
     if (a.brief.length > BRIEF_MAX) return { result: `kiss-mini: the brief has ${a.brief.length} characters; at most ${BRIEF_MAX}.` }
@@ -785,7 +797,7 @@ export const register: Register = on => {
     }
     await save($, t)
     await refresh($)
-    return { result: `kiss-mini task ${id} (${t.kind}) started (${await started($, t)}).${t.return ? ' Its report comes back to this session as one message.' : ''}` }
+    return { result: await reply($, t, how => `kiss-mini task ${id} (${t.kind}) started (${how}).${t.return ? ' Its report comes back to this session as one message.' : ''}`) }
   })
 
   // Host: a worker's progress tool sets its step n of m.
@@ -882,6 +894,8 @@ export const register: Register = on => {
       fields.ahead = Number((await $.process.run(['git', '-C', t.cwd, 'rev-list', '--count', `${t.base}..${t.branch}`])).stdout.trim()) || 0
       fields.tests = reportTests(e.answer)
       fields.pr = /^## Pull request body\s*\n([\s\S]*)/m.exec(e.answer)?.[1]?.trim() || summary
+      // D13: a change with commits that says done is ready, so its sender can deliver it; with none it stays done.
+      if (state === 'done' && fields.ahead > 0) fields.state = 'ready'
     }
     // A stop may have landed while the report was written: it stands.
     const fresh = (await $.store.get(TASK + t.id)) as Task

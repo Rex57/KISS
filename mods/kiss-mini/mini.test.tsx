@@ -116,6 +116,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
       const failed = e.argv[2]?.includes('fail')
       return { value: { exitCode: failed ? 1 : 0, stdout: failed ? 'collected 3\nline a\nFAILED test_add - assert -1 == 5\n' : 'ok\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    if (e.argv[3] === 'rev-parse' && e.argv[4]?.startsWith('mini/')) return { value: { exitCode: 0, stdout: 'abc1234def5678\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('rev-list')) return { value: { exitCode: 0, stdout: `${w.ahead}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--porcelain') && e.argv.includes('status')) return { value: { exitCode: 0, stdout: w.dirty, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--is-ancestor')) return { value: { exitCode: w.merged ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -180,7 +181,7 @@ test('/kiss-mini ask records a working task and the band reads 1 working; the re
   expect(w.spawned[0]?.cwd).toBe('/repo')
   expect(git(w).some(line => line.includes('worktree add'))).toBe(false)
   expect(w.spawned[0]?.prompt).toContain('mcp__kiss__progress')
-  expect(w.spawned[0]?.prompt).toContain('State: done|ready|failed|waiting for you')
+  expect(w.spawned[0]?.prompt).toContain('Report (your final message): "State: done|failed|waiting for you", then Summary:.')
   expect(w.spawned[0]?.prompt).toContain('Kind: question')
   expect(w.spawned[0]?.prompt).toContain('what does tickets.py check?')
   expect(w.spawned[0]?.prompt).toContain('Current behaviour:')
@@ -309,13 +310,13 @@ const READY = [
   'Fixes add.',
 ].join('\n')
 
-/** A code task from the owner, through the host, to ready. */
-async function ready($: any, w: ReturnType<typeof world>) {
+/** A code task from the owner, through the host, to ready (or to what `answer` says). */
+async function ready($: any, w: ReturnType<typeof world>, answer = READY) {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   await $.command.run({ command: 'kiss:kiss-mini', args: 'fix add so it returns the sum --base main' })
   await $.session.receive({ origin: { kind: 'peer', plugin: 'kiss' }, text: w.sent[0]?.text ?? '' })
   await $.turn.start({ agentId: 'w1', text: w.spawned[0]?.prompt ?? '', turnId: 't1' })
-  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer: READY, durationMs: 1000, isAborted: false, turnId: 't1' })
+  await $.turn.complete({ agentId: 'w1', reason: 'answer', answer, durationMs: 1000, isAborted: false, turnId: 't1' })
 }
 const git = (w: ReturnType<typeof world>) => w.runs.filter(argv => argv[0] === 'git').map(argv => argv.join(' '))
 
@@ -325,6 +326,7 @@ test('a code task gets a mini/<id> worktree from --base; ready, the pane shows i
   expect(git(w)).toContain(`git -C /repo worktree add -b mini/${ID} ${WT} main`)
   expect(w.spawned[0]?.cwd).toBe(WT)
   expect(w.spawned[0]?.prompt).toContain('Kind: code')
+  expect(w.spawned[0]?.prompt).toContain('Report (your final message): "State: ready|failed|waiting for you", then Summary:, Branch:, Tests:.')
   expect(await status($)).toContain(`${ID} code ready: fix add so it returns the sum`)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -1420,12 +1422,27 @@ test('a question leaves no worktree; the pane names the full text; no State line
   await ui.unmount()
 })
 
-test('a host that cannot start fails the task with claude\'s words', async ($, on) => {
+test('a host that cannot start fails the task with claude\'s words: the reply says failed, never started', async ($, on) => {
   const w = world(on, { delivered: false, fail: { claude: { stderr: 'Workspace not trusted.' } } })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  const r = await $.command.run({ command: 'kiss:kiss-mini', args: 'ask why?' } as never)
-  expect(r.text).toContain('could not start a host: Workspace not trusted.')
+  for (const args of ['ask why?', 'fix add --base main', 'watch pr 7']) {
+    const r = await $.command.run({ command: 'kiss:kiss-mini', args } as never)
+    expect(r.text?.startsWith('failed: could not start a host: Workspace not trusted.')).toBe(true)
+    expect(r.text).not.toMatch(/started/)
+  }
   expect(w.store[`kiss-mini/task/${ID}`].state).toBe('failed')
+})
+
+test('a hand-off when no host can start: the tool result says failed with the reason, never started; the task is failed', async ($, on) => {
+  const w = world(on, { delivered: false, fail: { claude: { stderr: 'Workspace not trusted.' } } })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  for (const call of [{ kind: 'bug', title: 'add subtracts', brief: HANDOFF_BRIEF, base: 'kiss-run', return: true },
+    { kind: 'question', title: 'why', brief: 'Summary: why?' }, { kind: 'watch', title: 'ci', brief: '', target: 'run 9' }]) {
+    const r = (await $.tool.call({ tool: 'mcp__kiss__handoff', ...call } as never)) as { result: string }
+    expect(r.result.startsWith('failed: could not start a host: Workspace not trusted.')).toBe(true)
+    expect(r.result).not.toMatch(/started/)
+  }
+  expect(Object.values(w.store).filter((t: any) => t?.kind).map((t: any) => t.state)).toEqual(['failed', 'failed', 'failed'])
 })
 
 test('a claude run that throws fails the task with its words: one task, the skill does not run, no later host runs it', async ($, on) => {
@@ -1673,14 +1690,72 @@ test('a slow seed does not count toward the 30 minutes of a code task', async ($
   expect(await status($)).toContain(`${ID} code failed: fix add so it returns the sum - timed out after 30 minutes`)
 })
 
-test('a merged task whose worktree holds only the new .codegraph/ index ends done and its worktree goes', async ($, on) => {
+test('a merged task whose worktree holds an untracked .codegraph/ keeps it: a change like any other', async ($, on) => {
   const w = world(on)
   await ready($, w)
   w.merged = true
   w.dirty = '?? .codegraph/\n'
   await w.clock.advance(60_000)
+  expect(git(w).some(line => line.includes('worktree remove'))).toBe(false)
+  expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].worktree]).toEqual(['done', WT])
+  expect(w.toasts.at(-1)).toContain(`uncommitted changes: ${WT}`)
+})
+
+test('a merged task with a clean worktree: one toast and, with return set, one message to its sender with the branch and its last sha', async ($, on) => {
+  const w = world(on)
+  await handoff($, w, true)
+  const before = w.sent.length
+  w.merged = true
+  await w.clock.advance(60_000)
   expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
-  expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].worktree]).toEqual(['done', undefined])
+  const said = `kiss-mini ${ID}: merged into kiss-run; its worktree is removed; branch mini/${ID} at abc1234def5678`
+  expect(w.toasts.filter(t => t.includes('merged into'))).toEqual([said])
+  expect(w.sent.slice(before)).toEqual([{ to: 's1', text: said }])
+})
+
+test('a merged task with a clean worktree and return off toasts and sends nothing', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  const before = w.sent.length
+  w.merged = true
+  await w.clock.advance(60_000)
+  expect(w.toasts.filter(t => t.includes('merged into main; its worktree is removed'))).toHaveLength(1)
+  expect(w.sent.length).toBe(before)
+})
+
+const NO_BRANCH = ['State: ready', 'Summary: add(a, b) now returns the sum.', 'Tests: pytest: 3 passed'].join('\n')
+test('a code answer with no Branch line is relayed with the task\'s branch and its commit count', async ($, on) => {
+  const w = world(on)
+  w.ahead = 2
+  await handoff($, w, true, NO_BRANCH)
+  const text = w.sent.filter(m => !m.text.startsWith('KISS-MINI task'))[0]?.text ?? ''
+  expect(text.split('\n')).toContain(`Branch: mini/${ID} (2 commits)`)
+  expect(text.split('\n')).toContain('Tests: pytest: 3 passed')
+})
+
+test('a code answer that says done with 2 commits is stored and relayed as ready', async ($, on) => {
+  const w = world(on)
+  w.ahead = 2
+  await handoff($, w, true, NO_BRANCH.replace('State: ready', 'State: done'))
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('ready')
+  expect(w.sent.filter(m => !m.text.startsWith('KISS-MINI task'))[0]?.text.split('\n')).toContain('State: ready')
+})
+
+test('an owner\'s code answer that says done with 2 commits is ready with its Merge button', async ($, on) => {
+  const w = world(on)
+  w.ahead = 2
+  await ready($, w, READY.replace('State: ready', 'State: done'))
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('ready')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: `merge-${ID}` })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a code answer that says done with 0 commits stays done', async ($, on) => {
+  const w = world(on)
+  w.ahead = 0
+  await ready($, w, READY.replace('State: ready', 'State: done'))
+  expect(w.store[`kiss-mini/task/${ID}`].state).toBe('done')
 })
 
 test('a task started in a subfolder of an indexed repo still gets its seed', async ($, on) => {
