@@ -10,7 +10,8 @@
   python3 -I tickets.py render RUN       write issues/<ID>.md, the text briefs.py seeds
   python3 -I tickets.py open RUN         the open tickets, one per line
   python3 -I tickets.py continue RUN [ELAPSED BUDGET] [--review ID]   the controller's message (at most 3 open
-                                         tickets, in file order), or nothing when all pass; with --review (a risky ticket under review alone), only the open
+                                         tickets, in file order), or nothing when all pass; without ELAPSED and
+                                         BUDGET, the clock of prompt.py from RUN/run.json (none without a start); with --review (a risky ticket under review alone), only the open
                                          tickets that do not depend on it, up to the first risky one, or nothing
                                          when all of them do; plus the hold of the product checks when the facts
                                          file's `Shared test resources:` line says "one at a time"
@@ -20,10 +21,11 @@ One ticket: {"id", "title", "spec", "acceptance": [...], "passes": false} and, o
 "seeds" (hints for the CodeGraph seed), "depends_on" (ids), "risky" (the reviewer also checks it alone).
 JSON, not Markdown: an agent edits only `passes`, and `check` refuses any other change.
 """
-import json, os, re, subprocess, sys
+import json, os, re, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import briefs  # noqa: E402  (the index lookup is briefs.py's own)
+import prompt  # noqa: E402  (the run's clock and budget are prompt.py's own)
 
 ID = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
 BATCH = 3   # D2: the most open tickets one implementer turn builds, so the context check runs between batches
@@ -254,6 +256,14 @@ def selftest():
                 with contextlib.redirect_stdout(out):
                     main(["tickets.py", "continue", run, *argv])
                 assert out.getvalue() == want + "\n", (body, argv, out.getvalue())
+        with open(os.path.join(run, "run.json"), "w") as f:              # D4: the clock of prompt.py, from run.json
+            json.dump({"START": 1000, "WAITS": [120, 30]}, f)
+        # 2000 - 1000 - 150 = 850 s; budget 4 tickets x 600 s + 7200 s = 9600 s (no facts file, no full check time)
+        for argv, want in (([], " Elapsed 850s / 9600s."), (["5", "100"], " Elapsed 5s / 100s.")):   # typed values win
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                main(["tickets.py", "continue", run, *argv], now=lambda: 2000)
+            assert out.getvalue() == continue_text(four) .replace(" pass.", " pass." + want) + "\n", (argv, out.getvalue())
         with open(os.path.join(run, "run.json"), "w") as f:              # the template's own words give no hold
             json.dump({"PROJECT": os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "templates", "project.md")}, f)
         assert not one_at_a_time(run), "the template's Shared test resources item says one at a time"
@@ -342,7 +352,7 @@ def selftest():
     print("tickets selftest ok")
 
 
-def main(argv, lookup=briefs.run):
+def main(argv, lookup=briefs.run, now=time.time):
     if argv[1:] == ["--selftest"]:
         return selftest()
     if len(argv) < 3 or argv[1] not in ("check", "freeze", "render", "open", "continue"):
@@ -376,7 +386,14 @@ def main(argv, lookup=briefs.run):
             review, argv = "".join(argv[i + 1:i + 2]), argv[:i] + argv[i + 2:]
             if review not in {r["id"] for r in rows}:
                 sys.exit(f"--review {review!r}: not a ticket id")
-        e, b = (int(argv[3]), int(argv[4])) if len(argv) > 4 else (None, None)
+        try:
+            with open(os.path.join(run, "run.json")) as f:
+                r = json.load(f)
+        except (OSError, ValueError):
+            r = {}
+        # typed values win; else the clock of prompt.py (D4), none without a start time
+        e, b = ((int(argv[3]), int(argv[4])) if len(argv) > 4 else
+                (prompt.elapsed(r, now), prompt.budget(run)) if "START" in r else (None, None))
         print(continue_text(rows, e, b, review, hold=bool(review) and one_at_a_time(run)))
     else:
         sys.exit(__doc__)

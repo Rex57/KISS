@@ -53,6 +53,11 @@ def budget(run):
     return s + 60 * int(m.group(1)) if m else s
 
 
+def elapsed(run, now=time.time):
+    """The run's clock (D4): seconds since run["START"], less the owner waits."""
+    return max(0, int(now() - run["START"] - sum(run.get("WAITS", []))))
+
+
 def fill(step, keys, text=None):
     text = text if text is not None else open(os.path.join(T, step + ".md")).read()
     keys = dict(keys)
@@ -178,7 +183,7 @@ def prompt(step, R, call, now=time.time):
     with open(path) as f:
         keys = dict(json.load(f), **call, R=R)
     if "ELAPSED" not in call and "START" in keys:           # D4: no ELAPSED typed by hand
-        keys["ELAPSED"] = max(0, int(now() - keys["START"] - sum(keys.get("WAITS", []))))
+        keys["ELAPSED"] = elapsed(keys, now)
     if step == "handoff":
         return fill(step, keys, handoff_text()) + "\n" + prompt("fix", R, call, now)
     if step in FILES:

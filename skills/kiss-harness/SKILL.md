@@ -96,7 +96,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    A triage claim about the base code cites its file and line. A fix-now line found after a review goes into that
    round's `sort-<n>.json` with a severity (step 8). Run `callcheck.py -p
    W <the HEAD at the last stop, or BASE at the first>..HEAD` and send each caller line it prints to read to the implementer. Open tickets and no
-   BLOCKED: `tickets.py continue R <elapsed> <budget>` (it names at most 3 open tickets) → send it to the SAME implementer (after a risky ticket,
+   BLOCKED: `tickets.py continue R` (it names at most 3 open tickets; its clock is prompt.py's) → send it to the SAME implementer (after a risky ticket,
    step 6's `--review` message goes instead). When it stopped on a held check and the solo reviewer still runs, send
    nothing; when that reviewer stops, send "product free" with the next continue. Before each continue, fix
    round and recheck, run `metrics.py R --context` (Claude Code): an agent it marks gets the handoff of
@@ -104,8 +104,8 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    gate. On BLOCKED: a decision when the block needs a choice, else a gate.
 6. **A risky ticket** is reviewed alone (step 7 on its commits) as soon as the implementer names it; otherwise the
    final review covers it. Start the solo reviewer (with "one at a time" in the facts file's `Shared test resources:`,
-   only after the previous solo reviewer stops), and at once send the implementer `tickets.py continue R <elapsed>
-   <budget> --review <ID>`: only the open tickets that do not depend on the risky one, up to the next risky ticket.
+   only after the previous solo reviewer stops), and at once send the implementer `tickets.py continue R
+   --review <ID>`: only the open tickets that do not depend on the risky one, up to the next risky ticket.
    When it prints nothing (each open ticket waits for it), send no message. The solo review's fix round goes to the
    implementer at its next stop. When the message holds the product checks (the facts file's `Shared test
    resources:` says "one at a time"), send the implementer "product free" as soon as the solo reviewer stops; it then
