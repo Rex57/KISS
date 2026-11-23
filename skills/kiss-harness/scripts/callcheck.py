@@ -289,6 +289,12 @@ def selftest_one_pass():
         assert [calls.count(c) for c in ("status", "sync", "files", "callers")] == [1, 1, 1, 5], calls
         assert open(count).read() == "x", "the language server started more than once"
         assert out.count("definition  keep.py:1  function f") == 5 and "LSP" not in out, out
+        # the one LSP deadline for the whole diff: the timed-out note names each definition with no answer (a fake clock)
+        once = cgcallers.FAKE_LSP.replace('    elif m.get("method") == "textDocument/references":\n',
+                                          '    elif m.get("method") == "textDocument/references" and not globals().get("said"):\n        said = True\n')
+        tick = iter(range(0, 10 ** 6, 5)).__next__                                # 5 s per look at the clock
+        out = check(W, "--cached", lambda W_, t: cgcallers.many(W_, t, cg=fake_cg, servers={"python": [sys.executable, "-c", once, "[]"]}, clock=tick))
+        assert "\nLSP: timed out; no answer for: f1 (keep.py:1), f2 (keep.py:1), f3 (keep.py:1), f4 (keep.py:1)\n" in out, out
         calls[:] = ["boom"]
         out = check(W, "--cached", lambda W_, t: cgcallers.many(W_, t, cg=fake_cg, servers={}))
         block = out[out.index("== removed: f3"):out.index("== removed: f4")]

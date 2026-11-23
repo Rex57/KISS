@@ -16,7 +16,8 @@ filter it reads every indexed file of that language and prints a warning. codegr
 untyped parameter or value, and a call through getattr or an index with a string (KISS rules/codegraph.md, "callers is
 incomplete").
 With pyright-langserver (Python) or typescript-language-server (JS/TS) on PATH, an LSP pass asks the server for the
-references of each definition (one deadline of 120 s for the whole pass, then "LSP: timed out"); with no server it
+references of each definition (one deadline of 120 s for the whole pass, then "LSP: timed out; no answer for: <name>
+(<file>:<line>), ..."); with no server it
 prints "no language server for <language>: LSP pass skipped".
 Each caller line is marked:
   [both]       codegraph has an edge on this line and the word search finds the name on it
@@ -270,7 +271,7 @@ class Lsp:
 
 def lsp_refs(W, defs, text, servers, clock, limit=LSP_LIMIT):
     """({index of a definition: {(file, line)}} of the references the language servers find, the lines to print)."""
-    refs, notes, deadline = {}, [], clock() + limit
+    refs, notes, deadline, answered = {}, [], clock() + limit, set()
     root = os.path.realpath(W)
     uri = lambda f: "file://" + urllib.parse.quote(os.path.join(root, f))
     groups = {}
@@ -308,12 +309,16 @@ def lsp_refs(W, defs, text, servers, clock, limit=LSP_LIMIT):
                 found = server.ask("textDocument/references", {
                     "textDocument": {"uri": uri(dd["filePath"])}, "context": {"includeDeclaration": False},
                     "position": {"line": dd["startLine"] - 1, "character": at.start() if at else 0}}, deadline, clock) or []
+                answered.add(i)
                 for loc in found:
                     path = os.path.realpath(urllib.parse.unquote(urllib.parse.urlparse(loc["uri"]).path))
                     if path.startswith(root + os.sep):
                         refs.setdefault(i, set()).add((os.path.relpath(path, root), loc["range"]["start"]["line"] + 1))
         except TimeoutError:
-            notes.append("LSP: timed out")
+            # one deadline for every target: name each definition the servers never answered for
+            notes.append("LSP: timed out; no answer for: " + ", ".join(
+                "%s (%s:%s)" % (defs[i]["name"], defs[i]["filePath"], defs[i]["startLine"])
+                for i in sorted(j for ix in groups.values() for j in ix) if i not in answered))
             break
         except OSError as e:
             notes.append("LSP: %s failed: %s" % (servers[key][0], str(e)[:200]))
@@ -692,7 +697,7 @@ def selftest():
         reads = []
         tick = lambda: reads.append(31 * len(reads)) or reads[-1]                       # each look at the clock: 31 s on
         o = out("helper", "-p", W, "-f", "lib/util.py", clock=tick)
-        assert o.rstrip().endswith("LSP: timed out") and "[both     ] app.py:6  go" in o, o
+        assert o.rstrip().endswith("LSP: timed out; no answer for: helper (lib/util.py:1)") and "[both     ] app.py:6  go" in o, o
         assert LSP_LIMIT <= max(reads) < LSP_LIMIT + 31, reads                          # R5: it stops at the limit, not later
         lsp["python"] = [sys.executable, "-c", "import sys; sys.exit(1)"]                # R4: a server that exits at once
         reads.clear()
@@ -706,7 +711,7 @@ def selftest():
         t = threading.Thread(target=lambda: done.append(out("bigfn", "-p", W, clock=tick)), daemon=True)
         t.start()
         t.join(20)
-        assert done and done[0].rstrip().endswith("LSP: timed out"), "R3: a full pipe to the server blocked the pass"
+        assert done and done[0].rstrip().endswith("LSP: timed out; no answer for: bigfn (big.py:1)"), "R3: a full pipe to the server blocked the pass"
     assert code_only("a('x // y') // z\n/* q\n */ b(\"c\")") == "a('      ')     \n    \n    b(\" \")"
     print("cgcallers selftest ok")
     return 0
