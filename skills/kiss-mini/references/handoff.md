@@ -2,8 +2,8 @@
 
 The kiss-mini skill, its mod, the `kiss-worker` agent and kiss-harness all read this file. `T` is a task's
 folder, `$TMPDIR/kiss-mini/<id>/` (`/tmp` when `TMPDIR` is unset), never in the checkout: the brief's `Task folder:`
-line. A code or bug task's worktree is not in T: it is `<main checkout>/.kiss/worktrees/mini-<id>/` (the main checkout is the first
-worktree `git worktree list` names), so a restart keeps it, and `.kiss/` is in the repo's ignore or exclude file. T holds `brief.md`, a worker's `scratch/` and, at the end, `report.md` (the full log), which the receiver of the
+line. A code or bug task's worktree is not in T: it is `<main checkout>/.kiss/worktrees/mini-<id>/` (the main checkout is the work
+tree of the repository's common git folder), so a restart keeps it, and `.kiss/` is in the repo's ignore or exclude file. T holds `brief.md`, a worker's `scratch/` and, at the end, `report.md` (the full log), which the receiver of the
 report writes (a subagent may not write it). The mod's prune removes all of T when it forgets the task, 7 days after
 the task ends.
 

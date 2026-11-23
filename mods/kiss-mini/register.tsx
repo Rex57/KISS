@@ -44,11 +44,14 @@ async function folder($: $, id: string) {
   return `${tmp.replace(/\/$/, '')}/kiss-mini/${id}`
 }
 
-/** The main checkout of the repository `dir` is in: the first `worktree` line git lists (a submodule's common git folder is in its superproject's .git); undefined when git fails. */
+/** The main checkout of the repository `dir` is in: what its common git folder names as its work tree (a submodule's,
+ * whose git folder is in its superproject's .git and sets core.worktree), else that folder minus `/.git`; undefined when git fails. */
 async function mainOf($: $, dir: string) {
-  const list = await $.process.run(['git', '-C', dir, 'worktree', 'list', '--porcelain'], { timeoutMs: 120_000 }).catch(() => undefined)
-  const first = list?.exitCode === 0 ? list.stdout.split('\n')[0] : undefined
-  return first?.startsWith('worktree ') ? first.slice(9) : undefined
+  const git = (at: string, ...args: string[]) => $.process.run(['git', '-C', at, 'rev-parse', ...args], { timeoutMs: 120_000 }).catch(() => undefined)
+  const common = await git(dir, '--path-format=absolute', '--git-common-dir')
+  if (common?.exitCode !== 0) return undefined
+  const top = await git(common.stdout.trim(), '--show-toplevel')
+  return top?.exitCode === 0 ? top.stdout.trim() : common.stdout.trim().replace(/\/\.git$/, '')
 }
 
 /** D1: a code task's worktree, beside the harness worktrees in its main checkout, so a restart keeps it (T stays in TMPDIR). */

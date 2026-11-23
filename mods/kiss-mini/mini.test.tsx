@@ -33,9 +33,9 @@ type Opts = {
   top?: string
   /** How long `codegraph explore` (the seed) takes, on the mock clock. */
   seedMs?: number
-  /** The main checkout: the first worktree `git worktree list` names (default: top). */
+  /** The main checkout: the work tree of the repository's common git folder (default: top). */
   common?: string
-  /** The repository's git folder, where `--git-path` names its exclude file (default: `<common>/.git`; a submodule's is in its superproject's .git). */
+  /** The repository's git folder, as `--git-common-dir` answers it (default: `<common>/.git`; a submodule's is in its superproject's .git). */
   gitDir?: string
 }
 function world(on: On, { delivered = true, branch = 'main', fail = {}, store, hang = [], tmp = '/tmp/', cwd = '/repo', plugins = [], indexed = false, colour = false, top = cwd, seedMs = 0, common = top, project = top, mismatch = null, gitDir = `${common}/.git` }: Opts = {}) {
@@ -112,6 +112,11 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     if (e.argv[0] === 'git' && w.gone.includes(e.argv[2] ?? '')) return { value: { exitCode: 128, stdout: '', stderr: `fatal: cannot change to '${e.argv[2]}': No such file or directory\n`, isStdoutTruncated: false, isStderrTruncated: false } }
     // Every test's repository is /repo; its worktrees share its git folder.
     if (e.argv[3] === 'branch' && e.argv[4] === '--list') return { value: { exitCode: 0, stdout: w.branchGone ? '' : `  ${e.argv[5]}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv.includes('--git-common-dir')) return { value: { exitCode: 0, stdout: `${gitDir}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    // Asked in the git folder, as real git answers: a submodule's (core.worktree set) names its checkout; a plain one fails.
+    if (e.argv[2] === gitDir && e.argv.includes('--show-toplevel')) return gitDir === `${common}/.git`
+      ? { value: { exitCode: 128, stdout: '', stderr: 'fatal: this operation must be run in a work tree\n', isStdoutTruncated: false, isStderrTruncated: false } }
+      : { value: { exitCode: 0, stdout: `${common}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--git-path')) return { value: { exitCode: 0, stdout: `${gitDir}/info/exclude\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv[3] === 'check-ignore') {
       const listed = (w.files[`${gitDir}/info/exclude`] ?? '').split('\n').includes('.kiss/')
@@ -153,7 +158,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     const bad = fail[`${e.argv[3]} ${e.argv[4]}`] ?? fail[e.argv[3] ?? ''] ?? fail[e.argv[0] ?? '']
     if (bad && e.argv[3] === 'merge') w.merging = true
     if (bad) return { value: { exitCode: 1, stdout: bad.stdout ?? '', stderr: bad.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (e.argv[3] === 'worktree' && e.argv[4] === 'list') return { value: { exitCode: 0, stdout: w.worktrees || `worktree ${common}\nHEAD abc\nbranch refs/heads/main\n\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv[3] === 'worktree' && e.argv[4] === 'list') return { value: { exitCode: 0, stdout: w.worktrees || `worktree ${gitDir === `${common}/.git` ? common : gitDir}\nHEAD abc\nbranch refs/heads/main\n\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.join(' ') === 'claude plugin list --json') return { value: { exitCode: 0, stdout: JSON.stringify(plugins), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const out = e.argv.includes('--abbrev-ref') ? `${w.branch}\n` : e.argv.includes('--shortstat') ? ' 1 file changed, 1 insertion(+), 1 deletion(-)\n' : ''
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
