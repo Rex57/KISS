@@ -12,7 +12,9 @@ this skill's folder (the folder of this file). Read [references/handoff.md](refe
 the first task: it holds the kinds, the states, the brief, the report and the worker's rules.
 
 On Claude Code with the KISS mod, `/kiss-mini` and the `mcp__kiss__handoff` tool run the same flow through a background
-host, and the `/kiss-mini` pane shows the tasks: use them, not the steps below. These steps are for an agent without it.
+host, and the `/kiss-mini` pane shows the tasks: use them, not the steps below. With the mod, a task's report comes
+to the session that sent it as one message (the hand-off's `return: true`): do not read the task folders for it.
+These steps are for an agent without it.
 
 ## Skills the worker uses when they are installed
 

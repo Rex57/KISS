@@ -38,8 +38,10 @@ when no decision is open.
 4. **Work the map, one decision at a time** (research may run side by side). Take the first open decision that
    nothing open blocks, unless the owner names one. Settle it by its type:
    - `research`: in the background, through kiss-mini (`/kiss-mini ask <question>` or its hand-off) when it is
-     installed, else a subagent that calls the Skill tool with `mattpocock-skills:research`. Its findings go into
-     the decision file; the owner confirms what they decide.
+     installed, else call the Skill tool with `mattpocock-skills:research` yourself, in this session: it starts its
+     own background agent (no subagent starts another). Its findings go into the decision file; copy a worker's long
+     answer from its report file into the decision file with a command, not through your context. The owner
+     confirms what they decide.
    - `prototype`: call `mattpocock-skills:prototype` for a cheap, throwaway thing the owner can try (a state
      model, a UI), in the scratch folder or on a branch that is never merged; the owner decides from it.
    - `grilling`: `mattpocock-skills:grilling` and `mattpocock-skills:domain-modeling` with the owner. Only the owner

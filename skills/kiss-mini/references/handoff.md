@@ -3,7 +3,7 @@
 The kiss-mini skill, its mod, the `kiss-worker` agent and kiss-harness all read this file. `T` is a task's
 folder, `$TMPDIR/kiss-mini/<id>/` (`/tmp` when `TMPDIR` is unset), never in the checkout: the brief's `Task folder:`
 line. A code or bug task's worktree is not in T: it is `<main checkout>/.kiss/worktrees/mini-<id>/` (the main checkout is the first
-worktree `git worktree list` names), so a restart keeps it, and `.kiss/` is in the repo's ignore or exclude file. It holds `brief.md`, a worker's `scratch/` and, at the end, `report.md` (the full log), which the receiver of the
+worktree `git worktree list` names), so a restart keeps it, and `.kiss/` is in the repo's ignore or exclude file. T holds `brief.md`, a worker's `scratch/` and, at the end, `report.md` (the full log), which the receiver of the
 report writes (a subagent may not write it). The mod's prune removes all of T when it forgets the task, 7 days after
 the task ends.
 
@@ -29,7 +29,7 @@ Current behaviour: <what happens now>
 Expected behaviour: <what happens after the work>
 Key interfaces: <files by path, functions, commands; never copies of their text>
 Acceptance checks:
-- <a command or a check that shows done>
+- <the command itself, written out, or a check that shows done>
 Out of scope: <what the worker leaves alone>
 Suggested skills: <the skills for this kind, from the table below>
 ```
@@ -41,11 +41,15 @@ has a CodeGraph index. `W`, the worker's starting folder (`$PWD`), is the worktr
 mod indexes it, and `T/seed.md` holds `codegraph explore -p "W"` on the task's words. Run the commands from that folder: after a
 `cd` into the Checkout, `-p "$PWD"` reads the base branch's index, with no warning. Read code with `codegraph explore|node|callers -p "W"` (one
 function: `codegraph node -p "W" <name>`, never grep plus `sed -n`), and run `codegraph sync -q "W"` after edits. Point to specs, issues, commits and logs by path or
-URL; do not copy them in. No secrets: no keys, passwords or personal data. Count the characters before the send.
+URL; do not copy them in. Each acceptance check is the command itself, written out, never a name for one ("the tests",
+"the full check"); a git-ignored file a check or the task needs (a facts file, a run folder) is named by its absolute
+path in the checkout, because the worktree does not hold it. The mod's own brief for an owner's `/kiss-mini` knows no
+command: its worker writes out the commands it runs in `Tests:`. No secrets: no keys, passwords or personal data. Count the characters before the send.
 
 ## The report
 
-The worker's final message. The receiver saves the whole message as `T/report.md` and passes on these lines:
+The worker's final message, as the brief's `Final message:` line names it: a code or bug task's `State` is ready,
+failed or waiting for you, a question's is done, failed or waiting for you. The receiver saves the whole message as `T/report.md` and passes on these lines:
 
 ```markdown
 State: ready | done | failed | waiting for you
@@ -97,7 +101,9 @@ skill when it is installed: a draft pull request takes it as its body.
 6. **End** with the report as your final message; write no report file. Before it says that no test covers a
    function, run `codegraph callers -p "$PWD" <name>` (when the repo has an index): a selftest in the same file counts.
    In the report's `Mutants:` line, list each new guard and each test whose seam or expected value changed, each with a
-   mutant in a scratch copy that makes it fail (one mutant may serve several), or say why none can.
+   mutant in a scratch copy that makes it fail (one mutant may serve several), or say why none can; when your mutant
+   is not the one the brief names, say why. Before `State: ready`, run every acceptance check after your last change:
+   a check you did not run, or ran on less than its scope, is named in the Summary, and the state is `failed`.
 
 ## Credit
 
