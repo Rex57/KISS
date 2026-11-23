@@ -98,7 +98,7 @@ def changes(W, spec):
     cached = spec == "--cached"
     base, head = ("HEAD", "") if cached else spec.split("..", 1)
     diff = git(W, "diff", "-z", "--name-status", "-M", *(["--cached"] if cached else [base, head])).split("\0")[:-1]   # -z: no quoted names
-    out, other, added_in = [], [], {}
+    out, other, added_in, removed_sig = [], [], {}, {}
     while diff:
         status, old = diff.pop(0), diff.pop(0)
         new = diff.pop(0) if status[0] in "RC" else old
@@ -109,8 +109,8 @@ def changes(W, spec):
         before = {} if status.startswith("A") else defs(git(W, "show", "%s:%s" % (base, old), missing_ok=True), old)
         after = {} if status.startswith("D") else defs(git(W, "show", "%s:%s" % (head, new), missing_ok=True), new)
         added = {n: s for n, s in after.items() if n not in before}
-        for n in added:
-            added_in.setdefault(n, new)
+        for n, s in added.items():
+            added_in.setdefault(n, (new, s))
         for name, sig in before.items():
             if name in after:
                 if after[name] != sig:
@@ -118,7 +118,9 @@ def changes(W, spec):
                 continue
             twin = [n for n, s in added.items() if s == sig and n.rsplit(".", 1)[0:-1] == name.rsplit(".", 1)[0:-1]]
             out.append(("renamed", name, old, "to " + twin[0]) if len(twin) == 1 else ("removed", name, old, ""))
-    return [("moved", n, f, added_in[n]) if k == "removed" and n in added_in else (k, n, f, note)
+            removed_sig[name, old] = sig
+    # moved: the same name and signature in another file; a new signature or an unrelated namesake stays removed (F10, F13)
+    return [("moved", n, f, added_in[n][0]) if k == "removed" and added_in.get(n, ("", None))[1] == removed_sig[n, f] else (k, n, f, note)
             for k, n, f, note in out], other
 
 
@@ -153,7 +155,7 @@ def check(W, spec, callers=cgcallers.many):
     found, other = changes(W, spec)
     asked = [(name, path) for kind, name, path, note in found if kind != "moved"]
     refusal, said, texts, notes = callers(W, asked) if asked else ("", "", [], [])
-    texts = iter(texts or [refusal] * len(asked))
+    texts = iter(texts or ["[cgcallers failed] " + refusal] * len(asked))   # a refusal is a line to read, never 0
     lines = [said] if said else []
     for kind, name, path, note in found:
         if kind == "moved":
@@ -162,7 +164,7 @@ def check(W, spec, callers=cgcallers.many):
         lines.append("\n== %s: %s (%s)%s" % (kind, name, path, " " + note if note else ""))
         text = next(texts)
         if kind != "signature" and ("no definition named" in text or "matches file" in text):   # none left in this file
-            text += "\n".join(["word search (no definition holds %s any more):" % name] + word_hits(W, name, path))
+            text = text.rstrip() + "\n" + "\n".join(["word search (no definition holds %s any more):" % name] + word_hits(W, name, path))
         lines.append(text.rstrip())
     lines += notes
     to_read = sum(l.startswith("[") for t in lines for l in t.splitlines())
@@ -224,6 +226,10 @@ def selftest():
             assert "[grep only] d.py" not in out and "e.py" not in out, out           # R13: a namesake's def; R1: no import
             assert "[grep only] f.py:2  return o.ack()" in out and "[grep only] a.py" not in out, out   # a method: any file
             assert out.splitlines()[-1] == "callcheck: 5 names checked (removed, renamed or re-signed), 4 caller lines to read", out
+            assert "\nword search (no definition holds gone2 any more):" in out, out   # F12: the header starts its own line
+        refused = check(W, "HEAD~1..HEAD", lambda W_, t: ("callcheck: wrong or missing index for W", "", [], []))
+        assert refused.count("[cgcallers failed] callcheck: wrong or missing index for W") == 5, refused   # F11: no index
+        assert refused.splitlines()[-1].endswith("5 caller lines to read"), refused
         try:                                                                          # R2: a bad range stops with git's words
             check(W, "nosuch..HEAD", per_name(fake))
             raise AssertionError("a bad range must stop")
@@ -231,6 +237,7 @@ def selftest():
             assert "nosuch" in str(e), e
     selftest_one_pass()
     selftest_moved()
+    selftest_moved_resigned()
     selftest_languages()
     print("callcheck selftest ok")
     return 0
@@ -331,6 +338,28 @@ def selftest_moved():
         assert "moved: mv_e old.py -> new.py" in out and "u5.py" not in out, out  # an importer that follows the move: none
         assert "== removed: mv_" not in out and "== removed: gone_x (old.py)" in out, out
         assert "[grep only] u1.py:5  return mv_a() + gone_x()" in out[out.index("== removed: gone_x"):], out   # its word hits, as before
+    finally:
+        shutil.rmtree(W)
+
+
+def selftest_moved_resigned():
+    """F10, F13: a name is moved only when its new definition keeps the removed one's signature; else it is removed."""
+    import shutil
+    W = repo({"old.py": "def calc(x):\n    return x\n\n\ndef helper():\n    return 1\n", "user.py": "from old import calc\ncalc(1)\n"},
+             {"old.py": "X = 1\n", "new.py": "def calc(x, y):\n    return x + y\n", "user.py": "from new import calc\ncalc(1)\n",
+              "other.py": "def helper(q):\n    return q\n"})
+    asked = []
+
+    def fake(W_, n, p):
+        asked.append(n)
+        return ('codegraph: no definition of "%s" matches file "old.py" — showing all definitions instead.\n' % n
+                + ("definition  new.py:1  function calc\n[both     ] user.py:2  user.py  calc(1)" if n == "calc"
+                   else "definition  other.py:1  function helper"))
+    try:
+        out = check(W, "--cached", per_name(fake))
+        assert sorted(asked) == ["calc", "helper"], (asked, out)
+        assert "== removed: calc (old.py)" in out and "[both     ] user.py:2  user.py  calc(1)" in out, out   # its broken caller
+        assert "== removed: helper (old.py)" in out and "\nmoved:" not in out, out                            # an unrelated namesake
     finally:
         shutil.rmtree(W)
 
