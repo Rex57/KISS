@@ -13,7 +13,8 @@ the first task: it holds the kinds, the states, the brief, the report and the wo
 
 On Claude Code with the KISS mod, `/kiss-mini` and the `mcp__kiss__handoff` tool run the same flow through a background
 host, and the `/kiss-mini` pane shows the tasks: use them, not the steps below. With the mod, a task's report comes
-to the session that sent it as one message (the hand-off's `return: true`): do not read the task folders for it.
+to the session that sent it as one message (the hand-off's `return: true`): do not poll the task folders for it; the
+message's `Full log` path holds the whole text.
 These steps are for an agent without it.
 
 ## Skills the worker uses when they are installed
