@@ -439,7 +439,9 @@ async function tick($: $) {
       const repo = await repoOf($, t)
       if ((await $.process.run(['git', '-C', repo, 'merge-base', '--is-ancestor', t.branch, t.base!])).exitCode === 0) {
         // A worktree with changes nobody committed is never forced away.
-        const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.trim()
+        // The index the seed made (`?? .codegraph/`) is no change of the worker's.
+        const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.split('\n')
+          .filter(l => l.trim() && l.trim() !== '?? .codegraph/').join('\n')
         if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
         else {
           const sha = (await $.process.run(['git', '-C', repo, 'rev-parse', t.branch])).stdout.trim()

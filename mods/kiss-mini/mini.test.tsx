@@ -1713,15 +1713,16 @@ test('a slow seed does not count toward the 30 minutes of a code task', async ($
   expect(await status($)).toContain(`${ID} code failed: fix add so it returns the sum - timed out after 30 minutes`)
 })
 
-test('a merged task whose worktree holds an untracked .codegraph/ keeps it: a change like any other', async ($, on) => {
+test('a merged task whose worktree holds only the new .codegraph/ index ends done, its worktree goes and its sender gets the merged message', async ($, on) => {
   const w = world(on)
-  await ready($, w)
+  await handoff($, w, true)
+  const before = w.sent.length
   w.merged = true
   w.dirty = '?? .codegraph/\n'
   await w.clock.advance(60_000)
-  expect(git(w).some(line => line.includes('worktree remove'))).toBe(false)
-  expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].worktree]).toEqual(['done', WT])
-  expect(w.toasts.at(-1)).toContain(`uncommitted changes: ${WT}`)
+  expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
+  expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].worktree]).toEqual(['done', undefined])
+  expect(w.sent.slice(before)).toEqual([{ to: 's1', text: `kiss-mini ${ID}: merged into kiss-run; its worktree is removed; branch mini/${ID} at abc1234def5678` }])
 })
 
 test('a merged task with a clean worktree: one toast and, with return set, one message to its sender with the branch and its last sha', async ($, on) => {
