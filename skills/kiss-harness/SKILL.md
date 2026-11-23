@@ -83,7 +83,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    full in each `prompt.py` and `metrics.py` command, not a variable: `metrics.py` finds the run by it. Show the owner
    each WARN it prints for a facts line the file lacks, before the build: it says what no line means, and the file needs
    no edit unless the owner wants another behaviour. Any `prompt.py` call that prints "KISS <new>
-   is installed" on stderr: tell the owner to start the run in a new session. Then `prompt.py implementer R ELAPSED=0` →
+   is installed" on stderr: tell the owner to start the run in a new session. Then `prompt.py implementer R` →
    start ONE subagent with that text, on the model and effort of the Models rule (`references/agents.md`), in the
    background. Give every path absolute. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` (empty) and `git -C MAIN
@@ -109,7 +109,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    implementer at its next stop. When the message holds the product checks (the facts file's `Shared test
    resources:` says "one at a time"), send the implementer "product free" as soon as the solo reviewer stops; it then
    runs its held checks (step 5: a stop on a held check waits for it).
-7. **Review once at the end:** `prompt.py reviewer R HEAD=<head> ELAPSED=<s>` (a risky ticket's review adds
+7. **Review once at the end:** `prompt.py reviewer R HEAD=<head>` (a risky ticket's review adds
    `BASE=<the commit before it>`) → a NEW subagent on the model and effort of the Models rule. Save its last message
    to `R/review-<n>.md` (n = this round's number, from 1). **Flake check:** when the run's test diff (`git -C W diff
    BASE..HEAD` of the test files) adds a time value (a timeout, a sleep, a wall-clock bound), start the facts file's
@@ -122,11 +122,12 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    then go on. Each owner finding is a decision.
 9. **Fix rounds:** write the fix list to `R/fix-<n>.md`; work an owner decision adds after the tickets gate goes in
    it with the ticket rules of [references/spec-and-tickets.md](references/spec-and-tickets.md) (its failure-path
-   lines, and a message to an agent checked against that agent's standing prompt). Then `prompt.py fix R ROUND=<n>
-   ELAPSED=<s>` → the SAME implementer. Check each test its answer names from the diff and the test output (run the
+   lines, and a message to an agent checked against that agent's standing prompt). Then `prompt.py fix R ROUND=<n>`
+   → the SAME implementer. Check each test its answer names from the diff and the test output (run the
    test). Save the answer to `R/answer-<n>.md`; when the round fixed a critical, high or reproduced-in-app finding, or holds work from an owner decision, `prompt.py recheck R
    ROUND=<n> FIX_BASE=<sha> FIX_HEAD=<sha>` → the SAME reviewer (its findings, if any, become `R/review-<n+1>.md`).
-   Before each one, the context check of step 5: a marked implementer or reviewer is replaced by the handoff.
+   Before each one, the context check of step 5: a marked implementer or reviewer is replaced by the handoff (a new
+   implementer gets `prompt.py handoff R ROUND=<n>`: its standing rules, then this round's fix prompt).
    At most 2 fix rounds per review and 3 per run; then a gate. At the cap, when only low or medium findings that
    touch no guard, data or owner rule are left: no gate; run the close, and the merge gate offers them as one
    kiss-mini task. Any other finding left asks a gate.
@@ -148,7 +149,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
        docs gate)`.
     6. One **metrics line**: `Metrics: subagents <n>, fix rounds <n>, rechecks <n>, headless sessions <n>, minutes
        <used> of <budget> (owner wait <n> left out)` (headless sessions: the `claude -p` or `claude --bg` sessions the run starts for tests;
-       subagents and kiss-mini workers do not count), given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it prints the full
+       subagents and kiss-mini workers do not count), given to `python3 -I "$HB/scripts/metrics.py" R --record "<that line>"`: it fills in
+       the subagent count from the transcripts and the minutes and the owner wait from `R/run.json` (you type the fix rounds, the
+       rechecks and the headless sessions; a typed value of a filled field is replaced, with a note), prints the full
        line (with the tokens per role and the `CodeGraph share (v2)`) and records it in `<repo>/.kiss/runs/metrics.md`, one line
        per run (a rerun of the close replaces the run's line), and saves each subagent tool call in `R/calls.jsonl`
        (the share's evidence after a tidy-up moves the transcripts). It refuses when the last `Full check at` line is not a
@@ -179,14 +182,15 @@ is in your skill list; a skill that is not there is skipped, and the step does w
 
 **The pause:** on the owner's "pause", stop the subagent, and write `## Pause <time>` into `R/decisions.md`: HEAD,
 `git -C W status`, the open tickets, the next exact command and the elapsed time. The clock stops. On "resume",
-continue the same agent (the handoff of [references/agents.md](references/agents.md) when it cannot be reached), and
-the clock starts again from the elapsed time.
+run `prompt.py wait R <the pause's seconds>`, then continue the same agent (the handoff of
+[references/agents.md](references/agents.md) when it cannot be reached).
 
 **The clock:** the budget is 10 minutes per ticket plus 2 hours for the reviews and fix rounds, plus the facts
 file's `Full check time:`. Put "Time: elapsed
-Ns of a Ms budget." in each message to a subagent (`prompt.py` does it with `ELAPSED`). Past the budget, a gate comes
-before the next round. The time the owner takes to answer a gate or a decision is off the clock, and the metrics line
-says how much was left out.
+Ns of a Ms budget." in each message to a subagent: `prompt.py` computes it as now minus the start that `prompt.py start`
+wrote in `R/run.json`, minus the owner waits (an `ELAPSED=<s>` value still wins). Past the budget, a gate comes before the
+next round. The time the owner takes to answer a gate or a decision is off the clock: after each answer, run `prompt.py
+wait R <the seconds it took>`; the metrics line says how much was left out.
 
 ## Side tasks
 

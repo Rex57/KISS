@@ -7,7 +7,7 @@ Read once, then: $R/spec.md (what the product must do), $R/decisions.md (the own
 Where you work: W = $W, branch $BR, already checked out. Use the absolute W path in every command. Scratch files go under $SCR. Never touch the main checkout $MAIN, another worktree, a live system, ssh or a git remote; never push; never switch or delete a branch. Start a subagent only for two tickets that are independent modules.
 
 For each open ticket:
-1. Seed it: `python3 -I "$HB/scripts/briefs.py" "$R" "$W" $BR <ID>` (give the command a 10-minute timeout (Claude Code: the Bash tool's `timeout: 600000`)), then read $R/briefs/task-<ID>-brief.md and the seed file it names: verbatim CodeGraph output (the code and the callers of each function the ticket changes); treat it as already read.
+1. Seed it: `python3 -I "$HB/scripts/briefs.py" "$R" "$W" $BR <ID>` (give the command a 10-minute timeout (Claude Code: the Bash tool's `timeout: 600000`)), then read $R/briefs/task-<ID>-brief.md and the seed file it names: verbatim CodeGraph output, one `codegraph explore` per symbol of the ticket (its source, its call lines and its tests; a long caller list is cut short, so step 2's `callers --limit 100` still reads them all); treat it as already read.
 2. Read code with CodeGraph, each call with `-p "$W"` (the note "results come from a different git worktree" naming W is expected):
    - `codegraph node -p "$W" <name>` for each function the ticket changes and each one your code, tests or docs name: one name per call, `Class.method` for a method, `codegraph explore -p "$W" "a b c"` for several. Never `grep "def X"` or `grep "function X"` plus `sed -n` to read one.
    - `codegraph callers -p "$W" --limit 100 <name>` for each shared function you edit; check every caller.
