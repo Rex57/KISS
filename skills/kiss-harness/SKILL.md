@@ -43,8 +43,9 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    the CI config. Mark each part you could not find.
 3. **Ask the owner only about the gaps**, in rounds, each question with your recommended answer. Ask whether domain
    docs are on or off. Write each answer into the file.
-4. **Runs** go in `<repo>/.kiss/runs/` and their worktrees in `<repo>/.kiss/worktrees/`: add both folders (or all
-   of `.kiss/`) to `.gitignore` or `.git/info/exclude`, as the owner says.
+4. **Runs** go in `<repo>/.kiss/runs/`, their worktrees in `<repo>/.kiss/worktrees/` and their scratch files in
+   `<repo>/.kiss/scratch/`: add the three folders (or all of `.kiss/`) to `.gitignore` or `.git/info/exclude`, as the
+   owner says.
 5. **CodeGraph** indexes the repo: `codegraph status "<repo>"` prints `Project: <repo>`. Your agent loads the global CodeGraph
    rule (`rules/codegraph.md` in the KISS repo); `kiss-doctor setup` puts it in place.
 
@@ -90,7 +91,7 @@ is in your skill list; a skill that is not there is skipped, and the step does w
    is installed" on stderr: tell the owner to start the run in a new session. Then `prompt.py implementer R` →
    start ONE subagent with that text, on the model and effort of the Models rule (`references/agents.md`), in the
    background. It builds at most 3 open tickets per turn, then ends the turn with a line that names them and the next
-   open one, so the context check of step 5 runs between batches. Give every path absolute. SCR is in the repo (git-ignored with `.kiss/`), never a session scratch folder, which a
+   open one, so the context check of step 5 runs between batches. Give every path absolute. SCR is in the repo (git-ignored by step 4 of "Before the first run"), never a session scratch folder, which a
    session restart can delete. `R` and `PROJECT` are in the main checkout: a new worktree does not hold a git-ignored file.
 5. **When it stops:** `tickets.py check R` (only `passes` changed), `git -C W status` (empty) and `git -C MAIN
    status` (empty for the files the run's diff `git -C W diff --name-only BASE..HEAD` names; another session's files
