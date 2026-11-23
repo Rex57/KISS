@@ -147,7 +147,7 @@
       "package": "@colbymchenry/codegraph",
       "github": "colbymchenry/codegraph",
       "tool": "codegraph",
-      "version": "1.6.2",
+      "version": "1.6.4",
       "commands": {
         "explore": [
           "-p"
@@ -185,7 +185,7 @@
     },
     {
       "name": "claude-code-mods",
-      "build": "2.1.317"
+      "build": "2.1.330"
     }
   ]
 }

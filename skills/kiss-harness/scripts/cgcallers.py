@@ -12,9 +12,9 @@ definition's own file and the files that import its module or its package (Pytho
 it reads every indexed file of the language. A hit in a comment, a string or a docstring is not counted, except the
 string 'NAME' given to getattr, hasattr or setattr. For a function (not a method), a hit `X.NAME` counts only when X
 is its module or a name bound to it (`import a.b as X`, `X = import_module(...)`). For a language with no import
-filter it reads every indexed file of that language and prints a warning. codegraph misses a function passed as a
-value, a call through getattr with a string, a method on an object when two classes define the name, and recursion
-(KISS rules/codegraph.md, "callers is incomplete").
+filter it reads every indexed file of that language and prints a warning. codegraph misses a method called on an
+untyped parameter or value, and a call through getattr or an index with a string (KISS rules/codegraph.md, "callers is
+incomplete").
 With pyright-langserver (Python) or typescript-language-server (JS/TS) on PATH, an LSP pass asks the server for the
 references of each definition (one deadline of 120 s for the whole pass, then "LSP: timed out"); with no server it
 prints "no language server for <language>: LSP pass skipped".

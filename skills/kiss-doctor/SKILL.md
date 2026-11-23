@@ -49,7 +49,8 @@ a shell profile or Codex's `config.toml`.
    `rules/**/*.md` under its config folder, with `@` imports followed for 4 hops, where a file holds it only with more
    than half of its bold lead-ins, and each such file must equal the rule. A copy with every lead-in but other
    words is a WARN. Then each skill in
-   the skill table of each KISS skill that has one and KISS's own (installed, enabled, once, callable by the model), and the tools.
+   the skill table of each KISS skill that has one and KISS's own (installed, enabled, once, callable by the model), and the tools: a WARN when
+   CodeGraph is older than 1.6.4 or when this repo's index needs a rebuild (`codegraph index "<repo>"`).
    Done when it prints its summary line.
 2. **Compare with your own skill list.** The script reads the disk; your skill list is what this session loaded.
    A skill on disk but not in your list needs a reload: `/reload-plugins` in Claude Code, a new session elsewhere.

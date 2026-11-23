@@ -339,6 +339,20 @@ def check_skills(agent, roots, need, note="", here=()):
     return out
 
 
+CODEGRAPH_MIN = (1, 6, 4)   # rules/codegraph.md's blind-spot list is checked on this CodeGraph
+
+
+def check_index(repo):
+    """A WARN when `codegraph status -j` says the repo's index needs a rebuild (a CodeGraph upgrade changed its extraction)."""
+    try:
+        status = json.loads(run(["codegraph", "status", "-j", repo])) if repo and shutil.which("codegraph") else {}
+    except ValueError:
+        status = {}
+    if isinstance(status, dict) and (status.get("index") or {}).get("reindexRecommended") is True:
+        return [("WARN", "device", 'the CodeGraph index of %s needs a rebuild: run codegraph index "%s"' % (repo, repo), "Tools you need")]
+    return []
+
+
 def check_tools():
     good = sys.version_info >= (3, 9)
     out = [("OK" if good else "FAIL", "device", f"python3 {sys.version.split()[0]} (3.9 or later)", "" if good else "Tools you need")]
@@ -347,6 +361,10 @@ def check_tools():
         version = run([tool, "--version"]).strip().splitlines()[:1] if found else []
         out.append(("OK", "device", f"{tool}: {version[0] if version else 'found'}", "") if found
                    else ("FAIL", "device", f"{tool}: not on PATH", "Tools you need"))
+    have = re.search(r"(\d+)\.(\d+)\.(\d+)", run(["codegraph", "--version"])) if shutil.which("codegraph") else None
+    if have and tuple(map(int, have.groups())) < CODEGRAPH_MIN:
+        out.append(("WARN", "device", "codegraph %s: older than %s, the version the CodeGraph rule holds for: upgrade it: "
+                    "npm install -g @colbymchenry/codegraph" % (have.group(0), ".".join(map(str, CODEGRAPH_MIN))), "Tools you need"))
     out.append(("OK", "device", "cgcallers", "") if shutil.which("cgcallers")
                else ("WARN", "device", "cgcallers: not on PATH, and the CodeGraph rule calls it by that name", "Tools you need"))
     return out
@@ -1373,6 +1391,42 @@ def selftest():
             execute(["allow", "mcp__codegraph__*", "in", settings_path()])
             assert ("claude", "mcp-allow") not in gaps(dict(got, agents=["claude"])) and check_mcp("claude")[0][0] == "OK"
             assert check_mcp("antigravity")[0][0] == "INFO"
+            # D6: CodeGraph older than 1.6.4, and a repo index that `status -j` marks for a rebuild (a fake codegraph)
+            def fake_cg(version, status):
+                with open(os.path.join(fx, "path", "codegraph"), "w") as f:
+                    f.write("#!/bin/sh\n[ \"$1\" = --version ] && echo '%s' && exit 0\n"
+                            "[ \"$1 $2\" = 'status -j' ] && echo '%s' && exit 0\nexit 9\n" % (version, json.dumps(status)))
+                os.chmod(os.path.join(fx, "path", "codegraph"), 0o755)
+            for version, warns in (("1.6.2", 1), ("1.6.4", 0), ("1.7.0", 0), ("1.10.0", 0)):
+                fake_cg(version, {})
+                cg = [r for r in check_tools() if r[0] == "WARN" and r[2].startswith("codegraph")]
+                assert len(cg) == warns, (version, cg)
+                assert not cg or "1.6.4" in cg[0][2] and "npm install -g @colbymchenry/codegraph" in cg[0][2], cg
+            assert not os.path.isdir(os.path.join(repo, ".codegraph"))
+            for status, warns in (({"initialized": True, "index": {"reindexRecommended": True}}, 1),
+                                  ({"initialized": True, "index": {"reindexRecommended": False}}, 0),
+                                  ({"initialized": False, "projectPath": repo}, 0)):
+                fake_cg("1.6.4", status)
+                cg = [r for r in check_index(repo) if r[0] == "WARN"]
+                assert len(cg) == warns, (status, cg)
+                assert not cg or 'codegraph index "%s"' % repo in cg[0][2], cg
+            assert check_index(None) == [] and "index" in gaps(dict(got, agents=[], repo=repo))   # no index: setup still offers init
+            # D6: the new rule passes the rule check; KISS 2.3.0's rule (its two changed paragraphs put back) is a stale copy
+            new = read(os.path.join(KISS, "rules", "codegraph.md"))
+            old = re.sub(r"\*\*`callers` is incomplete:\*\*.*?sentence\.\n", lambda m: (
+                "**`callers` is incomplete:** measured, it misses a method called on an object when two or more classes define the\n"
+                "name; a call through a module attribute to a name several modules define; a function passed as a value; recursion;\n"
+                "`getattr` with a string. 0 callers proves nothing: with 0 callers or two or more definitions, and before a delete,\n"
+                "rename or signature change, run `cgcallers NAME -p \"W\"` and read every `[grep only]` and `[lsp]` line. Name forms:\n"
+                "`codegraph node` takes a bare name or `Class.method` (`module.func` fails); ask `explore` with names, not a sentence.\n"),
+                new, flags=re.S).replace("on the symbols it changes and reads; (4)", "on the symbols it changes and reads, and\n"
+                                         "`codegraph callers -p \"W\" --limit 100` of each one it changes; (4)")
+            assert len(old.encode()) == 2710 and len(new) < len(old), (len(old), len(new))   # 2,710 bytes at 2.3.0
+            for text, want in ((new, "OK"), (old, "WARN")):
+                with open(os.path.join(fx, "kiss.md"), "w") as f:
+                    f.write(text)
+                got_rule = check_rule("claude", text, [os.path.join(fx, "kiss.md")], markers(), new)
+                assert got_rule[0][0] == want and (want == "OK" or "differs from KISS's text" in got_rule[0][2]), got_rule
             # D4: each WARN kind of the rule gets a numbered replace item naming its file; an OK copy and a FAIL none
             real = read(os.path.join(KISS, "rules", "codegraph.md"))
             def items(agent, path, text):
@@ -1738,7 +1792,7 @@ def report(agents):
     need, marks = required(), markers()
     rule = read(os.path.join(KISS, "rules", "codegraph.md"))
     repo = run(["git", "rev-parse", "--show-toplevel"]).strip() if shutil.which("git") else ""
-    rows = check_tools() + check_servers(repo) + check_feedback(settings_path(), project=os.getcwd())
+    rows = check_tools() + check_index(repo) + check_servers(repo) + check_feedback(settings_path(), project=os.getcwd())
     for agent in agents:
         text, files, roots, note = agent_setup(agent)
         rows += check_rule(agent, text, files, marks, rule) + check_skills(agent, roots, need, note, loaded_here(agent))
