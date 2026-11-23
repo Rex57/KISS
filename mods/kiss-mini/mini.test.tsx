@@ -52,6 +52,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     /** Commits on the worker's branch past its base, and what `git status --porcelain` says in its worktree. */
     ahead: 1,
     dirty: '',
+    /** What status prints with status.showUntrackedFiles=all (files, not folders) when the call does not ask for normal. */
+    dirtyAll: undefined as string | undefined,
     clock: undefined as unknown as ReturnType<typeof mock.clock>,
     /** What `gh pr view` and `gh run view` answer, and the clock time of each gh call. */
     gh: { pr: 'OPEN', run: 'in_progress ' },
@@ -154,7 +156,7 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     }
     if (e.argv[3] === 'rev-parse' && e.argv[4]?.startsWith('mini/')) return { value: { exitCode: 0, stdout: 'abc1234def5678\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('rev-list')) return { value: { exitCode: 0, stdout: `${w.ahead}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (e.argv.includes('--porcelain') && e.argv.includes('status')) return { value: { exitCode: 0, stdout: w.dirty, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (e.argv.includes('--porcelain') && e.argv.includes('status')) return { value: { exitCode: 0, stdout: e.argv.includes('--untracked-files=normal') ? w.dirty : w.dirtyAll ?? w.dirty, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--is-ancestor')) return { value: { exitCode: w.merged ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('MERGE_HEAD')) return { value: { exitCode: w.merging ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--abort')) w.merging = false
@@ -1746,6 +1748,17 @@ test('a merged task whose worktree holds only the new .codegraph/ index ends don
   expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
   expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].worktree]).toEqual(['done', undefined])
   expect(w.sent.slice(before)).toEqual([{ to: 's1', text: `kiss-mini ${ID}: merged into kiss-run; its worktree is removed; branch mini/${ID} at abc1234def5678` }])
+})
+
+test('with status.showUntrackedFiles=all, a merged worktree whose only change is the .codegraph/ index still goes', async ($, on) => {
+  const w = world(on)
+  await ready($, w)
+  w.merged = true
+  w.dirty = '?? .codegraph/\n'
+  w.dirtyAll = '?? .codegraph/.gitignore\n'
+  await w.clock.advance(60_000)
+  expect(git(w)).toContain(`git -C /repo worktree remove --force ${WT}`)
+  expect([w.store[`kiss-mini/task/${ID}`].state, w.store[`kiss-mini/task/${ID}`].worktree]).toEqual(['done', undefined])
 })
 
 test('a merged task with a clean worktree: one toast and, with return set, one message to its sender with the branch and its last sha', async ($, on) => {

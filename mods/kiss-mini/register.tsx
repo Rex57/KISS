@@ -444,8 +444,8 @@ async function tick($: $) {
       const repo = await repoOf($, t)
       if ((await $.process.run(['git', '-C', repo, 'merge-base', '--is-ancestor', t.branch, t.base!])).exitCode === 0) {
         // A worktree with changes nobody committed is never forced away.
-        // The index the seed made (`?? .codegraph/`) is no change of the worker's.
-        const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.split('\n')
+        // The index the seed made (`?? .codegraph/`) is no change of the worker's; `normal` whatever status.showUntrackedFiles says.
+        const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain', '--untracked-files=normal'])).stdout.split('\n')
           .filter(l => l.trim() && l.trim() !== '?? .codegraph/').join('\n')
         if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
         else {
