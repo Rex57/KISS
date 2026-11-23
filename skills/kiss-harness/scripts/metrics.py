@@ -11,7 +11,10 @@
                                        refused unless the last `Full check at <sha>: <result>` line of
                                        R/decisions.md is a pass at the HEAD of R/run.json's W; it also writes
                                        R/calls.jsonl, one line per subagent tool call (role, tool, its command or
-                                       path, blocked), replaced whole like metrics.md, before metrics.md
+                                       path, blocked), replaced whole like metrics.md, before metrics.md. It fills
+                                       `subagents <n>` from the transcripts and `minutes <used> of <budget> (owner
+                                       wait <n> left out)` from R/run.json's START and WAITS (prompt.py); a typed
+                                       value of either is replaced, with a note on stderr
   python3 -I metrics.py --selftest
 
 Transcripts: under CLAUDE_CONFIG_DIR (default ~/.claude), projects/*/<session>/subagents/**/agent-<id>.jsonl, each
@@ -29,10 +32,11 @@ a docs folder, or a path outside the repo and W), counts (grep -c, | wc) and cal
 Commands are split outside quotes, at pipes, `;`, `&&`, `||` and `$( )`; a heredoc's body is text. No index: the
 share is n/a with the reason. No subagent of the run: "tokens: not available on this agent".
 """
-import glob, json, os, re, shlex, subprocess, sys
+import glob, json, os, re, shlex, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import briefs  # noqa: E402  (the index lookup is the seed's own: briefs.exists)
+import prompt  # noqa: E402  (the run's budget is prompt.py's own)
 
 CG_READ = {"query", "explore", "context", "node", "files", "callers", "callees", "impact", "affected", "search"}
 SEEDS = {"briefs.py", "callcheck.py"}
@@ -523,7 +527,38 @@ def refusal(R):
     return ""
 
 
-def record(R, line):
+def filled(R, line, now=time.time):
+    """The controller's line with the fields the run's records hold (D4, D11): the subagent count from the transcripts,
+    the minutes used and the owner wait from R/run.json; a typed value is replaced, with a note on stderr. A field the
+    records do not hold (no transcripts, no START) stays as typed."""
+    fields = []
+    subs = subagents(R)
+    if subs:
+        fields.append((r"subagents \d+", f"subagents {len(subs)}", "the transcripts"))
+    try:
+        with open(os.path.join(R, "run.json")) as f:
+            run = json.load(f)
+    except (OSError, ValueError):
+        run = {}
+    if isinstance(run, dict) and "START" in run:
+        waits = sum(run.get("WAITS", []))
+        fields.append((r"minutes \d+ of \d+(?: \(owner wait \d+ left out\))?",
+                       f"minutes {round(prompt.elapsed(run, now) / 60)} of {prompt.budget(R) // 60} (owner wait {round(waits / 60)} left out)",
+                       "R/run.json"))
+    for pattern, value, source in fields:
+        typed = re.search(pattern, line)
+        if typed and typed.group(0) != value:
+            print(f"metrics.py: typed {typed.group(0)}, recorded {value} (from {source})", file=sys.stderr)
+        if typed:
+            line = line[:typed.start()] + value + line[typed.end():]
+        elif value.startswith("subagents"):
+            line = re.sub(r"^(\W*Metrics:)\s*", lambda m: f"{m.group(1)} {value}, ", line, count=1) if re.match(r"\W*Metrics:", line) else f"{value}, {line}"
+        else:
+            line = f"{line.rstrip()}, {value}"
+    return line
+
+
+def record(R, line, now=time.time):
     """Print the full line, then put it in R's runs folder's metrics.md: a rerun replaces its line in place, a new
     run's line goes at the end, every other line stays. The book is replaced whole, so a failed write keeps it.
     Refused, before any write, without a passed full check at W's HEAD (refusal)."""
@@ -532,7 +567,7 @@ def record(R, line):
     if why:
         sys.exit(f"metrics.py --record refused: {why}")
     part, calls = measured(R)
-    full = re.sub(r"[\r\n]", " ", f"{line}; {part}")
+    full = re.sub(r"[\r\n]", " ", f"{filled(R, line, now)}; {part}")
     print(full)
     if calls is not None:                     # no transcripts: an earlier calls.jsonl stays
         whole(os.path.join(R, "calls.jsonl"), "".join(json.dumps(c) + "\n" for c in calls))
@@ -828,9 +863,34 @@ def selftest():
             os.rmdir(book)
             os.rename(book + "-kept", book)
         assert len(open(calls).read().splitlines()) == 2 and open(book).read() == kept, "the first new, the second old and whole"
-        record(e, "Metrics: subagents 2")                                   # a rerun makes both new
-        assert len(open(calls).read().splitlines()) == 2 and "- 2026-01-05-e: Metrics: subagents 2;" in open(book).read()
+        with contextlib.redirect_stderr(io.StringIO()):                     # its note: the transcripts hold 1
+            record(e, "Metrics: subagents 2")                               # a rerun makes both new
+        assert len(open(calls).read().splitlines()) == 2 and "- 2026-01-05-e: Metrics: subagents 1;" in open(book).read()   # D11: the transcripts' count
         assert not glob.glob(os.path.join(os.path.dirname(book), "**", "*.tmp"), recursive=True)
+        # D4, D11: --record fills the subagent count from the transcripts and the minutes and owner wait from run.json
+        f_ = run_folder(os.path.join(t, "repo", ".kiss", "runs", "2026-01-06-f"), f"Full check at {head}: pass\n")
+        with open(os.path.join(f_, "run.json"), "w") as f:
+            json.dump({"W": W, "START": 1_000_000, "WAITS": [600, 1200]}, f)
+        with open(os.path.join(f_, "tickets.json"), "w") as f:
+            json.dump([{"id": "T-1"}, {"id": "T-2"}, {"id": "T-3"}], f)          # 3 x 10 min + 2 h = 150 min
+        S10 = os.path.join(C2, "projects", "-r", "s10")
+        put(S10 + ".jsonl", [said("q", 1, 1, 0, 0, tools=[("Bash", f'python3 -I "/h/prompt.py" start "{f_}" W=x'),
+                                                         ("Agent", {}), ("Agent", {}), ("Agent", {})])])
+        for n in (1, 2, 3):
+            put(os.path.join(S10, "subagents", f"agent-q{n}.jsonl"), [user("go"), said(f"q{n}", 1, 1, 0, 0)], "kiss:kiss-implementer", f"q-{n}")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            got = record(f_, "Metrics: subagents 9, fix rounds 1, rechecks 2, headless sessions 1", now=lambda: 1_000_000 + 7200)
+        assert got.startswith("Metrics: subagents 3, fix rounds 1, rechecks 2, headless sessions 1, minutes 90 of 150 (owner wait 30 left out); "), got
+        assert err.getvalue() == "metrics.py: typed subagents 9, recorded subagents 3 (from the transcripts)\n", err.getvalue()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            got = record(f_, "Metrics: fix rounds 0, rechecks 0, headless sessions 0, minutes 5 of 6 (owner wait 7 left out)", now=lambda: 1_000_000 + 7200)
+        assert got.startswith("Metrics: subagents 3, fix rounds 0, rechecks 0, headless sessions 0, minutes 90 of 150 (owner wait 30 left out); "), got
+        assert err.getvalue() == "metrics.py: typed minutes 5 of 6 (owner wait 7 left out), recorded minutes 90 of 150 (owner wait 30 left out) (from R/run.json)\n", err.getvalue()
+        with contextlib.redirect_stderr(io.StringIO()):                     # F17: waits past the wall time: 0, never negative
+            got = record(f_, "Metrics: fix rounds 0, rechecks 0, headless sessions 0", now=lambda: 1_000_000 + 600)
+        assert got.startswith("Metrics: subagents 3, fix rounds 0, rechecks 0, headless sessions 0, minutes 0 of 150 (owner wait 30 left out); "), got
     print("metrics selftest ok")
 
 

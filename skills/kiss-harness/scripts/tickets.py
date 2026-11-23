@@ -3,13 +3,15 @@
 
   python3 -I tickets.py check RUN        the shape; after `freeze`, also: only `passes` changed; a WARN (exit 0)
                                          for a ticket that lists code files that exist in the repo of RUN, and no
-                                         symbols, and (before `freeze` only) for each symbol that repo's CodeGraph
+                                         symbols, for an acceptance line that names the full check without the
+                                         `(reviewer) ` prefix, and (before `freeze` only) for each symbol that repo's CodeGraph
                                          index does not hold
   python3 -I tickets.py freeze RUN       copy tickets.json to tickets.orig.json at the build start
   python3 -I tickets.py render RUN       write issues/<ID>.md, the text briefs.py seeds
   python3 -I tickets.py open RUN         the open tickets, one per line
-  python3 -I tickets.py continue RUN [ELAPSED BUDGET] [--review ID]   the controller's message, or nothing when all
-                                         pass; with --review (a risky ticket under review alone), only the open
+  python3 -I tickets.py continue RUN [ELAPSED BUDGET] [--review ID]   the controller's message (at most 3 open
+                                         tickets, in file order), or nothing when all pass; without ELAPSED and
+                                         BUDGET, the clock of prompt.py from RUN/run.json (none without a start); with --review (a risky ticket under review alone), only the open
                                          tickets that do not depend on it, up to the first risky one, or nothing
                                          when all of them do; plus the hold of the product checks when the facts
                                          file's `Shared test resources:` line says "one at a time"
@@ -19,12 +21,15 @@ One ticket: {"id", "title", "spec", "acceptance": [...], "passes": false} and, o
 "seeds" (hints for the CodeGraph seed), "depends_on" (ids), "risky" (the reviewer also checks it alone).
 JSON, not Markdown: an agent edits only `passes`, and `check` refuses any other change.
 """
-import json, os, re, subprocess, sys
+import json, os, re, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import briefs  # noqa: E402  (the index lookup is briefs.py's own)
+import prompt  # noqa: E402  (the run's clock and budget are prompt.py's own)
 
 ID = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
+BATCH = 3   # D2: the most open tickets one implementer turn builds, so the context check runs between batches
+FULL_CHECK = re.compile(r"\bfull check\b", re.I)
 OPTIONAL = {"files": list, "symbols": list, "seeds": list, "depends_on": list, "risky": bool}
 JS = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx")
 # shortcut: a fixed list of code file types (check runs without W's index); add a type when a project needs it
@@ -80,11 +85,16 @@ def problems(rows, orig=None):
 
 
 def warnings(rows, root):
-    """A code ticket with no symbols gets a seed with no node or callers: warn, never fail. Only code files that exist
-    in root (the repo that holds the run) count: a new file has no symbol yet."""
+    """A code ticket with no symbols gets a seed with no node or callers, and an acceptance line without `(reviewer) `
+    that names the full check asks the implementer for what only the controller runs: warn, never fail. Only code files
+    that exist in root (the repo that holds the run) count: a new file has no symbol yet."""
     return [f"WARN {r['id']}: lists code files and no symbols: its seed holds no node or callers" for r in rows
             if not r.get("symbols") and any(os.path.splitext(f)[1] in CODE and os.path.isfile(os.path.join(root, f))
-                                            for f in r.get("files") or [])]
+                                            for f in r.get("files") or [])] + [
+        f"WARN {r['id']}: acceptance line {n} asks the implementer for the full check, which the controller runs once at "
+        "the end: mark it `(reviewer) ` or name the tests it means"
+        for r in rows for n, a in enumerate(r.get("acceptance") or [], 1)
+        if isinstance(a, str) and FULL_CHECK.search(a) and not a.startswith("(reviewer) ")]
 
 
 def unindexed(rows, root, run=briefs.run):
@@ -140,11 +150,12 @@ def continue_text(rows, elapsed=None, budget=None, review=None, hold=False):
     stop = next((r["id"] for r in go if r.get("risky")), None) if review else None
     if stop:                                                   # a risky ticket keeps its own solo review
         go = go[:[r["id"] for r in go].index(stop) + 1]
+    go = go[:BATCH]
     clock = f" Elapsed {elapsed}s / {budget}s." if elapsed is not None and budget is not None else ""
     text = ("continue: open tickets " + ", ".join(f"{r['id']} ({r['title']})" for r in go)
             + f". {len(rows) - len(left)} of {len(rows)} pass.{clock}")
     if not review:
-        return text + " Take the next open ticket."
+        return text + " Build only these, then stop with your final message."
     waiting = [r["id"] for r in left if r["id"] in wait]
     return (text + " Build only these, then stop with your final message"
             + (f"; do not start {', '.join(waiting)} until the review of {review} is done." if waiting else ".")
@@ -192,13 +203,26 @@ def selftest():
         "start T-3 until the review of T-2 is done. T-2 is under review alone: its fix round comes at your next "
         "stop."), continue_text(four, review="T-2")
     assert continue_text(four[:3], review="T-1") == "", "every open ticket waits for the risky one: no message"
-    assert continue_text(four) == "continue: open tickets T-2 (d), T-3 (g), T-4 (h). 1 of 4 pass. Take the next open ticket."
+    assert continue_text(four) == "continue: open tickets T-2 (d), T-3 (g), T-4 (h). 1 of 4 pass. Build only these, then stop with your final message."
     risky = [dict(good[0], passes=True, risky=True), dict(good[1], id="T-2", depends_on=[]),
              dict(good[1], id="T-3", title="g", depends_on=[], risky=True), dict(good[0], id="T-4", title="h")]
     assert continue_text(risky, review="T-1") == (                       # the batch ends at its first risky ticket
         "continue: open tickets T-2 (d), T-3 (g). 1 of 4 pass. Build only these, then stop with your final message. "
         "T-1 is under review alone: its fix round comes at your next stop. T-3 is risky: stop after it."), continue_text(risky, review="T-1")
-    assert continue_text(risky) == "continue: open tickets T-2 (d), T-3 (g), T-4 (h). 1 of 4 pass. Take the next open ticket."
+    assert continue_text(risky) == "continue: open tickets T-2 (d), T-3 (g), T-4 (h). 1 of 4 pass. Build only these, then stop with your final message."
+    seven = [dict(good[0], id=f"T-{i}", title=f"t{i}") for i in range(1, 8)]     # D2: at most 3 tickets per turn
+    assert continue_text(seven) == ("continue: open tickets T-1 (t1), T-2 (t2), T-3 (t3). 0 of 7 pass. "
+                                    "Build only these, then stop with your final message."), continue_text(seven)
+    assert continue_text(seven[5:]).startswith("continue: open tickets T-6 (t6), T-7 (t7). 0 of 2 pass."), continue_text(seven[5:])
+    five = [dict(t, passes=True) for t in seven[:3]] + seven[3:]
+    assert continue_text(five).startswith("continue: open tickets T-4 (t4), T-5 (t5), T-6 (t6). 3 of 7 pass."), continue_text(five)
+    second = [dict(seven[0], passes=True, risky=True), seven[1], dict(seven[2], risky=True)] + seven[3:]
+    assert continue_text(second, review="T-1").startswith("continue: open tickets T-2 (t2), T-3 (t3). 1 of 7 pass."), "the risky stop holds"
+    reviewer = "(reviewer) through the full check: every selftest passes"
+    for line, warns in (("through the full check: every selftest passes", 1), ("run the Full Check before you set passes", 1),
+                        (reviewer, 0), ("through tickets.py --selftest: the full checklist renders", 0)):
+        got = [w for w in warnings([dict(good[0], acceptance=["through x: y", line])], "/no/such/repo") if "full check" in w]
+        assert len(got) == warns and (not got or got[0].startswith("WARN T-1: ")), (line, got)
     import tempfile
     hold = ' Hold your product checks until the controller sends "product free".'
     with tempfile.TemporaryDirectory() as run:                           # the hold reads the facts file of run.json
@@ -232,6 +256,14 @@ def selftest():
                 with contextlib.redirect_stdout(out):
                     main(["tickets.py", "continue", run, *argv])
                 assert out.getvalue() == want + "\n", (body, argv, out.getvalue())
+        with open(os.path.join(run, "run.json"), "w") as f:              # D4: the clock of prompt.py, from run.json
+            json.dump({"START": 1000, "WAITS": [120, 30]}, f)
+        # 2000 - 1000 - 150 = 850 s; budget 4 tickets x 600 s + 7200 s = 9600 s (no facts file, no full check time)
+        for argv, want in (([], " Elapsed 850s / 9600s."), (["5", "100"], " Elapsed 5s / 100s.")):   # typed values win
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                main(["tickets.py", "continue", run, *argv], now=lambda: 2000)
+            assert out.getvalue() == continue_text(four) .replace(" pass.", " pass." + want) + "\n", (argv, out.getvalue())
         with open(os.path.join(run, "run.json"), "w") as f:              # the template's own words give no hold
             json.dump({"PROJECT": os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "templates", "project.md")}, f)
         assert not one_at_a_time(run), "the template's Shared test resources item says one at a time"
@@ -283,6 +315,19 @@ def selftest():
                 except SystemExit as x:
                     assert x.code == 0, x.code                            # a WARN never fails the check
             assert out.getvalue().splitlines() == want + ["ok: 2 tickets, 0 pass"], out.getvalue()
+        with open(os.path.join(run, "tickets.json"), "w") as f:            # the full-check WARN through check: exit 0
+            json.dump([dict(good[0], acceptance=["through the full check: all pass"]), dict(good[1], acceptance=["(reviewer) through the full check: all pass"])], f)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            try:
+                main(["tickets.py", "check", run], lookup=fake)
+            except SystemExit as x:
+                assert x.code == 0, x.code
+        assert [l for l in out.getvalue().splitlines() if "full check" in l] == [
+            "WARN T-1: acceptance line 1 asks the implementer for the full check, which the controller runs once at the end: "
+            "mark it `(reviewer) ` or name the tests it means"], out.getvalue()
+        with open(os.path.join(run, "tickets.json"), "w") as f:
+            json.dump([dict(good[0], symbols=["Lsp.read", "f", "made_here"]), dict(good[1], symbols=["Lsp::read"])], f)
         with contextlib.redirect_stdout(io.StringIO()):
             main(["tickets.py", "freeze", run])
         called = []                                                      # after the freeze: no query, no symbol WARN
@@ -307,7 +352,7 @@ def selftest():
     print("tickets selftest ok")
 
 
-def main(argv, lookup=briefs.run):
+def main(argv, lookup=briefs.run, now=time.time):
     if argv[1:] == ["--selftest"]:
         return selftest()
     if len(argv) < 3 or argv[1] not in ("check", "freeze", "render", "open", "continue"):
@@ -341,7 +386,14 @@ def main(argv, lookup=briefs.run):
             review, argv = "".join(argv[i + 1:i + 2]), argv[:i] + argv[i + 2:]
             if review not in {r["id"] for r in rows}:
                 sys.exit(f"--review {review!r}: not a ticket id")
-        e, b = (int(argv[3]), int(argv[4])) if len(argv) > 4 else (None, None)
+        try:
+            with open(os.path.join(run, "run.json")) as f:
+                r = json.load(f)
+        except (OSError, ValueError):
+            r = {}
+        # typed values win; else the clock of prompt.py (D4), none without a start time
+        e, b = ((int(argv[3]), int(argv[4])) if len(argv) > 4 else
+                (prompt.elapsed(r, now), prompt.budget(run)) if "START" in r else (None, None))
         print(continue_text(rows, e, b, review, hold=bool(review) and one_at_a_time(run)))
     else:
         sys.exit(__doc__)

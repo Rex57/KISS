@@ -58,9 +58,10 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
   how far the change reaches, each batch a ticket after the first stage; then remove the old form, in a ticket after
   every batch. When a batch cannot pass alone, end with one ticket that joins and checks them all.
 - **Acceptance lines** are the definition of done. Each one names its seam: `through <seam>: <what a person or a
-  test sees>`. No file paths or code in a ticket's `spec` or `acceptance` (except: an "as before" or "as now" line cites its `file:line` at BASE); `files` and `symbols` are only hints for
+  test sees>`. No file paths or code in a ticket's `spec` or `acceptance` (except the citation of a fact, by the rule "A fact you write" in SKILL.md); `files` and `symbols` are only hints for
   the CodeGraph seed. A line that only the reviewer can check (the running product, or a reader's judgement) starts
-  with `(reviewer) `; the implementer runs every other line before it sets `passes`. A `(reviewer)` line that needs a
+  with `(reviewer) `; the implementer runs every other line before it sets `passes`. A line that needs a live system is a `(reviewer)`
+  line: the implementer never touches one. A `(reviewer)` line that needs a
   read-only command on a live system names its `D<n>`, and that ruling names the exact commands.
 - **Failure paths and totals** each get their own acceptance line:
   - A ticket that makes state outside its process (a container, a file, an account, a plugin, a database): one
@@ -68,8 +69,6 @@ Write `R/spec.md` from `templates/spec.md`. Read the code first, and use the pro
   - A deploy ticket: one line through the built artifact, not the source.
   - A ticket whose caller has a timeout: name that timeout as a time window.
   - A line that measures a total (a count, a score) also names what must not get worse item by item.
-  - A line that says "as before" or "as now" states the behaviour as the code shows it (with the `file:line` of the
-    acceptance-line rule).
   - A text the user sees (a message, a warning) is copied word for word from its decision.
   - A ticket that changes when or where a rule runs puts each reader of that rule (from `codegraph callers`) in
     `symbols`, and its spec names the rule each reader keeps.

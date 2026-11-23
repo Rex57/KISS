@@ -14,7 +14,8 @@ When your tool list differs from this page, trust the tool list.
 **The handoff, when a subagent cannot be continued, or when `metrics.py R --context` marks it at a round
 boundary (its context has grown past the bound):** start a new one with the same prompt as the first, plus the
 new message, plus: "Read `R/progress.md` first: it is the record of the work so far." For a reviewer, add its last
-findings file. `progress.md` and the commits hold everything the next agent needs; that is why the implementer
+findings file. For an implementer in a fix round, `prompt.py handoff R ROUND=<n>` prints the whole prompt: the
+implementer's standing rules without its per-ticket steps, then that round's fix prompt. `progress.md` and the commits hold everything the next agent needs; that is why the implementer
 writes them after each ticket.
 
 **A kiss-mini worker** starts the same way, in the background, and is never continued (a redo is a new

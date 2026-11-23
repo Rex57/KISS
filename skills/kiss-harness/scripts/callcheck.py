@@ -7,12 +7,15 @@
 
 It compares the definitions of each changed file in Python, JS/TS, Swift, Go, Rust, Java, Kotlin, Ruby, PHP, C# or
 C/C++ on both sides of the diff (Python by its AST, JS/TS by a pattern for `function f(`, `f = (...) =>` and a method
-`f(...) {`, the others by a generic pattern). For each name it prints the cgcallers block of that file's definition;
-for a name no definition holds any more (removed, renamed) it prints the word hits cgcallers' search finds in the
-tracked files of that language. The count line counts the names checked and the caller lines to read. After it, a diff
+`f(...) {`, the others by a generic pattern). For each name it prints the cgcallers block of that file's definition,
+from one cgcallers pass in this process for the whole diff; for a name no definition holds any more (removed, renamed)
+it prints the word hits cgcallers' search finds in the tracked files of that language. A name removed from one file and
+defined in another file of the diff prints one `moved: NAME OLD -> NEW` line and the word hits that still reach it
+through OLD, in place of its cgcallers block. The count line counts the names checked and the caller lines to read. After it, a diff
 with any other code file prints a "language not covered" line that names those files.
 """
 import ast
+import json
 import os
 import re
 import subprocess
@@ -90,22 +93,24 @@ def defs(src, path):
 
 
 def changes(W, spec):
-    """([(kind, name, file, note)] for each removed, renamed or re-signed function in the diff, [the code files of the
-    diff in a language not compared])."""
+    """([(kind, name, file, note)] for each removed, renamed, moved (note: the new file) or re-signed function in the
+    diff, [the code files of the diff in a language not compared])."""
     cached = spec == "--cached"
     base, head = ("HEAD", "") if cached else spec.split("..", 1)
     diff = git(W, "diff", "-z", "--name-status", "-M", *(["--cached"] if cached else [base, head])).split("\0")[:-1]   # -z: no quoted names
-    out, other = [], []
+    out, other, added_in, removed_sig = [], [], {}, {}
     while diff:
         status, old = diff.pop(0), diff.pop(0)
         new = diff.pop(0) if status[0] in "RC" else old
         if not old.endswith(COMPARED) and os.path.splitext(new)[1] in CODE and not new.endswith(COMPARED):
             other.append(new)
-        if not old.endswith(COMPARED) or status.startswith("A"):
+        if not old.endswith(COMPARED):
             continue
-        before = defs(git(W, "show", "%s:%s" % (base, old), missing_ok=True), old)
+        before = {} if status.startswith("A") else defs(git(W, "show", "%s:%s" % (base, old), missing_ok=True), old)
         after = {} if status.startswith("D") else defs(git(W, "show", "%s:%s" % (head, new), missing_ok=True), new)
         added = {n: s for n, s in after.items() if n not in before}
+        for n, s in added.items():
+            added_in.setdefault(n, (new, s))
         for name, sig in before.items():
             if name in after:
                 if after[name] != sig:
@@ -113,12 +118,10 @@ def changes(W, spec):
                 continue
             twin = [n for n, s in added.items() if s == sig and n.rsplit(".", 1)[0:-1] == name.rsplit(".", 1)[0:-1]]
             out.append(("renamed", name, old, "to " + twin[0]) if len(twin) == 1 else ("removed", name, old, ""))
-    return out, other
-
-
-def run_cgcallers(W, name, path, script=os.path.join(HERE, "cgcallers.py")):
-    p = subprocess.run([sys.executable, "-I", script, name, "-p", W, "-f", path], capture_output=True, text=True)
-    return p.stdout + ("\n[cgcallers failed] exit %d: %s" % (p.returncode, p.stderr.strip()[-500:]) if p.returncode else "")
+            removed_sig[name, old] = sig
+    # moved: the same name and signature in another file; a new signature or an unrelated namesake stays removed (F10, F13)
+    return [("moved", n, f, added_in[n][0]) if k == "removed" and added_in.get(n, ("", None))[1] == removed_sig[n, f] else (k, n, f, note)
+            for k, n, f, note in out], other
 
 
 def word_hits(W, name, path):
@@ -147,15 +150,23 @@ def word_hits(W, name, path):
     return rows
 
 
-def check(W, spec, callers=run_cgcallers):
+def check(W, spec, callers=cgcallers.many):
+    """callers(W, [(name, file)]) is cgcallers' one pass: (a refusal, the sync line, [a text per target], [notes])."""
     found, other = changes(W, spec)
-    lines = []
+    asked = [(name, path) for kind, name, path, note in found if kind != "moved"]
+    refusal, said, texts, notes = callers(W, asked) if asked else ("", "", [], [])
+    texts = iter(texts or ["[cgcallers failed] " + refusal] * len(asked))   # a refusal is a line to read, never 0
+    lines = [said] if said else []
     for kind, name, path, note in found:
+        if kind == "moved":
+            lines.append("\n".join(["\nmoved: %s %s -> %s" % (name, path, note)] + word_hits(W, name, path)))
+            continue
         lines.append("\n== %s: %s (%s)%s" % (kind, name, path, " " + note if note else ""))
-        text = callers(W, name, path)
+        text = next(texts)
         if kind != "signature" and ("no definition named" in text or "matches file" in text):   # none left in this file
-            text += "\n".join(["word search (no definition holds %s any more):" % name] + word_hits(W, name, path))
+            text = text.rstrip() + "\n" + "\n".join(["word search (no definition holds %s any more):" % name] + word_hits(W, name, path))
         lines.append(text.rstrip())
+    lines += notes
     to_read = sum(l.startswith("[") for t in lines for l in t.splitlines())
     lines.append("\ncallcheck: %d names checked (removed, renamed or re-signed), %d caller lines to read" % (len(found), to_read))
     if other:
@@ -204,7 +215,7 @@ def selftest():
                 g("commit", "-qm", "two")
                 spec = "HEAD~1..HEAD"
             asked.clear()
-            out = check(W, spec, fake)
+            out = check(W, spec, per_name(fake))
             assert sorted(asked) == [("K.ack", "a.py"), ("gone", "a.py"), ("gone2", "c.ts"), ("old_name", "a.py"),
                                      ("resigned", "a.py")], asked
             assert "== removed: gone (a.py)" in out and "== renamed: old_name (a.py) to new_name" in out, out
@@ -215,19 +226,142 @@ def selftest():
             assert "[grep only] d.py" not in out and "e.py" not in out, out           # R13: a namesake's def; R1: no import
             assert "[grep only] f.py:2  return o.ack()" in out and "[grep only] a.py" not in out, out   # a method: any file
             assert out.splitlines()[-1] == "callcheck: 5 names checked (removed, renamed or re-signed), 4 caller lines to read", out
+            assert "\nword search (no definition holds gone2 any more):" in out, out   # F12: the header starts its own line
+        refused = check(W, "HEAD~1..HEAD", lambda W_, t: ("callcheck: wrong or missing index for W", "", [], []))
+        assert refused.count("[cgcallers failed] callcheck: wrong or missing index for W") == 5, refused   # F11: no index
+        assert refused.splitlines()[-1].endswith("5 caller lines to read"), refused
         try:                                                                          # R2: a bad range stops with git's words
-            check(W, "nosuch..HEAD", fake)
+            check(W, "nosuch..HEAD", per_name(fake))
             raise AssertionError("a bad range must stop")
         except SystemExit as e:
             assert "nosuch" in str(e), e
-        boom = os.path.join(W, "boom.py")
-        with open(boom, "w") as fh:
-            fh.write("import sys\nprint('partial')\nsys.exit('Traceback: boom')\n")
-        out = run_cgcallers(W, "x", "a.py", script=boom)                             # R2: a crashed cgcallers is a line to read
-        assert "partial" in out and "[cgcallers failed] exit 1: Traceback: boom" in out, out
+    selftest_one_pass()
+    selftest_moved()
+    selftest_moved_resigned()
     selftest_languages()
     print("callcheck selftest ok")
     return 0
+
+
+def per_name(fake):
+    """A callers function for check() from a fake cgcallers of one (W, name, path)."""
+    return lambda W, targets: ("", "codegraph sync: Already up to date", [fake(W, n, p) for n, p in targets], [])
+
+
+def repo(before, after):
+    """A scratch git repo with `before` committed and `after` staged (a None text deletes); the caller removes it."""
+    import tempfile
+    W = tempfile.mkdtemp()
+    g = lambda *a: subprocess.run(["git", "-C", W] + list(a), check=True, capture_output=True)
+    g("init", "-q"), g("config", "user.name", "t"), g("config", "user.email", "t@example.com")
+    for files in (before, after):
+        for f, body in files.items():
+            if body is None:
+                os.remove(os.path.join(W, f))
+            else:
+                with open(os.path.join(W, f), "w") as fh:
+                    fh.write(body)
+        g("add", "-A")
+        if files is before:
+            g("commit", "-qm", "x")
+    return W
+
+
+def selftest_one_pass():
+    """5 names removed from 5 files: one status, sync and files read and one language server for all of them; a
+    failure of one target leaves the others' blocks."""
+    import shutil, tempfile
+    W = repo({"m%d.py" % i: "def f%d():\n    return %d\n" % (i, i) for i in range(5)} | {"keep.py": "def keep():\n    return 0\n"},
+             {"m%d.py" % i: "X = %d\n" % i for i in range(5)})
+    count = tempfile.mktemp()
+    calls = []
+
+    def fake_cg(args):
+        calls.append(args[0])
+        if args[0] == "status":
+            return json.dumps({"initialized": True, "projectPath": W, "worktreeMismatch": None})
+        if args[0] == "sync":
+            return "Already up to date\n"
+        if args[0] == "files":
+            return json.dumps([{"path": f, "language": "python"} for f in ["keep.py"] + ["m%d.py" % i for i in range(5)]])
+        if args[-1] == "f3" and "boom" in calls:
+            raise RuntimeError("it broke")
+        # a namesake in keep.py: codegraph shows it instead of the file's own, gone, definition
+        return json.dumps({"definitions": [{"definition": {"name": args[-1], "kind": "function", "filePath": "keep.py", "startLine": 1,
+                                                           "language": "python"}, "callers": [], "edges": []}],
+                           "filteredOut": True, "note": "no definition of %s matches file" % args[-1]})
+    server = {"python": [sys.executable, "-c", "open(%r, 'a').write('x')\n" % count + cgcallers.FAKE_LSP, "[]"]}
+    try:
+        out = check(W, "--cached", lambda W_, t: cgcallers.many(W_, t, cg=fake_cg, servers=server))
+        assert [calls.count(c) for c in ("status", "sync", "files", "callers")] == [1, 1, 1, 5], calls
+        assert open(count).read() == "x", "the language server started more than once"
+        assert out.count("definition  keep.py:1  function f") == 5 and "LSP" not in out, out
+        # the one LSP deadline for the whole diff: the timed-out note names each definition with no answer (a fake clock)
+        once = cgcallers.FAKE_LSP.replace('    elif m.get("method") == "textDocument/references":\n',
+                                          '    elif m.get("method") == "textDocument/references" and not globals().get("said"):\n        said = True\n')
+        tick = iter(range(0, 10 ** 6, 5)).__next__                                # 5 s per look at the clock
+        out = check(W, "--cached", lambda W_, t: cgcallers.many(W_, t, cg=fake_cg, servers={"python": [sys.executable, "-c", once, "[]"]}, clock=tick))
+        assert "\nLSP: timed out; no answer for: f1 (keep.py:1), f2 (keep.py:1), f3 (keep.py:1), f4 (keep.py:1)\n" in out, out
+        calls[:] = ["boom"]
+        out = check(W, "--cached", lambda W_, t: cgcallers.many(W_, t, cg=fake_cg, servers={}))
+        block = out[out.index("== removed: f3"):out.index("== removed: f4")]
+        assert "[cgcallers failed] RuntimeError: it broke" in block and "definition" not in block, out
+        assert out.count("definition  keep.py:1  function f") == 4, out           # the other targets' blocks still print
+    finally:
+        shutil.rmtree(W)
+        os.path.exists(count) and os.remove(count)
+
+
+def selftest_moved():
+    """A name removed from one file and defined in another prints one `moved:` line and each file that still reaches
+    it through the old module, by every import form cgcallers reads; no cgcallers block for it."""
+    import shutil
+    old = "def keep():\n    return 0\n\n\ndef gone_x():\n    return 1\n\n\n" + "".join(
+        "def mv_%s():\n    return 1\n\n\n" % c for c in "abcde")
+    users = {"u1.py": "from old import mv_a, gone_x\n\n\ndef u():\n    return mv_a() + gone_x()\n",
+             "u2.py": "import old\n\n\ndef u():\n    return old.mv_b()\n",
+             "u3.py": "import old as O\n\n\ndef u():\n    return O.mv_c()\n",
+             "u4.py": "import importlib\nm = importlib.import_module(\"old\")\nm.mv_d()\n",
+             "u5.py": "from old import mv_e\nmv_e()\n"}
+    W = repo(dict(users, **{"old.py": old}),
+             {"old.py": "def keep():\n    return 0\n", "new.py": "".join("def mv_%s():\n    return 1\n\n\n" % c for c in "abcde"),
+              "u5.py": "from new import mv_e\nmv_e()\n"})                       # u5 follows the move
+    asked = []
+    try:
+        out = check(W, "--cached", per_name(lambda W_, n, p: asked.append(n) or "codegraph: no definition named %s" % n))
+        assert asked == ["gone_x"], (asked, out)                                  # a moved name gets no cgcallers block
+        for c, user, line in (("a", "u1.py:1", "from old import mv_a, gone_x"), ("a", "u1.py:5", "return mv_a() + gone_x()"),
+                              ("b", "u2.py:5", "return old.mv_b()"), ("c", "u3.py:5", "return O.mv_c()"), ("d", "u4.py:3", "m.mv_d()")):
+            assert out.count("\nmoved: mv_%s old.py -> new.py\n" % c) == 1, (c, out)
+            block = out[out.index("moved: mv_%s " % c):].split("\n\n")[0]
+            assert "[grep only] %s  %s" % (user, line) in block, (c, block)
+        assert "moved: mv_e old.py -> new.py" in out and "u5.py" not in out, out  # an importer that follows the move: none
+        assert "== removed: mv_" not in out and "== removed: gone_x (old.py)" in out, out
+        assert "[grep only] u1.py:5  return mv_a() + gone_x()" in out[out.index("== removed: gone_x"):], out   # its word hits, as before
+    finally:
+        shutil.rmtree(W)
+
+
+def selftest_moved_resigned():
+    """F10, F13: a name is moved only when its new definition keeps the removed one's signature; else it is removed."""
+    import shutil
+    W = repo({"old.py": "def calc(x):\n    return x\n\n\ndef helper():\n    return 1\n", "user.py": "from old import calc\ncalc(1)\n"},
+             {"old.py": "X = 1\n", "new.py": "def calc(x, y):\n    return x + y\n", "user.py": "from new import calc\ncalc(1)\n",
+              "other.py": "def helper(q):\n    return q\n"})
+    asked = []
+
+    def fake(W_, n, p):
+        asked.append(n)
+        return ('codegraph: no definition of "%s" matches file "old.py" — showing all definitions instead.\n' % n
+                + ("definition  new.py:1  function calc\n[both     ] user.py:2  user.py  calc(1)" if n == "calc"
+                   else "definition  other.py:1  function helper"))
+    try:
+        out = check(W, "--cached", per_name(fake))
+        assert sorted(asked) == ["calc", "helper"], (asked, out)
+        assert "== removed: calc (old.py)" in out and "[both     ] user.py:2  user.py  calc(1)" in out, out   # its broken caller
+        assert "== removed: helper (old.py)" in out and "\nmoved:" not in out, out                            # an unrelated namesake
+    finally:
+        shutil.rmtree(W)
 
 
 def selftest_languages():
@@ -274,7 +408,7 @@ def selftest_languages():
             put(after, spec != "--cached")
             asked = []
             fake = lambda W_, name, path: asked.append(name) or "definition  %s:1  function %s" % (path, name)
-            out = check(W, spec, fake)
+            out = check(W, spec, per_name(fake))
             return asked, out
 
     asked, out = names({f: s[0] for f, s in swift.items()}, {f: s[1] for f, s in swift.items()})

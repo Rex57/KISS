@@ -44,6 +44,32 @@ async function folder($: $, id: string) {
   return `${tmp.replace(/\/$/, '')}/kiss-mini/${id}`
 }
 
+/** The main checkout of the repository `dir` is in: what its common git folder names as its work tree (a submodule's,
+ * whose git folder is in its superproject's .git and sets core.worktree), else that folder minus `/.git`; undefined when git fails. */
+async function mainOf($: $, dir: string) {
+  const git = (at: string, ...args: string[]) => $.process.run(['git', '-C', at, 'rev-parse', ...args], { timeoutMs: 120_000 }).catch(() => undefined)
+  const common = await git(dir, '--path-format=absolute', '--git-common-dir')
+  if (common?.exitCode !== 0) return undefined
+  const top = await git(common.stdout.trim(), '--show-toplevel')
+  return top?.exitCode === 0 ? top.stdout.trim() : common.stdout.trim().replace(/\/\.git$/, '')
+}
+
+/** D1: a code task's worktree, beside the harness worktrees in its main checkout, so a restart keeps it (T stays in TMPDIR). */
+const worktreeOf = async ($: $, cwd: string, id: string) => `${(await mainOf($, cwd)) ?? cwd}/.kiss/worktrees/mini-${id}`
+
+/** D1: `.kiss/` in the repo's exclude file once, so the worktree never shows in `git status`. Its caller ignores a failure (D14). */
+async function exclude($: $, t: Task) {
+  // Asked in the main checkout, whose .kiss/ holds the worktree (a subfolder or another worktree may read other rules).
+  const repo = (await mainOf($, t.cwd)) ?? t.cwd
+  const git = (...args: string[]) => $.process.run(['git', '-C', repo, ...args], { timeoutMs: 120_000 })
+  if ((await git('check-ignore', '-q', '.kiss/')).exitCode !== 1) return
+  const path = (await git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude')).stdout.trim()
+  if (!path) return
+  // An append, never a read and rewrite: the owner's lines keep every byte (the fs API reads and writes only UTF-8 text).
+  // Its folder first: an empty `git init` template has no info/.
+  await $.process.run(['sh', '-c', 'mkdir -p "${1%/*}" && { [ -s "$1" ] && [ -n "$(tail -c 1 "$1")" ] && echo >> "$1"; echo .kiss/ >> "$1"; }', 'sh', path], { timeoutMs: 120_000 })
+}
+
 /** The worker's report: its State line and its Summary (up to the next field), cut to 600 characters. */
 export function parseReport(answer: string, kind?: Task['kind']): { state: State; summary: string } {
   if (!answer.trim()) return { state: 'failed', summary: 'the worker returned no answer' }
@@ -213,7 +239,8 @@ function briefLines(t: Task, text: string, rules: string, dir: string, seed = fa
   // Short: the lines that only say "not given" go first, before any of the task's own text.
   const given = (line: string) => !(short && line.endsWith(NOT_GIVEN))
   const where = [...(isCode(t)
-    ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree}`, `Task folder: ${dir}`]
+    // A worktree in the checkout is named from the Checkout field: a long checkout path would cost the task text twice.
+    ? [`Checkout: ${t.cwd}    Base: ${t.base}    Branch: ${t.branch}    Worktree: ${t.worktree?.startsWith(`${t.cwd}/`) ? `<Checkout>${t.worktree.slice(t.cwd.length)}` : t.worktree}`, `Task folder: ${dir}`]
     : [`Checkout: ${t.cwd} (read only)    Task folder: ${dir}`]),
   // The folder by its field's name: the path is on the line above, and a second copy would cost the task text its length.
   `Bash: ${bashPrefix(t, isCode(t) ? "'<Worktree>'" : "'<Checkout>'")}<command>`,
@@ -221,7 +248,7 @@ function briefLines(t: Task, text: string, rules: string, dir: string, seed = fa
   // would query the base branch's index. Two full paths here would cost the task text 150 characters.
   ...(seed ? ['CodeGraph (never cd first): codegraph explore|node|callers -p "$PWD" <names>; codegraph sync -q "$PWD" after edits; seed: seed.md in the Task folder'] : [])]
   // The report's first line and the progress tool are in the brief itself: a worker may not open the Rules file.
-  const rule = 'Report: your final message starts "State: done|ready|failed|waiting for you", then "Summary:". Call mcp__kiss__progress (step, total) as you start each step.'
+  const rule = `Final message: ${isCode(t) ? '"State: ready|failed|waiting for you", then Summary:, Branch:, Tests:' : '"State: done|failed|waiting for you", then Summary:'}. Call mcp__kiss__progress (step, total) at each step.`
   if (t.brief !== undefined) {
     return [`# Mini task ${t.id}: ${t.title.slice(0, 120)}`, ...where, `Return: ${t.return ? 'harness' : 'owner'}    Checks: run`, `Rules: ${rules}`, rule, text].join('\n')
   }
@@ -274,8 +301,14 @@ async function seedFile($: $, t: Task, dir: string): Promise<boolean> {
   const w = t.worktree ?? top
   // A missing or slow codegraph is no seed, never a failed task. Stdin is closed: `init` must not wait for an answer.
   const cg = (...argv: string[]) => $.process.run(['codegraph', ...argv], { cwd: w, timeoutMs: 600_000, stdin: '' }).catch(() => undefined)
-  // FORCE_COLOR or CI puts colour codes around `Project:`.
-  if (!(await cg('status', top))?.stdout.replace(/\x1b\[[0-9;]*m/g, '').includes(`Project: ${top}\n`)) return false
+  // The checkout's own index, by CodeGraph's JSON status (no colour codes): initialized, its project, no worktree mismatch.
+  let status: { initialized?: unknown; projectPath?: unknown; worktreeMismatch?: unknown } | undefined
+  try {
+    status = JSON.parse((await cg('status', '-j', top))?.stdout ?? '')
+  } catch {
+    return false
+  }
+  if (status?.initialized !== true || status.projectPath !== top || status.worktreeMismatch) return false
   if (w !== top && (await cg('init', w))?.exitCode !== 0) return false
   const r = await cg('explore', '-p', w, t.title.slice(0, 200))
   if (r?.exitCode !== 0 || !r.stdout.trim()) return false
@@ -305,7 +338,8 @@ function reportMessage(t: Task, answer: string) {
     `kiss-mini task ${t.id} (${t.kind}): ${t.title.slice(0, 120)}`,
     `State: ${t.state}`,
     `Summary: ${t.report ?? ''}`,
-    line('Branch', 'none'),
+    // A worker that names no branch: the task's own, with the commits counted at its report.
+    line('Branch', isCode(t) && t.branch && t.ahead !== undefined ? `${t.branch} (${t.ahead} commits)` : 'none'),
     `Tests: ${reportTests(answer)}`,
     `Full log: ${t.log}`,
   ].join('\n')
@@ -410,11 +444,18 @@ async function tick($: $) {
       const repo = await repoOf($, t)
       if ((await $.process.run(['git', '-C', repo, 'merge-base', '--is-ancestor', t.branch, t.base!])).exitCode === 0) {
         // A worktree with changes nobody committed is never forced away.
-        // The index the seed made (`?? .codegraph/`) is no change of the worker's.
-        const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain'])).stdout.split('\n')
+        // The index the seed made (`?? .codegraph/`) is no change of the worker's; `normal` whatever status.showUntrackedFiles says.
+        const dirty = (await $.process.run(['git', '-C', t.worktree, 'status', '--porcelain', '--untracked-files=normal'])).stdout.split('\n')
           .filter(l => l.trim() && l.trim() !== '?? .codegraph/').join('\n')
         if (dirty) $.ui.toast(`kiss-mini ${t.id}: merged; worktree kept, it has uncommitted changes: ${t.worktree}`)
-        else await $.process.run(['git', '-C', repo, 'worktree', 'remove', '--force', t.worktree])
+        else {
+          const sha = (await $.process.run(['git', '-C', repo, 'rev-parse', t.branch])).stdout.trim()
+          await $.process.run(['git', '-C', repo, 'worktree', 'remove', '--force', t.worktree])
+          // The owner and the sender learn who removed the worktree, and where the branch stands.
+          const said = `kiss-mini ${t.id}: merged into ${t.base}; its worktree is removed; branch ${t.branch} at ${sha}`
+          $.ui.toast(said)
+          if (t.return) await $.session.send({ to: { sessionId: t.sender }, text: said }).catch(() => {})
+        }
         await save($, { ...t, state: 'done', delivered: 'merge', deliveredAt: now, ...(dirty ? {} : { worktree: undefined }) })
         continue
       }
@@ -495,6 +536,7 @@ async function run($: $, id: string) {
   // The host's minute timer checks a watch: a check never runs inside the message that brought the task.
   if (t.kind === 'watch') return
   if (isCode(t)) {
+    await exclude($, t).catch(() => {})
     const made = await $.process.run(['git', '-C', t.cwd, 'worktree', 'add', '-b', t.branch!, t.worktree!, t.base!])
     // No worktree was made: nothing is left to Discard.
     if (made.exitCode !== 0) {
@@ -551,6 +593,12 @@ async function wake($: $, text: string) {
   return r.exitCode === 0 ? 'started a new host' : `${NO_HOST}: ${`${r.stderr}\n${r.stdout}`.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 300)}`
 }
 
+/** The reply to a new task: what started it, or "failed: could not start a host: <reason>" (the task is failed). */
+async function reply($: $, t: Task, ok: (how: string) => string) {
+  const how = await started($, t)
+  return how.startsWith(NO_HOST) ? `failed: ${how} (kiss-mini task ${t.id})` : ok(how)
+}
+
 /** A task no host can take ends failed with the reason. */
 async function started($: $, t: Task) {
   const how = await wake($, `KISS-MINI task ${t.id}`).catch((err: Error) => `${NO_HOST}: ${err.message}`)
@@ -587,9 +635,7 @@ async function deliver($: $, id: string, how: Delivery) {
 
 /** A code task's own repository (D16): the main checkout of its worktree's git folder, else the sender's folder. */
 async function repoOf($: $, t: Task) {
-  if (t.repo) return t.repo
-  const common = t.worktree ? await $.process.run(['git', '-C', t.worktree, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 120_000 }) : undefined
-  return common?.exitCode === 0 ? common.stdout.trim().replace(/\/\.git$/, '') : t.cwd
+  return t.repo ?? (t.worktree && (await mainOf($, t.worktree))) ?? t.cwd
 }
 
 async function deliverOnce($: $, id: string, how: Delivery) {
@@ -749,12 +795,12 @@ export const register: Register = on => {
         const base = at >= 0 ? words.splice(at, 2)[1] : undefined
         const head = base ?? (await $.process.run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
         if (!head || head === 'HEAD') return { text: `kiss-mini: ${cwd} is on no branch (or in no repository): name one with --base <branch>.` }
-        Object.assign(t, { kind: 'code', title: words.join(' '), base: head, branch: `mini/${id}`, worktree: `${await folder($, id)}/wt` })
+        Object.assign(t, { kind: 'code', title: words.join(' '), base: head, branch: `mini/${id}`, worktree: await worktreeOf($, cwd, id) })
       }
       if (!t.title) return { text: 'kiss-mini: say what to do: /kiss-mini <task>, /kiss-mini ask <question>.' }
       await save($, t)
       await refresh($)
-      return { text: `kiss-mini ${id}: ${t.kind} started (${await started($, t)}).` }
+      return { text: await reply($, t, how => `kiss-mini ${id}: ${t.kind} started (${how}).`) }
     }
     const lines = (await tasks($)).map(t => `${t.id} ${t.kind} ${t.state}: ${t.title}${t.report ? ` - ${t.report}` : ''}`)
     return { text: lines.join('\n') || 'kiss-mini: no tasks.' }
@@ -771,7 +817,7 @@ export const register: Register = on => {
       const t: Task = { id, kind: 'watch', title: a.title || w.target, ...w, return: a.return === true, sender: await $.session.id(), cwd: await $.session.cwd(), state: 'watching', started: await $.clock.now(), key: crypto.randomUUID() }
       await save($, t)
       await refresh($)
-      return { result: `kiss-mini task ${id} (watch) started (${await started($, t)}).${t.return ? ' Its end comes back to this session as one message.' : ''}` }
+      return { result: await reply($, t, how => `kiss-mini task ${id} (watch) started (${how}).${t.return ? ' Its end comes back to this session as one message.' : ''}`) }
     }
     if (!['code', 'bug', 'question'].includes(a.kind) || !a.title || !a.brief) return { result: 'kiss-mini: kind (code, bug, question or watch), title and brief are needed.' }
     if (a.brief.length > BRIEF_MAX) return { result: `kiss-mini: the brief has ${a.brief.length} characters; at most ${BRIEF_MAX}.` }
@@ -781,11 +827,11 @@ export const register: Register = on => {
     if (isCode(t)) {
       const base = a.base || (await $.process.run(['git', '-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
       if (!base || base === 'HEAD') return { result: `kiss-mini: ${cwd} is on no branch: give a base.` }
-      Object.assign(t, { base, branch: `mini/${id}`, worktree: `${await folder($, id)}/wt` })
+      Object.assign(t, { base, branch: `mini/${id}`, worktree: await worktreeOf($, cwd, id) })
     }
     await save($, t)
     await refresh($)
-    return { result: `kiss-mini task ${id} (${t.kind}) started (${await started($, t)}).${t.return ? ' Its report comes back to this session as one message.' : ''}` }
+    return { result: await reply($, t, how => `kiss-mini task ${id} (${t.kind}) started (${how}).${t.return ? ' Its report comes back to this session as one message.' : ''}`) }
   })
 
   // Host: a worker's progress tool sets its step n of m.
@@ -882,6 +928,8 @@ export const register: Register = on => {
       fields.ahead = Number((await $.process.run(['git', '-C', t.cwd, 'rev-list', '--count', `${t.base}..${t.branch}`])).stdout.trim()) || 0
       fields.tests = reportTests(e.answer)
       fields.pr = /^## Pull request body\s*\n([\s\S]*)/m.exec(e.answer)?.[1]?.trim() || summary
+      // D13: a change with commits that says done is ready, so its sender can deliver it; with none it stays done.
+      if (state === 'done' && fields.ahead > 0) fields.state = 'ready'
     }
     // A stop may have landed while the report was written: it stands.
     const fresh = (await $.store.get(TASK + t.id)) as Task

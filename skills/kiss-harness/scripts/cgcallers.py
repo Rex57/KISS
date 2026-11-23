@@ -12,15 +12,15 @@ definition's own file and the files that import its module or its package (Pytho
 it reads every indexed file of the language. A hit in a comment, a string or a docstring is not counted, except the
 string 'NAME' given to getattr, hasattr or setattr. For a function (not a method), a hit `X.NAME` counts only when X
 is its module or a name bound to it (`import a.b as X`, `X = import_module(...)`). For a language with no import
-filter it reads every indexed file of that language and prints a warning. codegraph misses a function passed as a
-value, a call through getattr with a string, a method on an object when two classes define the name, and recursion
-(KISS rules/codegraph.md, "callers is incomplete").
+filter it reads every indexed file of that language and prints a warning. codegraph misses a method called on an
+untyped parameter or value, and a call through getattr or an index with a string (KISS rules/codegraph.md, "callers is
+incomplete").
 With pyright-langserver (Python) or typescript-language-server (JS/TS) on PATH, an LSP pass asks the server for the
-references of each definition (one deadline of 120 s for the whole pass, then "LSP: timed out"); with no server it
+references of each definition (one deadline of 120 s for the whole pass, then "LSP: timed out; no answer for: <name>
+(<file>:<line>), ..."); with no server it
 prints "no language server for <language>: LSP pass skipped".
 Each caller line is marked:
-  [both]       codegraph has an edge on this line and the word search finds the name on it, or (Python) the line is
-               in a function codegraph lists as a caller
+  [both]       codegraph has an edge on this line and the word search finds the name on it
   [grep only]  the name on a line with no codegraph edge: a caller codegraph missed, an import, or a namesake: read it
   [cg only]    a codegraph edge on a line the word search does not find (an alias such as `F.name`)
   [cg guess]   a codegraph edge with confidence 0.4 resolved by exact name match: a guess from the name only
@@ -271,7 +271,7 @@ class Lsp:
 
 def lsp_refs(W, defs, text, servers, clock, limit=LSP_LIMIT):
     """({index of a definition: {(file, line)}} of the references the language servers find, the lines to print)."""
-    refs, notes, deadline = {}, [], clock() + limit
+    refs, notes, deadline, answered = {}, [], clock() + limit, set()
     root = os.path.realpath(W)
     uri = lambda f: "file://" + urllib.parse.quote(os.path.join(root, f))
     groups = {}
@@ -309,12 +309,16 @@ def lsp_refs(W, defs, text, servers, clock, limit=LSP_LIMIT):
                 found = server.ask("textDocument/references", {
                     "textDocument": {"uri": uri(dd["filePath"])}, "context": {"includeDeclaration": False},
                     "position": {"line": dd["startLine"] - 1, "character": at.start() if at else 0}}, deadline, clock) or []
+                answered.add(i)
                 for loc in found:
                     path = os.path.realpath(urllib.parse.unquote(urllib.parse.urlparse(loc["uri"]).path))
                     if path.startswith(root + os.sep):
                         refs.setdefault(i, set()).add((os.path.relpath(path, root), loc["range"]["start"]["line"] + 1))
         except TimeoutError:
-            notes.append("LSP: timed out")
+            # one deadline for every target: name each definition the servers never answered for
+            notes.append("LSP: timed out; no answer for: " + ", ".join(
+                "%s (%s:%s)" % (defs[i]["name"], defs[i]["filePath"], defs[i]["startLine"])
+                for i in sorted(j for ix in groups.values() for j in ix) if i not in answered))
             break
         except OSError as e:
             notes.append("LSP: %s failed: %s" % (servers[key][0], str(e)[:200]))
@@ -330,6 +334,21 @@ def run(cmd, cwd):
     except OSError as e:
         return "exit 127: %s" % e
     return p.stdout if p.returncode == 0 else "%s\nexit %d: %s" % (p.stdout, p.returncode, p.stderr.strip())
+
+
+def other_index(status, W):
+    """'' when `codegraph status -j W` (its text STATUS) says W has an index of its own: `initialized` true,
+    `projectPath` W and `worktreeMismatch` empty; else the index it names instead, or 'no index'."""
+    try:
+        s = json.loads(status)
+    except ValueError:
+        s = None
+    if not isinstance(s, dict) or s.get("initialized") is not True:
+        return "no index"
+    named = str(s.get("projectPath") or "no index")
+    if s.get("worktreeMismatch"):
+        return "%s (worktreeMismatch: %s)" % (named, json.dumps(s["worktreeMismatch"]))
+    return "" if os.path.realpath(named) == os.path.realpath(W) else named
 
 
 def read_file(path):
@@ -353,32 +372,28 @@ def main(argv=None, cg=None, git=None, read=read_file, servers=SERVERS, clock=ti
         ap.error("NAME is required")
     git = git or (lambda args: run(["git"] + args, os.getcwd()))
     W = a.W or git(["rev-parse", "--show-toplevel"]).strip()
-    runner = cg or (lambda args: run(["codegraph"] + args, W))
-    cg = lambda args: COLOUR.sub("", runner(args))        # FORCE_COLOR or CI puts colour codes around `Project:` and in sync's line
-    status = cg(["status", W])
-    named = re.search(r"Project: (.+)", status)
-    index = "no index" if not named or "Not initialized" in status else named.group(1).strip()
-    if os.path.realpath(index) != os.path.realpath(W):    # a folder inside another checkout reads that one's index
-        print("codegraph: no index of its own in %s: `codegraph status` names %s; run `codegraph init \"%s\" </dev/null` first"
-              % (W, index, W))
+    refusal, said, texts, notes = many(W, [(a.name, a.file)], a.all, cg, read, servers, clock)
+    if refusal:
+        print(refusal)
         return 1
+    print("\n".join([said] + texts + notes))
+    return 0
+
+
+def many(W, targets, every=False, cg=None, read=read_file, servers=SERVERS, clock=time.monotonic):
+    """One pass for a list of targets (NAME, FILE or None): one status read, one sync, one file list and one language
+    server session for all. Returns (the refusal when W has no index of its own, else '', the sync line, [the text of
+    each target, in order], [the LSP notes]); a target whose read fails gets a `[cgcallers failed]` line as its text."""
+    runner = cg or (lambda args: run(["codegraph"] + args, W))
+    cg = lambda args: COLOUR.sub("", runner(args))        # FORCE_COLOR or CI puts colour codes in sync's line
+    index = other_index(runner(["status", "-j", W]), W)
+    if index:                                             # a folder inside another checkout reads that one's index
+        return ("codegraph: no index of its own in %s: `codegraph status` names %s; run `codegraph init \"%s\" </dev/null` first"
+                % (W, index, W)), "", [], []
     said = [l.strip("│●└┌◇◆ ") for l in cg(["sync", W]).splitlines()]
     said = [l for l in said if l and l not in ("Syncing CodeGraph", "Done", "Scanning files...")]
-    print("codegraph sync: %s" % (said[-1] if said else "no output (is codegraph on PATH?)"))
-    try:
-        found = json.loads(cg(["callers", "-p", W, "-j", "-l", "2000"] + (["-f", a.file] if a.file else []) + [a.name]) or "{}")
-    except json.JSONDecodeError:
-        found = {}
-    if found.get("filteredOut"):
-        print("codegraph: %s" % found.get("note", "-f %s matches no definition: showing all of them" % a.file))
-    defs = found.get("definitions") or []
-    if not defs:
-        print("codegraph: no definition named %s in %s (check the name, the index: codegraph status \"%s\")" % (a.name, W, W))
-        return 0
-    try:
-        indexed = [(f["path"], f.get("language", "")) for f in json.loads(cg(["files", "-p", W, "-j"]) or "[]")]
-    except json.JSONDecodeError:
-        indexed = []
+    said = "codegraph sync: %s" % (said[-1] if said else "no output (is codegraph on PATH?)")
+    indexed = None
     texts, imports, scans, binds, warned = {}, {}, {}, {}, set()
 
     def text(f):
@@ -399,82 +414,98 @@ def main(argv=None, cg=None, git=None, read=read_file, servers=SERVERS, clock=ti
             binds[f] = aliases(text(f), lang)
         return binds[f]
 
-    def scan(f, lang):                      # (word lines, def spans) of a file, once for every definition
-        if f not in scans:
-            scans[f] = (word_lines(text(f), lang, word), def_spans(text(f)) if lang in PY else [])
-        return scans[f]
+    def scan(f, lang, word):                # (word lines, def spans) of a file, once for every definition of a word
+        if (f, word) not in scans:
+            scans[(f, word)] = (word_lines(text(f), lang, word), def_spans(text(f)) if lang in PY else [])
+        return scans[(f, word)]
 
-    word = a.name.rsplit(".", 1)[-1]           # Class.method: codegraph takes it whole, the code has the method word
-    n = re.escape(word)
-    blocks = []
-    for d in defs:
-        dd = d["definition"]
-        home, lang = dd["filePath"], dd.get("language", "")
-        head = ["\ndefinition  %s:%s  %s %s" % (home, dd["startLine"], dd.get("kind", ""), dd["name"])]
-        family = PY if lang in PY else JS if lang in JS else {lang}
-        if not family & (PY | JS) and lang not in warned:
-            warned.add(lang)
-            head.append("warning: no import filter for %s: searched every indexed %s file" % (lang, lang))
-        # its module, and its package: `from pkg import name` reaches a name pkg/__init__ re-exports
-        mod, pkg = module_of(home), os.path.basename(os.path.dirname(home))
-        mods = {mod, pkg} - {""}
-        wanted = {"mod:" + mod, "name:" + mod, "imp:" + pkg, "from:%s:%s" % (pkg, word)}
-        # a method is called on an object, whose file seldom imports the class's module: no import filter
-        files = [f for f, l in indexed if l in family and (f == home or a.all or not family & (PY | JS)
-                                                            or dd.get("kind") == "method"
-                                                            or wanted & names(f, l))]
-        langs = dict(indexed)
-        who_cg = {c["id"]: c for c in d.get("callers") or []}
-        edges = {}   # (file, line) -> (caller name, a guess?)
-        for e in d.get("edges") or []:
-            c, m = who_cg.get(e.get("source"), {}), e.get("metadata") or {}
-            if c:
-                edges[(c["filePath"], e.get("line") or c.get("startLine"))] = (
-                    c["name"], m.get("confidence") == 0.4 and m.get("resolvedBy") == "exact-match")
-        # D19: the def (its start line) of each codegraph caller; module code keeps the exact-line rule
-        held = {(c["filePath"], c.get("startLine")) for c in who_cg.values() if c.get("kind") != "file"}
-        rows, matched = [], set()
-        for f in files:
-            body = text(f).splitlines()
-            hits, spans = scan(f, langs.get(f))
-            for ln, receivers in hits.items():
-                line = body[ln - 1].strip() if ln <= len(body) else ""
-                if dd.get("kind") != "method" and family & (PY | JS) and not a.all and all(
-                        r is not None and r not in mods and bound(f, langs.get(f)).get(r) not in mods for r in receivers):
-                    continue                       # D20: only `X.NAME` on another object: not this function
-                if (f == home and ln == dd["startLine"]) or re.search(r"\b(def|function)\s*\*?\s*%s\b" % n, line):
-                    continue                       # this definition, or a namesake's
-                if (f, ln) in edges:
-                    matched.add((f, ln))
-                    who, guess = edges[(f, ln)]
-                    rows.append(("cg guess" if guess else "both", f, ln, who, line[:110]))
-                elif langs.get(f) in PY and (f, max([s[0] for s in spans if s[0] <= ln <= s[1]] or [None])) in held:
-                    rows.append(("both", f, ln, enclosing(spans, ln), line[:110]))   # another call in a listed caller
-                else:
-                    rows.append(("grep only", f, ln, enclosing(spans, ln) if spans else "-", line[:110]))
-        for (f, ln), (who, guess) in edges.items():
-            if (f, ln) not in matched:
-                rows.append(("cg guess" if guess else "cg only", f, ln or 0, who, ""))
-        blocks.append((head, rows, len({(c["filePath"], c["name"]) for c in who_cg.values()})))
-    refs, notes = lsp_refs(W, [d["definition"] for d in defs], text, servers, clock)
-    for i, (head, rows, callers) in enumerate(blocks):
+    out, alldefs, blocks = [], [], []       # blocks: (target index, head, rows, callers) per definition
+    for t, (name, only) in enumerate(targets):
+        lines = []
+        try:
+            try:
+                found = json.loads(cg(["callers", "-p", W, "-j", "-l", "2000"] + (["-f", only] if only else []) + [name]) or "{}")
+            except json.JSONDecodeError:
+                found = {}
+            if found.get("filteredOut"):
+                lines.append("codegraph: %s" % found.get("note", "-f %s matches no definition: showing all of them" % only))
+            defs = found.get("definitions") or []
+            if not defs:
+                lines.append("codegraph: no definition named %s in %s (check the name, the index: codegraph status \"%s\")" % (name, W, W))
+            elif indexed is None:
+                try:
+                    indexed = [(f["path"], f.get("language", "")) for f in json.loads(cg(["files", "-p", W, "-j"]) or "[]")]
+                except json.JSONDecodeError:
+                    indexed = []
+            word = name.rsplit(".", 1)[-1]           # Class.method: codegraph takes it whole, the code has the method word
+            n = re.escape(word)
+            mine = []
+            for d in defs:
+                dd = d["definition"]
+                home, lang = dd["filePath"], dd.get("language", "")
+                head = ["\ndefinition  %s:%s  %s %s" % (home, dd["startLine"], dd.get("kind", ""), dd["name"])]
+                family = PY if lang in PY else JS if lang in JS else {lang}
+                if not family & (PY | JS) and lang not in warned:
+                    warned.add(lang)
+                    head.append("warning: no import filter for %s: searched every indexed %s file" % (lang, lang))
+                # its module, and its package: `from pkg import name` reaches a name pkg/__init__ re-exports
+                mod, pkg = module_of(home), os.path.basename(os.path.dirname(home))
+                mods = {mod, pkg} - {""}
+                wanted = {"mod:" + mod, "name:" + mod, "imp:" + pkg, "from:%s:%s" % (pkg, word)}
+                # a method is called on an object, whose file seldom imports the class's module: no import filter
+                files = [f for f, l in indexed if l in family and (f == home or every or not family & (PY | JS)
+                                                                    or dd.get("kind") == "method"
+                                                                    or wanted & names(f, l))]
+                langs = dict(indexed)
+                who_cg = {c["id"]: c for c in d.get("callers") or []}
+                edges = {}   # (file, line) -> (caller name, a guess?)
+                for e in d.get("edges") or []:
+                    c, m = who_cg.get(e.get("source"), {}), e.get("metadata") or {}
+                    if c:
+                        edges[(c["filePath"], e.get("line") or c.get("startLine"))] = (
+                            c["name"], m.get("confidence") == 0.4 and m.get("resolvedBy") == "exact-match")
+                rows, matched = [], set()
+                for f in files:
+                    body = text(f).splitlines()
+                    hits, spans = scan(f, langs.get(f), word)
+                    for ln, receivers in hits.items():
+                        line = body[ln - 1].strip() if ln <= len(body) else ""
+                        if dd.get("kind") != "method" and family & (PY | JS) and not every and all(
+                                r is not None and r not in mods and bound(f, langs.get(f)).get(r) not in mods for r in receivers):
+                            continue                       # D20: only `X.NAME` on another object: not this function
+                        if (f == home and ln == dd["startLine"]) or re.search(r"\b(def|function)\s*\*?\s*%s\b" % n, line):
+                            continue                       # this definition, or a namesake's
+                        if (f, ln) in edges:
+                            matched.add((f, ln))
+                            who, guess = edges[(f, ln)]
+                            rows.append(("cg guess" if guess else "both", f, ln, who, line[:110]))
+                        else:
+                            rows.append(("grep only", f, ln, enclosing(spans, ln) if spans else "-", line[:110]))
+                for (f, ln), (who, guess) in edges.items():
+                    if (f, ln) not in matched:
+                        rows.append(("cg guess" if guess else "cg only", f, ln or 0, who, ""))
+                mine.append((dd, (t, head, rows, len({(c["filePath"], c["name"]) for c in who_cg.values()}))))
+        except Exception as e:                       # one target's failure: its note, and the other targets go on
+            lines.append("[cgcallers failed] %s: %s" % (type(e).__name__, str(e)[:500]))
+            mine = []
+        out.append(lines)
+        alldefs += [dd for dd, _ in mine]
+        blocks += [b for _, b in mine]
+    refs, notes = lsp_refs(W, alldefs, text, servers, clock) if alldefs else ({}, [])
+    for i, (t, head, rows, callers) in enumerate(blocks):
         seen = {(r[1], r[2]) for r in rows}
         rows = [("lsp",) + r[1:] if r[0] == "grep only" and (r[1], r[2]) in refs.get(i, ()) else r for r in rows]
-        home = defs[i]["definition"]
+        home = alldefs[i]
         for f, ln in sorted(refs.get(i, set()) - seen - {(home["filePath"], home["startLine"])}):
             body = text(f).splitlines()
             spans = def_spans(text(f)) if f.endswith(".py") else []
             rows.append(("lsp", f, ln, enclosing(spans, ln) if spans else "-", body[ln - 1].strip()[:110] if ln <= len(body) else ""))
-        print("\n".join(head))
         rows.sort(key=lambda r: (r[0] != "grep only", r[1].startswith("tests/"), r[1], r[2]))
-        for mark, f, ln, who, line in rows:
-            print("[%-9s] %s:%s  %s  %s" % (mark, f, ln, who, line))
         g = [r for r in rows if r[0] == "grep only"]
-        print("%d codegraph callers; %d grep-only lines (%d outside tests): read each before you trust a count."
-              % (callers, len(g), sum(not r[1].startswith("tests/") for r in g)))
-    for note in notes:
-        print(note)
-    return 0
+        out[t] += ["\n".join(head)] + ["[%-9s] %s:%s  %s  %s" % r for r in rows] + [
+            "%d codegraph callers; %d grep-only lines (%d outside tests): read each before you trust a count."
+            % (callers, len(g), sum(not r[1].startswith("tests/") for r in g))]
+    return "", said, ["\n".join(lines) for lines in out], notes
 
 
 FAKE_LSP = r"""
@@ -566,8 +597,9 @@ def selftest():
     def fake_cg(args):
         calls.append(args[0])
         if args[0] == "status":
-            status = "CodeGraph Status\n\nProject: %s\n" % project.get("is", args[1])
-            return status.replace("Project:", "\x1b[36mProject:\x1b[0m") if project.get("colour") else status
+            if "-j" not in args:                    # the text form, coloured as FORCE_COLOR=1 makes it: never read
+                return "CodeGraph Status\n\n\x1b[36mProject:\x1b[0m %s\n" % args[-1]
+            return json.dumps(dict({"initialized": True, "projectPath": args[-1], "worktreeMismatch": None}, **project.get("is", {})))
         if args[0] == "sync":
             said = "┌  Syncing CodeGraph\n│\n●  Already up to date\n│\n└  Done\n"
             return said.replace("●", "\x1b[34m●\x1b[39m").replace("│", "\x1b[90m│\x1b[39m") if project.get("colour") else said
@@ -603,7 +635,7 @@ def selftest():
         assert sum(l.startswith("definition") for l in lines) == 2, o                      # one block per definition
         assert "[both     ] app.py:6  go  return helper()" in lines, o                     # an importer's call
         assert "[cg guess ] app.py:9  go2  return helper()" in lines, o                    # a 0.4 exact-match edge
-        assert "[both     ] app.py:13  go4  return helper()" in lines, o                   # D19: a 2nd call in a listed caller
+        assert "[grep only] app.py:13  go4  return helper()" in lines, o                   # D6: no edge on the line, no "both"
         assert "app.py:16" not in o and "[grep only] app.py:17  go5  return CS.helper()" in lines, o   # D20: receivers
         assert "other.py" not in o, o                                                      # no import: not shown
         assert "app.py:4" not in o and "app.py:5" not in o, o                              # comment and string
@@ -612,20 +644,26 @@ def selftest():
         assert sum(l.startswith("definition") for l in o.splitlines()) == 1 and "lib/more.py" in o, o
         o = out("helper", "-p", W, "-f", "nosuch.py")
         assert o.splitlines()[1] == 'codegraph: no definition of "helper" matches file "nosuch.py" — showing all definitions instead.', o  # F7
-        project["is"] = "/elsewhere/main"                                                  # F8: another checkout's index
+        os.environ["FORCE_COLOR"] = "1"                                                   # D27: the JSON status has no colour
+        for bad, names in (({"projectPath": "/elsewhere/main"}, "/elsewhere/main"),       # F8: another checkout's index
+                           ({"initialized": False}, "no index"),
+                           ({"worktreeMismatch": {"indexRoot": "/elsewhere/main"}}, "/elsewhere/main")):
+            project["is"] = bad
+            calls.clear()
+            o = out("helper", "-p", W)
+            assert "sync" not in calls and "definition" not in o, (bad, calls, o)
+            assert o.splitlines()[0].startswith("codegraph: no index of its own in %s: `codegraph status` names " % W), (bad, o)
+            assert names in o.splitlines()[0], (bad, o)
+            assert "`codegraph init \"%s\" </dev/null`" % W in o and "-y" not in o, (bad, o)   # the new form, in the refusal
+        project.clear()
         calls.clear()
+        o = out("helper", "-p", W)                                                         # W's own: on to the sync
+        assert calls[:2] == ["status", "sync"] and o.splitlines()[0] == "codegraph sync: Already up to date" and "definition" in o, o
+        project["colour"] = True                                                           # sync's line, coloured, still reads
         o = out("helper", "-p", W)
-        assert "sync" not in calls and "definition" not in o, (calls, o)
-        assert o.splitlines()[0].startswith("codegraph: no index of its own in %s: `codegraph status` names /elsewhere/main" % W), o
-        assert "`codegraph init \"%s\" </dev/null`" % W in o and "-y" not in o, o           # the new form, in the refusal
-        project["colour"] = True                                                           # D27: another checkout, coloured: refused
-        o = out("helper", "-p", W)
-        assert o.splitlines()[0].startswith("codegraph: no index of its own in %s: `codegraph status` names /elsewhere/main;" % W), o
+        assert o.splitlines()[0] == "codegraph sync: Already up to date", o
         project.clear()
-        project["colour"] = True                                                           # W's own, coloured: reads as W's
-        o = out("helper", "-p", W)
-        assert o.splitlines()[0] == "codegraph sync: Already up to date" and "no index" not in o and "definition" in o, o
-        project.clear()
+        del os.environ["FORCE_COLOR"]
         assert "exit 3: it broke" in run(["sh", "-c", "echo it broke >&2; exit 3"], W)      # F8: a failed command says why
         o = out("fetchIt", "-p", W)
         lines = o.splitlines()
@@ -659,7 +697,7 @@ def selftest():
         reads = []
         tick = lambda: reads.append(31 * len(reads)) or reads[-1]                       # each look at the clock: 31 s on
         o = out("helper", "-p", W, "-f", "lib/util.py", clock=tick)
-        assert o.rstrip().endswith("LSP: timed out") and "[both     ] app.py:6  go" in o, o
+        assert o.rstrip().endswith("LSP: timed out; no answer for: helper (lib/util.py:1)") and "[both     ] app.py:6  go" in o, o
         assert LSP_LIMIT <= max(reads) < LSP_LIMIT + 31, reads                          # R5: it stops at the limit, not later
         lsp["python"] = [sys.executable, "-c", "import sys; sys.exit(1)"]                # R4: a server that exits at once
         reads.clear()
@@ -673,7 +711,7 @@ def selftest():
         t = threading.Thread(target=lambda: done.append(out("bigfn", "-p", W, clock=tick)), daemon=True)
         t.start()
         t.join(20)
-        assert done and done[0].rstrip().endswith("LSP: timed out"), "R3: a full pipe to the server blocked the pass"
+        assert done and done[0].rstrip().endswith("LSP: timed out; no answer for: bigfn (big.py:1)"), "R3: a full pipe to the server blocked the pass"
     assert code_only("a('x // y') // z\n/* q\n */ b(\"c\")") == "a('      ')     \n    \n    b(\" \")"
     print("cgcallers selftest ok")
     return 0

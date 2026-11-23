@@ -6,13 +6,14 @@
 
 The brief (RUN/briefs/task-<ID>-brief.md) holds W, the read-first line, the ticket and one line that points to the
 seed. The seed (RUN/briefs/seed-<ID>.md) is CodeGraph output, read after a sync: for each symbol of the ticket that
-exists (a bare name, `Class.method` or `Class::method`), `codegraph node` and `codegraph callers --limit 100` (or
-`codegraph explore` of it when its kind is a type, TYPE_KINDS), then the ticket's `seeds` queries through `explore`. A
-ticket whose files CodeGraph does not index gets "No code seed". The rules live in the implementer prompt.
+exists (a bare name, `Class.method` or `Class::method`), one `codegraph explore` of it (its source, call lines and
+tests), then the ticket's `seeds` queries through `explore`. A ticket whose files CodeGraph does not index gets "No code seed". The rules live in the implementer prompt.
 """
 import json, os, re, subprocess, sys, tempfile
 
-CALLERS_LIMIT = 100   # rules/codegraph.md, "Subagents" item 3
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cgcallers  # noqa: E402  (the one reader of `codegraph status -j`)
+
 NO_CODE = "No code seed: this ticket edits files CodeGraph does not index."
 
 
@@ -34,27 +35,17 @@ def file_types(W, run=run):
     return sorted(indexed), sorted(exts(run("git", "-C", W, "ls-files").stdout.splitlines()) - indexed)
 
 
-# CodeGraph's kinds of a type (D19: its node may be only a member list); checked in a Python and a Swift index.
-TYPE_KINDS = {"class", "struct", "enum", "interface", "protocol", "trait", "extension", "union", "record"}
-
-
-def kind(W, name, run=run):
-    """The kind of the node the index holds with exactly this name, or None (a ticket may name one it creates). A
-    `Class.method` or `Class::method` name matches a node whose qualified name is `Class::method` or ends with
-    `::Class::method`."""
+def exists(W, name, run=run):
+    """True when the index holds a node with exactly this name (a ticket may name one it creates). A `Class.method` or
+    `Class::method` name matches a node whose qualified name is `Class::method` or ends with `::Class::method`."""
     out = run("codegraph", "query", "-p", W, "-j", "-l", "50", name).stdout
     q = name.replace(".", "::")
     try:
-        return next((str(h["node"].get("kind", "")) for h in json.loads(out or "[]") if h["node"]["name"] == name
-                     or "::" in q and (h["node"].get("qualifiedName") == q
-                                       or str(h["node"].get("qualifiedName")).endswith("::" + q))), None)
+        return any(h["node"]["name"] == name or "::" in q and (h["node"].get("qualifiedName") == q
+                                                               or str(h["node"].get("qualifiedName")).endswith("::" + q))
+                   for h in json.loads(out or "[]"))
     except (ValueError, KeyError, TypeError, AttributeError):
-        return None
-
-
-def exists(W, name, run=run):
-    """True when the index holds a symbol with exactly this name (kind's match)."""
-    return kind(W, name, run) is not None
+        return False
 
 
 def empty(out):
@@ -73,23 +64,14 @@ def sync(W, run=run):
 
 
 def seed(W, t, indexed, run=run):
-    """The seed text: node and callers of each existing symbol (explore of a type kind, D19), then explore on each
-    query."""
+    """The seed text: explore of each existing symbol, then explore on each query."""
     files = t.get("files") or []
     if files and not exts(files) & set(indexed):
         return NO_CODE
     parts = []
     for name in t.get("symbols") or []:
-        k = kind(W, name, run)
-        if k is None:
-            continue
-        if k in TYPE_KINDS:                                   # a type whose node may be only a member list (D19)
-            parts.append(f'### `codegraph explore -p "{W}" "{name}"` (a {k}: its node may hold no code)\n{run("codegraph", "explore", "-p", W, name).stdout}')
-            continue
-        node = run("codegraph", "node", "-p", W, name).stdout
-        parts.append(f'### `codegraph node -p "{W}" {name}`\n{node}')
-        args = ["callers", "-p", W, "--limit", str(CALLERS_LIMIT), name]
-        parts.append(f"### `codegraph {' '.join(args[:2])} \"{W}\" {' '.join(args[3:])}`\n{run('codegraph', *args).stdout}")
+        if exists(W, name, run):
+            parts.append(f'### `codegraph explore -p "{W}" "{name}"`\n{run("codegraph", "explore", "-p", W, name).stdout}')
     queries = t.get("seeds") or []
     # Several queries share one query's size of seed: fewer files each (D10); one keeps CodeGraph's default.
     size = ["--max-files", str(max(3, 12 // len(queries)))] if len(queries) > 1 else []
@@ -106,8 +88,8 @@ def seed(W, t, indexed, run=run):
 
 def main(R, W, branch, ids, run=run):
     tickets = {t["id"]: t for t in json.load(open(os.path.join(R, "tickets.json")))}
-    status = run("codegraph", "status", W).stdout
-    assert f"Project: {W}" in status, f"wrong or missing index for {W}:\n{status}"
+    index = cgcallers.other_index(run("codegraph", "status", "-j", W).stdout, W)
+    assert not index, f"wrong or missing index for {W}: `codegraph status -j` names {index}"
     stale = sync(W, run)
     indexed, unindexed = file_types(W, run)
     os.makedirs(os.path.join(R, "briefs"), exist_ok=True)
@@ -155,21 +137,24 @@ def selftest():
         assert not exists(W, "Lsp.read", index(code=code, out=out)), (code, out)   # a failed lookup: no match, no crash
     known = [{"name": "foo", "qualifiedName": "foo", "kind": "function"}, dict(lsp, kind="method"),
              {"name": "Shape", "qualifiedName": "Shape", "kind": "struct"}]
+    os.environ["FORCE_COLOR"] = "1"                         # D27: the JSON status has no colour to strip
+    calls, project = [], {}
 
     def fake(*a, timeout=120):
+        calls.append(a)
         cmd = a[-1] if a[0] == "git" else a[1]
-        out = {"status": f"Project: {W}\n", "sync": "",
-               "files": "Files (1):\n\n  skills/x/a.py\n", "ls-files": "skills/x/a.py\nREADME.md\n",
+        if cmd == "status" and "-j" not in a:                # the text form, coloured as FORCE_COLOR=1 makes it: never read
+            return subprocess.CompletedProcess(a, 0, f"\x1b[36mProject:\x1b[0m {a[-1]}\n", "")
+        out = {"status": json.dumps(dict({"initialized": True, "projectPath": a[-1], "worktreeMismatch": None}, **project)),
+               "sync": "", "files": "Files (1):\n\n  skills/x/a.py\n", "ls-files": "skills/x/a.py\nREADME.md\n",
                "query": json.dumps([{"node": n} for n in known]),
-               # the kind decides, not the output form: a method's node with no code fence, a struct's with one
-               "node": f"NODE-OF {a[-1]} (no fence)\n" if "read" in a[-1] else f"NODE-OF {a[-1]}\n```py\ncode\n```\n",
-               "callers": f"CALLERS-OF {a[-1]}\n",
                "explore": f"**Exploration: {a[-1]}**\nFound 2 symbols\n" + "code\n" * 9 + "    if 'No results found' in out:\n"}[cmd]
         return subprocess.CompletedProcess(a, 0, out, "")
 
     with tempfile.TemporaryDirectory() as R:
-        rows = [{"id": "T-1", "title": "code", "files": ["skills/x/a.py"], "symbols": ["foo", "new_one", "Lsp.read", "Lsp::read", "Shape"], "seeds": ["foo bar"]},
-                {"id": "T-2", "title": "docs", "files": ["README.md"]}]
+        rows = [{"id": "T-1", "title": "code", "files": ["skills/x/a.py"], "symbols": ["foo", "new_one", "Lsp.read", "Shape"], "seeds": ["foo bar"]},
+                {"id": "T-2", "title": "docs", "files": ["README.md"]},
+                {"id": "T-3", "title": "two held, one not", "files": ["skills/x/a.py"], "symbols": ["foo", "new_one", "Shape"]}]
         json.dump(rows, open(os.path.join(R, "tickets.json"), "w"))
         os.makedirs(os.path.join(R, "issues"))
         for r in rows:
@@ -177,38 +162,39 @@ def selftest():
         main(R, W, "br", ["T-1", "T-2"], run=fake)
         read = lambda n: open(os.path.join(R, "briefs", n)).read()
         s1, s2, b1 = read("seed-T-1.md"), read("seed-T-2.md"), read("task-T-1-brief.md")
-        for want in ("NODE-OF foo", "CALLERS-OF foo", "Exploration: foo bar", "NODE-OF Lsp.read", "CALLERS-OF Lsp.read",
-                     "NODE-OF Lsp::read", "CALLERS-OF Lsp::read", f'### `codegraph explore -p "{W}" "Shape"`', "Exploration: Shape"):
-            assert want in s1, (want, s1)
-        assert "NODE-OF Shape" not in s1 and "CALLERS-OF Shape" not in s1, s1   # a type kind: explore it (D19)
+        for name in ("foo", "Lsp.read", "Shape", "foo bar"):   # one explore per symbol, then the queries
+            assert f'### `codegraph explore -p "{W}" "{name}"`\n**Exploration: {name}**' in s1, (name, s1)
         assert "new_one" not in s1, s1                         # a symbol the ticket creates has no seed yet
-        assert s1.index("NODE-OF foo") < s1.index("CALLERS-OF foo") < s1.index("Exploration: foo bar"), s1
-        assert NO_CODE in s2 and "NODE-OF" not in s2, s2
+        assert s1.index("Exploration: foo**") < s1.index("Exploration: Shape") < s1.index("Exploration: foo bar"), s1
+        assert NO_CODE in s2 and "Exploration" not in s2, s2
         assert [l for l in b1.splitlines() if "seed-T-1.md" in l] == [f"Read `{R}/briefs/seed-T-1.md` now."], b1
         for rule in ("codegraph", "cgcallers", "Commit", "Tests during the work", "sync"):
             assert rule not in b1, (rule, b1)                 # the rules live in the implementer prompt only
-    calls = []
-    def counting(*a, timeout=120):
-        calls.append(a)
-        return fake(*a, timeout=timeout)
+        calls.clear()
+        main(R, W, "br", ["T-3"], run=fake)
+        assert [a[-1] for a in calls if a[:2] == ("codegraph", "explore")] == ["foo", "Shape"], calls
+        assert not [a for a in calls if a[1] in ("node", "callers") or a[1] == "status" and "-j" not in a], calls
+        s3 = read("seed-T-3.md")
+        assert "Exploration: foo**" in s3 and "Exploration: Shape" in s3 and "new_one" not in s3, s3
     for n, flag in ((2, ["--max-files", "6"]), (3, ["--max-files", "4"]), (5, ["--max-files", "3"]), (1, [])):
         calls.clear()                                         # n queries share one query's size: max(3, 12 // n) files each
-        seed(W, {"seeds": ["q%d" % i for i in range(n)]}, [".py"], counting)
+        seed(W, {"seeds": ["q%d" % i for i in range(n)]}, [".py"], fake)
         got = [list(a[4:-1]) for a in calls if a[1] == "explore"]
         assert got == [flag] * n, (n, got)
-    colour = lambda path: f"\x1b[1m\nCodeGraph Status\n\x1b[0m\n\x1b[36mProject:\x1b[0m {path}\n"     # D27: FORCE_COLOR or CI set
     assert run(sys.executable, "-c", "print(%r)" % "\x1b[2mfunction\x1b[0m \x1b[36mcaller\x1b[0m").stdout == "function caller\n", "the seed holds no colour"
     with tempfile.TemporaryDirectory() as R:
         json.dump([], open(os.path.join(R, "tickets.json"), "w"))
-        painted = lambda path: lambda *a, timeout=120: (run(sys.executable, "-c", "print(%r)" % colour(path)) if a[1] == "status"
-                                                        else fake(*a, timeout=timeout))
-        main(R, W, "br", [], run=painted(W))                  # W's own coloured status passes the index check
-        try:
-            main(R, W, "br", [], run=painted("/w/other"))
-        except AssertionError as e:
-            assert "wrong or missing index" in str(e), e
-        else:
-            raise AssertionError("another path's coloured status passed the index check")
+        main(R, W, "br", [], run=fake)                        # W's own status passes the index check
+        for bad in ({"projectPath": "/w/other"}, {"initialized": False}, {"worktreeMismatch": {"indexRoot": "/w/other"}}):
+            project.clear()
+            project.update(bad)
+            try:
+                main(R, W, "br", [], run=fake)
+            except AssertionError as e:
+                assert f"wrong or missing index for {W}" in str(e), (bad, e)
+            else:
+                raise AssertionError(f"{bad} passed the index check")
+    del os.environ["FORCE_COLOR"]
     print("briefs selftest ok")
 
 
