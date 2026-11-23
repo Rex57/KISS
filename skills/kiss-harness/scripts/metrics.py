@@ -543,7 +543,7 @@ def filled(R, line, now=time.time):
     if isinstance(run, dict) and "START" in run:
         waits = sum(run.get("WAITS", []))
         fields.append((r"minutes \d+ of \d+(?: \(owner wait \d+ left out\))?",
-                       f"minutes {round((now() - run['START'] - waits) / 60)} of {prompt.budget(R) // 60} (owner wait {round(waits / 60)} left out)",
+                       f"minutes {round(prompt.elapsed(run, now) / 60)} of {prompt.budget(R) // 60} (owner wait {round(waits / 60)} left out)",
                        "R/run.json"))
     for pattern, value, source in fields:
         typed = re.search(pattern, line)
@@ -888,6 +888,9 @@ def selftest():
             got = record(f_, "Metrics: fix rounds 0, rechecks 0, headless sessions 0, minutes 5 of 6 (owner wait 7 left out)", now=lambda: 1_000_000 + 7200)
         assert got.startswith("Metrics: subagents 3, fix rounds 0, rechecks 0, headless sessions 0, minutes 90 of 150 (owner wait 30 left out); "), got
         assert err.getvalue() == "metrics.py: typed minutes 5 of 6 (owner wait 7 left out), recorded minutes 90 of 150 (owner wait 30 left out) (from R/run.json)\n", err.getvalue()
+        with contextlib.redirect_stderr(io.StringIO()):                     # F17: waits past the wall time: 0, never negative
+            got = record(f_, "Metrics: fix rounds 0, rechecks 0, headless sessions 0", now=lambda: 1_000_000 + 600)
+        assert got.startswith("Metrics: subagents 3, fix rounds 0, rechecks 0, headless sessions 0, minutes 0 of 150 (owner wait 30 left out); "), got
     print("metrics selftest ok")
 
 
