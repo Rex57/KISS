@@ -332,6 +332,21 @@ def run(cmd, cwd):
     return p.stdout if p.returncode == 0 else "%s\nexit %d: %s" % (p.stdout, p.returncode, p.stderr.strip())
 
 
+def other_index(status, W):
+    """'' when `codegraph status -j W` (its text STATUS) says W has an index of its own: `initialized` true,
+    `projectPath` W and `worktreeMismatch` empty; else the index it names instead, or 'no index'."""
+    try:
+        s = json.loads(status)
+    except ValueError:
+        s = None
+    if not isinstance(s, dict) or s.get("initialized") is not True:
+        return "no index"
+    named = str(s.get("projectPath") or "no index")
+    if s.get("worktreeMismatch"):
+        return "%s (worktreeMismatch: %s)" % (named, json.dumps(s["worktreeMismatch"]))
+    return "" if os.path.realpath(named) == os.path.realpath(W) else named
+
+
 def read_file(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         return f.read()
@@ -354,11 +369,9 @@ def main(argv=None, cg=None, git=None, read=read_file, servers=SERVERS, clock=ti
     git = git or (lambda args: run(["git"] + args, os.getcwd()))
     W = a.W or git(["rev-parse", "--show-toplevel"]).strip()
     runner = cg or (lambda args: run(["codegraph"] + args, W))
-    cg = lambda args: COLOUR.sub("", runner(args))        # FORCE_COLOR or CI puts colour codes around `Project:` and in sync's line
-    status = cg(["status", W])
-    named = re.search(r"Project: (.+)", status)
-    index = "no index" if not named or "Not initialized" in status else named.group(1).strip()
-    if os.path.realpath(index) != os.path.realpath(W):    # a folder inside another checkout reads that one's index
+    cg = lambda args: COLOUR.sub("", runner(args))        # FORCE_COLOR or CI puts colour codes in sync's line
+    index = other_index(runner(["status", "-j", W]), W)
+    if index:                                             # a folder inside another checkout reads that one's index
         print("codegraph: no index of its own in %s: `codegraph status` names %s; run `codegraph init \"%s\" </dev/null` first"
               % (W, index, W))
         return 1
@@ -566,8 +579,9 @@ def selftest():
     def fake_cg(args):
         calls.append(args[0])
         if args[0] == "status":
-            status = "CodeGraph Status\n\nProject: %s\n" % project.get("is", args[1])
-            return status.replace("Project:", "\x1b[36mProject:\x1b[0m") if project.get("colour") else status
+            if "-j" not in args:                    # the text form, coloured as FORCE_COLOR=1 makes it: never read
+                return "CodeGraph Status\n\n\x1b[36mProject:\x1b[0m %s\n" % args[-1]
+            return json.dumps(dict({"initialized": True, "projectPath": args[-1], "worktreeMismatch": None}, **project.get("is", {})))
         if args[0] == "sync":
             said = "┌  Syncing CodeGraph\n│\n●  Already up to date\n│\n└  Done\n"
             return said.replace("●", "\x1b[34m●\x1b[39m").replace("│", "\x1b[90m│\x1b[39m") if project.get("colour") else said
@@ -612,20 +626,26 @@ def selftest():
         assert sum(l.startswith("definition") for l in o.splitlines()) == 1 and "lib/more.py" in o, o
         o = out("helper", "-p", W, "-f", "nosuch.py")
         assert o.splitlines()[1] == 'codegraph: no definition of "helper" matches file "nosuch.py" — showing all definitions instead.', o  # F7
-        project["is"] = "/elsewhere/main"                                                  # F8: another checkout's index
+        os.environ["FORCE_COLOR"] = "1"                                                   # D27: the JSON status has no colour
+        for bad, names in (({"projectPath": "/elsewhere/main"}, "/elsewhere/main"),       # F8: another checkout's index
+                           ({"initialized": False}, "no index"),
+                           ({"worktreeMismatch": {"indexRoot": "/elsewhere/main"}}, "/elsewhere/main")):
+            project["is"] = bad
+            calls.clear()
+            o = out("helper", "-p", W)
+            assert "sync" not in calls and "definition" not in o, (bad, calls, o)
+            assert o.splitlines()[0].startswith("codegraph: no index of its own in %s: `codegraph status` names " % W), (bad, o)
+            assert names in o.splitlines()[0], (bad, o)
+            assert "`codegraph init \"%s\" </dev/null`" % W in o and "-y" not in o, (bad, o)   # the new form, in the refusal
+        project.clear()
         calls.clear()
+        o = out("helper", "-p", W)                                                         # W's own: on to the sync
+        assert calls[:2] == ["status", "sync"] and o.splitlines()[0] == "codegraph sync: Already up to date" and "definition" in o, o
+        project["colour"] = True                                                           # sync's line, coloured, still reads
         o = out("helper", "-p", W)
-        assert "sync" not in calls and "definition" not in o, (calls, o)
-        assert o.splitlines()[0].startswith("codegraph: no index of its own in %s: `codegraph status` names /elsewhere/main" % W), o
-        assert "`codegraph init \"%s\" </dev/null`" % W in o and "-y" not in o, o           # the new form, in the refusal
-        project["colour"] = True                                                           # D27: another checkout, coloured: refused
-        o = out("helper", "-p", W)
-        assert o.splitlines()[0].startswith("codegraph: no index of its own in %s: `codegraph status` names /elsewhere/main;" % W), o
+        assert o.splitlines()[0] == "codegraph sync: Already up to date", o
         project.clear()
-        project["colour"] = True                                                           # W's own, coloured: reads as W's
-        o = out("helper", "-p", W)
-        assert o.splitlines()[0] == "codegraph sync: Already up to date" and "no index" not in o and "definition" in o, o
-        project.clear()
+        del os.environ["FORCE_COLOR"]
         assert "exit 3: it broke" in run(["sh", "-c", "echo it broke >&2; exit 3"], W)      # F8: a failed command says why
         o = out("fetchIt", "-p", W)
         lines = o.splitlines()
