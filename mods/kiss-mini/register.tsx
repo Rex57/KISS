@@ -63,7 +63,8 @@ async function exclude($: $, t: Task) {
   const path = (await git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude')).stdout.trim()
   if (!path) return
   // An append, never a read and rewrite: the owner's lines keep every byte (the fs API reads and writes only UTF-8 text).
-  await $.process.run(['sh', '-c', '[ -s "$1" ] && [ -n "$(tail -c 1 "$1")" ] && echo >> "$1"; echo .kiss/ >> "$1"', 'sh', path], { timeoutMs: 120_000 })
+  // Its folder first: an empty `git init` template has no info/.
+  await $.process.run(['sh', '-c', 'mkdir -p "${1%/*}" && { [ -s "$1" ] && [ -n "$(tail -c 1 "$1")" ] && echo >> "$1"; echo .kiss/ >> "$1"; }', 'sh', path], { timeoutMs: 120_000 })
 }
 
 /** The worker's report: its State line and its Summary (up to the next field), cut to 600 characters. */

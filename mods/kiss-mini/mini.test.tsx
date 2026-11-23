@@ -78,6 +78,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     ignored: true,
     /** A folder stands where the exclude file goes: its read and its write fail. */
     excludeFolder: false,
+    /** The git folder has no info/ folder (an empty `git init` template): an append there fails unless it makes the folder. */
+    noInfo: false,
   }
   w.clock = mock.clock(on, { now: NOW })
   // The store in memory, readable by the test: the ledger is the contract every session reads.
@@ -132,6 +134,8 @@ function world(on: On, { delivered = true, branch = 'main', fail = {}, store, ha
     if (e.argv[0] === 'sh' && e.argv[4]?.endsWith('/info/exclude')) {
       const path = e.argv[4], old = w.files[path] ?? ''
       if (w.excludeFolder) return { value: { exitCode: 1, stdout: '', stderr: `sh: ${path}: Is a directory\n`, isStdoutTruncated: false, isStderrTruncated: false } }
+      // `mkdir -p "${1%/*}"` first makes the missing folder, as sh does; without it the append finds no folder.
+      if (w.noInfo && !e.argv[2]?.startsWith('mkdir -p "${1%/*}" && ')) return { value: { exitCode: 1, stdout: '', stderr: `sh: ${path}: No such file or directory\n`, isStdoutTruncated: false, isStderrTruncated: false } }
       w.files[path] = `${old}${old && !old.endsWith('\n') ? '\n' : ''}.kiss/\n`
       return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
@@ -1868,6 +1872,15 @@ test('a repo with no exclude file yet gets one that holds .kiss/', async ($, on)
   w.ignored = false
   await codeTask($, w)
   expect(w.files[EXCLUDE]).toBe('.kiss/\n')
+})
+
+test('a repo whose git folder has no info/ folder gets the folder and one .kiss/ line', async ($, on) => {
+  const w = world(on)
+  w.ignored = false
+  w.noInfo = true
+  await codeTask($, w)
+  expect(w.files[EXCLUDE]).toBe('.kiss/\n')
+  expect(git(w)).toContain(`git -C /repo worktree add -b mini/${ID} ${WT} main`)
 })
 
 test('a repo that ignores .kiss/ gets no exclude line', async ($, on) => {
